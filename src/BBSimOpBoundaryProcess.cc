@@ -19,11 +19,6 @@ G4OpBoundaryProcessStatus BBSimOpBoundaryProcess::GetStatus() const
   return GetWrappedProcess()->GetStatus();
 }
 
-G4bool BBSimOpBoundaryProcess::GetInvokeSD() const
-{
-  return GetWrappedProcess()->GetInvokeSD();
-}
-
 G4OpBoundaryProcess* BBSimOpBoundaryProcess::GetWrappedProcess() const
 {
   return static_cast<G4OpBoundaryProcess*>(pRegProcess);
