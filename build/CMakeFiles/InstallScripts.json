@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/rohanshenoy/geant4/OpNovice2/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
