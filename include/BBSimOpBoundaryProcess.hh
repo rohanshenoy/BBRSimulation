@@ -18,9 +18,8 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4VParticleChange* PostStepDoIt(const G4Track& aTrack,
                                   const G4Step& aStep) override;
 
-  // Call-throughs for G4OpBoundaryProcess-specific API used by SteppingAction.
+  // Call-through for G4OpBoundaryProcess-specific API used by SteppingAction.
   G4OpBoundaryProcessStatus GetStatus() const;
-  G4bool                    GetInvokeSD() const;
 
  private:
   // Static cast is safe: we always wrap exactly one G4OpBoundaryProcess.
