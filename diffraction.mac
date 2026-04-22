@@ -1,0 +1,26 @@
+# Diffraction smoke test — normal incidence, 45/45 polarization.
+# Expected: T_obs ≈ 0.50  (theory: 0.5*T_Ephi0 + 0.5*T_Ephi1 ≈ 0.5*1.055 + 0 ≈ 0.528)
+#
+# Photon: 500 GHz optical photon (E = 2.068 meV) traveling along +x.
+# Geometry: BBRCrackDetectorConstruction — TEM_waveguide slab at origin,
+#   entry face at x = -5 mm, exit face at x = +5 mm.
+# Source at x = -20 mm, safely upstream of the entry face.
+#
+# Polarization angle 225 deg → phat = (0, -cos45, -sin45) = (0, -0.7071, -0.7071)
+# so that E_theta = phat · ê_θ_in = 1/√2 and E_phi = phat · ê_φ_in = 1/√2.
+
+/control/verbose 0
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+
+/run/numberOfThreads 1
+/run/initialize
+
+# Particle gun settings are hardcoded in BBRDiffractionPGA:
+#   opticalphoton, position (-20,0,0) mm, direction (+1,0,0),
+#   energy 2.068 meV (500 GHz), phat = (0,-1/√2,-1/√2).
+
+/random/setSeeds 1234 5678
+
+/run/beamOn 1000

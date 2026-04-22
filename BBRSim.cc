@@ -3,6 +3,8 @@
 ///        Adapted from Geant4 optical/OpNovice2 example.
 
 #include "ActionInitialization.hh"
+#include "BBRCrackDetectorConstruction.hh"
+#include "BBRDiffractionActionInit.hh"
 #include "BBSimPhysics.hh"
 #include "DetectorConstruction.hh"
 #include "FTFP_BERT.hh"
@@ -29,7 +31,12 @@ int main(int argc, char** argv)
 
   auto runManager = G4RunManagerFactory::CreateRunManager();
 
-  auto detector = new DetectorConstruction();
+  // Use the crack diffraction geometry when running diffraction.mac.
+  G4VUserDetectorConstruction* detector;
+  if (argc > 1 && G4String(argv[1]).find("diffraction") != G4String::npos)
+    detector = new BBRCrackDetectorConstruction();
+  else
+    detector = new DetectorConstruction();
   runManager->SetUserInitialization(detector);
 
   G4VModularPhysicsList* physicsList = new FTFP_BERT;
@@ -44,7 +51,11 @@ int main(int argc, char** argv)
   physicsList->RegisterPhysics(new BBSimPhysics());
 
   runManager->SetUserInitialization(physicsList);
-  runManager->SetUserInitialization(new ActionInitialization());
+
+  if (argc > 1 && G4String(argv[1]).find("diffraction") != G4String::npos)
+    runManager->SetUserInitialization(new BBRDiffractionActionInit());
+  else
+    runManager->SetUserInitialization(new ActionInitialization());
 
   G4VisManager* visManager = new G4VisExecutive;
   visManager->Initialize();
