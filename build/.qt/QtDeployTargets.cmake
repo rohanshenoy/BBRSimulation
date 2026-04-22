@@ -1,2 +1,0 @@
-set(__QT_DEPLOY_TARGET_OpNovice2_FILE /Users/rohanshenoy/geant4/OpNovice2/build/OpNovice2)
-set(__QT_DEPLOY_TARGET_OpNovice2_TYPE EXECUTABLE)

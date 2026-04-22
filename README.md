@@ -1,170 +1,133 @@
-\page ExampleOpNovice2 Example OpNovice2 
+# BBRsim
 
-Investigate optical properties and parameters. Details of optical
-photon boundary interactions on a surface are recorded. Details 
-of optical photon generation and transport are recorded. Group velocity
-may be examined.
+Geant4-based free-space blackbody radiation (BBR) simulation for cryogenic
+experiments. Continues the work of Yen-Yung Chang (Caltech PhD, 2023, Ch. 5)
+and implements the technical scope of the Golwala / Mirabolfathi NSF QIS
+proposal *BBRsim: Free-Space Blackbody Radiation Simulation for
+Superconducting Circuits and Cryogenic Detectors* (2025).
 
-	
-## GEOMETRY DEFINITION
+## Why this exists
 
- The geometry consists of a cube "box" with a side of 2 m inside 
- the world cube of side 20 m. Optical properties of the box, the world, 
- and the surface may be set interactively via the commands defined 
- in the DetectorMessenger class.
+Superconducting-circuit qubits and sub-Kelvin phonon-mediated particle
+detectors are limited by non-thermal quasiparticle / charge-carrier
+populations. One cause is free-space BBR that leaks through machining
+gaps, cable slots, and flange-lid joints in otherwise "sealed" cryostat
+chambers. BBR from a 4 K surface peaks near λ = 1.3 mm, comparable to or
+larger than typical mating tolerances, so every nominally closed chamber
+behaves as a leaky waveguide for long-wavelength photons. Existing tools
+do not handle this well: ray-trace simulators assume open propagation,
+and non-sequential optical simulators assume discrete sources rather than
+an "everywhere" thermal source.
 
- Material properties may be added using the macro commands:
- - for the box:
-```
-/opnovice2/boxProperty NAME EN1 V1 EN2 V2 [ .. ENn Vn]
-/opnovice2/boxConstProperty NAME VALUE
-```
- - for the world:
-```
- /opnovice2/worldProperty NAME EN1 V1 EN2 V2 [ .. ENn Vn]
- /opnovice2/worldConstProperty NAME VALUE
-```
- - for the surface:
-```
- /opnovice2/surfaceProperty NAME EN1 V1 EN2 V2 [ .. ENn Vn]
-```
+BBRsim's goal is to do both — ray-trace in open volumes, wave propagation
+(via pre-computed HFSS S-parameters) in gaps — on CAD-accurate geometry,
+so apparatus can be designed *against* BBR backgrounds instead of
+debugging them afterward.
 
- Multiple energy and value pairs may be specified for the energy-dependent
- properties.
+## Status
 
- Values are in Geant4 internal units. Energy is in MeV.
+**Early scaffolding on top of Geant4's `optical/OpNovice2` example.**
 
- Example:
-```
-/opnovice2/boxProperty RINDEX 0.000002 1.3 0.000005 1.32 0.000008 1.34
-```
- sets the refractive index of the box to 1.3 at 2 eV, 1.32 at 5 eV, and
- 1.34 at 8 eV.
+What exists:
 
-## PHYSICS LIST
+- `BBRSim.cc` — executable entry point.
+- `BBSimPhysics` — `G4VPhysicsConstructor` that wraps the
+  `G4OpBoundaryProcess` registered by `G4OpticalPhysics`.
+- `BBSimOpBoundaryProcess` — `G4WrapperProcess` subclass; pure
+  pass-through today. This is the hook point where BBR-specific boundary
+  physics (tabulated cryogenic metal reflectance, HFSS waveguide
+  transmission, diffraction) will be injected.
+- `verify.mac` — fixed-seed regression to prove the wrapper stays
+  bit-identical to an unwrapped run while it is a pass-through.
+- Unmodified OpNovice2 `DetectorConstruction`, `PrimaryGenerator`,
+  `SteppingAction`, `Run`, `HistoManager`, messengers, and `.mac` test
+  cases — retained as a known-good baseline.
 
- The FTFP_BERT physics list is used, with electromagnetic option 
- EMZ (option4) and G4OpticalPhysics for the optical physics.
- 	 
-## AN EVENT : THE PRIMARY GENERATOR
- 
- The primary kinematic consists of a single particle. The type of 
- the particle, its energy, position, and direction, are set 
- in the PrimaryGeneratorAction class, and can be changed via the G4 
- build-in commands of G4ParticleGun class (see the macros provided with 
- this example).
-	
-## VISUALIZATION
- 
- The Visualization Manager is set in the main().
- The initialisation of the drawing is done via the commands
- /vis/... in the macro vis.mac. To get visualisation:
-```
-> /control/execute vis.mac
-```
- or run the program with no command line arguments:
-```
-$ ./OpNovice2
-```
- 	
-## HOW TO START ?
- 
- - Execute OpNovice2 in 'batch' mode from macro files
-```
-% ./OpNovice2 electron.mac
-```
- 		
- - Execute OpNovice2 in 'interactive mode' with visualization
-```
-% ./OpNovice2
-....
-Idle> type your commands
-....
-Idle> exit
+What is **not** here yet (all planned): a Planck-distributed
+`ThermalSurface` emission system; the patched `G4OpBoundaryProcess` that
+moves `REFLECTIVITY` from `G4OpticalSurface` to
+`G4MaterialPropertiesTable`; CADMesh / SOLIDWORKS `.STL` import; an HFSS
+`.csv` loader and open↔bounded interface in `UserSteppingAction`; a
+cryogenic-material optical-property database; and the BB source +
+mesh-TES detector geometries needed for validation.
+
+`CLAUDE.md` has a more detailed breakdown of the physics architecture
+and the implementation gap.
+
+## Build
+
+```bash
+mkdir build && cd build
+cmake ..
+make
 ```
 
-## RESULTS
+Batch-only (no UI/visualization):
 
- A table of optical photon events is printed at the end of the run.	
- Group velocity is printed with /tracking/verbose 1 or higher.
+```bash
+cmake -DWITH_GEANT4_UIVIS=OFF ..
+make
+```
 
-## HISTOGRAMS
- 
-   OpNovice2 has several predefined 1D histograms : 
-   -  1 : Cerenkov spectrum
-   -  2 : scintillation spectrum
-   -  3 : scintillation time (global time)
-   -  4 : WLS absorption spectrum
-   -  5 : WLS emission spectrum
-   -  6 : WLS emission time
-   -  7 : WLS2 absorption spectrum
-   -  8 : WLS2 emission spectrum
-   -  9 : WLS2 emission time
-   - 10 : boundary process status
-   - 11 : X momentum dir of scattered photons with px < 0
-   - 12 : Y momentum dir of scattered photons with px < 0
-   - 13 : Z momentum dir of scattered photons with px < 0
-   - 14 : X momentum dir of scattered photons with px >= 0
-   - 15 : Y momentum dir of scattered photons with px >= 0
-   - 16 : Z momentum dir of scattered photons with px >= 0
-   - 17 : X momentum dir of Fresnel-refracted photons
-   - 18 : Y momentum dir of Fresnel-refracted photons
-   - 19 : Z momentum dir of Fresnel-refracted photons
-   - 20 : fraction of photons refracted (i.e. Fresnel transmission)
-   - 21 : fraction of photons Fresnel-reflected
-   - 22 : fraction of photons total internal reflected (TIR)
-   - 23 : fraction of photons reflected (Fresnel reflection plus TIR)
-   - 24 : fraction of photons absorbed at surface
-   - 25 : fraction of photons "transmitted" (i.e. TRANSMITTANCE material property)
-   - 26 : fraction of photons spike-reflected
+CMake copies all `.mac` files to the build directory alongside the
+executable.
 
-   Histograms 11-26 are recorded for photons scattered from the +X
-   surface of the cube. Only the first interaction is recorded.  
- 
-   The histograms are managed by G4Analysis classes. 
-   The histos can be individually activated with the command :
-```
-/analysis/h1/set id nbBins  valMin valMax
-```
-   The unit is hardcoded to be eV for energy and ns for time.
-   
-   One can control the name of the histograms file with the command:
-```
-/analysis/setFileName  name  (default opnovice2)
-```
-   
-   It is possible to choose the format of the histogram file : root (default),
-   hdf5, xml, csv, by changing the default file type in HistoManager.cc
-   
-   It is also possible to print selected histograms on an ascii file:
-```
-/analysis/h1/setAscii id
-```
-   All selected histos will be written on a file name.ascii  (default opnovice2) 
+## Run
 
-## MACROS
+Interactive (UI + vis):
 
- Several macros are included.
- - boundary.mac: Set the surface to the various types and configurations of
-               model, type, etc., shoot optical photons, and record statistics.
-               This macro uses the command
-               /opnovice2/stepping/killOnSecondSurface,
-               which kills photon tracks incident on a second surface. This can
-               be useful for visualizing surface scattering.
- - coated.mac: To show reflection/refraction from thin film coating
- - electron.mac: Shoot electrons and observe Cerenkov and scintillation radiation
- - fresnel.mac:  Shoot optical photons of fixed polarization and random direction
-               at a surface, and plot reflectance/transmittance vs incident
-               angle.
- - complexRindex.mac: Use a dielectric-metal surface with a complex index of
-               refraction.
- - OpNovice2.mac: Shoot an optical photon inside a box.
- - scint_by_particle.mac: Configure scintillation to have particle-specific
-               yields, yield ratios, and time constants. Shoot different types
-               of particles.
- - vis.mac:    Configure visualization. The macro command
-               /opnovice2/stepping/killOnSecondSurface, which kills photon
-               tracks incident on a second surface, may be useful for
-               visualizing surface scattering.
- - wls.mac:    Configure two wavelength-shifting processes, and shoot optical
-               photons.
+```bash
+cd build
+./BBRSim
+```
+
+Batch:
+
+```bash
+./BBRSim electron.mac     # stock OpNovice2 — Cerenkov + scintillation from e-
+./BBRSim boundary.mac     # stock OpNovice2 — boundary process sweep
+./BBRSim verify.mac       # fixed-seed wrapper regression
+```
+
+The executable is `BBRSim`. (The original OpNovice2 `main()` is also
+present as `OpNovice2.cc` for reference; it is not built by the default
+`CMakeLists.txt`.)
+
+## Project plan and team
+
+From the NSF proposal, period of performance 2026Q4–2029Q3:
+
+- **O1** — Complete BBRsim development.
+- **O2** — Validate against a temperature-controlled TK-RAM / OFHC-Cu BB
+  source (4–20 K, ~160 cm² emitting area, CFRP thermal break) plus
+  purpose-built mesh-TES photon detectors (W TES, 3 mm on Si, three
+  designs optimized for 4 / 9 / 20 K peak emission). First stages use
+  manufactured test geometries at TAMU; the final stage uses a
+  SuperCDMS SNOLAB Pathfinder detector tower at SLAC.
+- **O3** — Publish and release BBRsim as a Geant4 module; upstream the
+  `G4OpBoundaryProcess` `REFLECTIVITY` change via the Geant4 EM Physics
+  Working Group.
+
+Team: Golwala (PI, Caltech), Mirabolfathi (co-PI, TAMU), Shenoy (student
+lead, Caltech), Xiong (Brinson postdoc, Caltech), Kurinsky / Partridge
+(SLAC SuperCDMS, unfunded collaborators), Chang (BBRsim originator,
+unfunded advisor).
+
+## References
+
+- Chang, Y.-Y., *SuperCDMS HVeV Run 2 Low-Mass Dark Matter Search,
+  Highly Multiplexed Phonon-mediated Particle Detector with Kinetic
+  Inductance Detector, and the Blackbody Radiation in Cryogenic
+  Experiments* (Caltech PhD thesis, 2023). Chapter 5 is the primary
+  reference for BBRsim physics and the particle-like simulation design.
+- Golwala & Mirabolfathi, *BBRsim* NSF QIS proposal (2025).
+- Agostinelli et al., "GEANT4 — a simulation toolkit," *NIM A* **506**,
+  250 (2003).
+- Poole et al., CADMesh (2nd ver.) — CAD → Geant4 geometry import.
+
+## License
+
+Portions derived from the Geant4 `examples/extended/optical/OpNovice2`
+example retain Geant4's license terms. BBRsim-specific additions will be
+released under a compatible open-source license with the final Geant4
+module publication.
