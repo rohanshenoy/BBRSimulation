@@ -211,17 +211,20 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
   const auto& ff = ds.farField;
   const std::size_t N = ff.size();
 
-  // Runtime CDF: combined power |E_theta·F₀ + E_phi·F₁|² per far-field point.
-  // Built from this dataset's rows only (N points, not the whole CSV).
+  // Runtime CDF: combined power |E_theta·F₀ + E_phi·F₁|² per far-field point,
+  // weighted by sinT to account for solid angle dΩ = sinT·dT·dPhi.
+  // Without sinT the poles (T=0°,180°) are overweighted by the 524 Phi rows
+  // that all map to the same physical direction.
   std::vector<G4double> cdf(N);
   G4double sum = 0.;
   for (std::size_t i = 0; i < N; ++i) {
     const auto& fp = ff[i];
+    G4double sinT   = std::sin(fp.theta_deg * CLHEP::pi / 180.);
     G4double Eth_re = E_theta*fp.rEtheta_re_0 + E_phi*fp.rEtheta_re_1;
     G4double Eth_im = E_theta*fp.rEtheta_im_0 + E_phi*fp.rEtheta_im_1;
     G4double Eph_re = E_theta*fp.rEphi_re_0   + E_phi*fp.rEphi_re_1;
     G4double Eph_im = E_theta*fp.rEphi_im_0   + E_phi*fp.rEphi_im_1;
-    sum    += Eth_re*Eth_re + Eth_im*Eth_im + Eph_re*Eph_re + Eph_im*Eph_im;
+    sum    += sinT * (Eth_re*Eth_re + Eth_im*Eth_im + Eph_re*Eph_re + Eph_im*Eph_im);
     cdf[i]  = sum;
   }
   for (auto& c : cdf) c /= sum;
