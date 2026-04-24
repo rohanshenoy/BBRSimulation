@@ -10,6 +10,7 @@
 #include "Randomize.hh"
 
 #include <cmath>
+#include <fstream>
 
 BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
   : G4WrapperProcess(name)
@@ -49,18 +50,23 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   const G4ThreeVector theta_hat(0., 1., 0.);   // long dimension
 
   // --- incoming angles in crack-local frame (folded into HFSS quarter-symmetry) ---
-  // HFSS convention: polar axis = -normal_hat, so θ=180° is normal incidence.
+  // HFSS convention: ẑ_i points OUT of the crack (= normal_hat = +x_world).
+  // A photon propagating along +x_world (khat = normal_hat) approaches the
+  // exit face from inside, i.e. its k-vector is anti-parallel to ẑ_i →
+  // IWaveTheta = 180° (confirmed: T≈1.055 at IWaveTheta=180°, T≈0 at 0°).
   G4double cosVal = std::min(1., std::max(-1., -khat.dot(normal_hat)));
   G4double iwaveTheta_deg = std::acos(cosVal) * (180. / CLHEP::pi);
-  // atan2 sign: ŷ_i = -ŷ_world, so theta_hat component is negated.
+  // IWavePhi: azimuth in HFSS x̂_i=phi_hat, ŷ_i=-theta_hat plane.
   G4double iwavePhi_raw   = std::atan2(-khat.dot(theta_hat), khat.dot(phi_hat))
                             * (180. / CLHEP::pi);
   G4double iwavePhi_deg   = std::abs(iwavePhi_raw);
   if (iwavePhi_deg > 90.) iwavePhi_deg = 180. - iwavePhi_deg;
 
   // --- decompose incoming polarization onto HFSS incoming spherical basis ---
-  // ê_θ_in and ê_φ_in in world frame, at pre-fold (iwaveTheta, iwavePhi_raw).
-  // Derivation: HFSS frame ẑ_i=normal_hat, x̂_i=phi_hat, ŷ_i=-theta_hat.
+  // Standard spherical basis at (IWaveTheta, IWavePhi) in HFSS frame
+  // (ẑ_i=normal_hat, x̂_i=phi_hat, ŷ_i=-theta_hat):
+  //   ê_θ = -sin(T)*ẑ_i + cos(T)*cos(P)*x̂_i - cos(T)*sin(P)*ŷ_i
+  //   ê_φ =            -sin(P)*x̂_i           - cos(P)*ŷ_i
   G4double th = iwaveTheta_deg * (CLHEP::pi / 180.);
   G4double ph = iwavePhi_raw   * (CLHEP::pi / 180.);
   G4ThreeVector eTheta_in = +std::sin(th) * normal_hat
@@ -111,6 +117,24 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     G4ThreeVector pos_out = fHFSSData->SampleExitPosition(
         E_theta, E_phi, iwavePhi_deg, iwaveTheta_deg,
         exitCenter, theta_hat, phi_hat);
+
+    // Validation output — written only when TEM_waveguide volumes exist (not verify.mac).
+    // Single-threaded runs only (diffraction.mac sets /run/numberOfThreads 1).
+    {
+      static std::ofstream sDiffrOut;
+      static bool sHeaderWritten = false;
+      if (!sHeaderWritten) {
+        sHeaderWritten = true;
+        sDiffrOut.open("diffraction_output.csv");
+        sDiffrOut << "dir_x,dir_y,dir_z,pos_y_m,pos_z_m\n";
+      }
+      if (sDiffrOut.is_open())
+        sDiffrOut << dir_out.x()         << ","
+                  << dir_out.y()         << ","
+                  << dir_out.z()         << ","
+                  << pos_out.y()/CLHEP::m << ","
+                  << pos_out.z()/CLHEP::m << "\n";
+    }
 
     fParticleChange.ProposeMomentumDirection(dir_out);
     fParticleChange.ProposePolarization(pol_out);
