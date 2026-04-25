@@ -35,10 +35,10 @@ std::pair<G4double, G4double> MakeKey(G4double phi, G4double theta)
 
 // ---------------------------------------------------------------------------
 
-BBRHFSSData::BBRHFSSData(const G4String& dataDir)
+BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& datasetId)
 {
-  auto dir0 = dataDir + "/InfParallelPlate_crack1Rohan_500GHz_Ephi=0";
-  auto dir1 = dataDir + "/InfParallelPlate_crack1Rohan_500GHz_Ephi=1";
+  auto dir0 = baseDir + "/" + datasetId + "_Ephi=0";
+  auto dir1 = baseDir + "/" + datasetId + "_Ephi=1";
   LoadFarField (dir0 + "/far_field.csv",  0);
   LoadFarField (dir1 + "/far_field.csv",  1);
   LoadWaveguide(dir0 + "/waveguide.csv",  0);

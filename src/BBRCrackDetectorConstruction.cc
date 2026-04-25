@@ -1,4 +1,5 @@
 #include "BBRCrackDetectorConstruction.hh"
+#include "BBRMaterials.hh"
 
 #include "G4Box.hh"
 #include "G4LogicalVolume.hh"
@@ -26,16 +27,23 @@ G4VPhysicalVolume* BBRCrackDetectorConstruction::Construct()
                                          worldLogical, "World",
                                          nullptr, false, 0, true);
 
-  // TEM_waveguide slab at origin.
-  // HFSS model: propagation along +x (normal_hat), gap b=0.05 mm along +z (phi_hat),
-  // long dimension along +y (theta_hat).
-  //   halfX = a/2 = 5 mm   (crack depth)
-  //   halfY = 50 mm         (long dimension, truncated from infinite)
-  //   halfZ = b/2 = 0.025 mm (gap half-width)
-  auto crackSolid   = new G4Box("TEM_waveguide_crack", 5.*mm, 50.*mm, 0.025*mm);
-  auto crackLogical = new G4LogicalVolume(crackSolid, vac, "TEM_waveguide_crack");
+  // Waveguide crack slab at origin. Material "vacuum_wg" marks it as a crack;
+  // BBSimOpBoundaryProcess detects the vacuum→vacuum_wg boundary and routes
+  // photons through the HFSS diffraction model.
+  //
+  // Local coordinate convention: local +X = propagation (normal_hat),
+  //   local +Y = long dimension (theta_hat), local +Z = gap (phi_hat).
+  // With identity rotation: local axes align with world +x/+y/+z.
+  //   halfX = 5 mm    (crack depth along propagation axis)
+  //   halfY = 50 mm   (long dimension a, truncated from infinite)
+  //   halfZ = 0.025 mm (gap half-width b/2 = 25 µm)
+  //
+  // Volume name = HFSS dataset ID (path prefix under HFSSSimData/).
+  static const char* kDatasetId = "InfParallelPlate_crack1Rohan_500GHz";
+  auto crackSolid   = new G4Box(kDatasetId, 5.*mm, 50.*mm, 0.025*mm);
+  auto crackLogical = new G4LogicalVolume(crackSolid, BBRMaterials::GetVacuumWG(), kDatasetId);
   new G4PVPlacement(nullptr, G4ThreeVector(),
-                    crackLogical, "TEM_waveguide_crack",
+                    crackLogical, kDatasetId,
                     worldLogical, false, 0, true);
 
   return worldPhysical;

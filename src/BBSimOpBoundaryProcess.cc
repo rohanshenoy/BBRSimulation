@@ -14,7 +14,6 @@
 
 BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
   : G4WrapperProcess(name)
-  , fHFSSData(std::make_unique<BBRHFSSData>("../HFSSSimData"))
 {}
 
 // PostStepDoIt — intercept TEM_waveguide volumes; fall through otherwise.
@@ -23,12 +22,9 @@ BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
 G4VParticleChange* BBSimOpBoundaryProcess::PostStepDoIt(const G4Track& aTrack,
                                                         const G4Step& aStep)
 {
-  const G4VTouchable* touch = aStep.GetPostStepPoint()->GetTouchable();
-  if (touch && touch->GetVolume()) {
-    const G4String& volName = touch->GetVolume()->GetName();
-    if (volName.find("TEM_waveguide") != G4String::npos)
-      return HandleDiffractionBoundary(aTrack, aStep);
-  }
+  const G4Material* mat2 = aStep.GetPostStepPoint()->GetMaterial();
+  if (mat2 && mat2->GetName() == "vacuum_wg")
+    return HandleDiffractionBoundary(aTrack, aStep);
   return pRegProcess->PostStepDoIt(aTrack, aStep);
 }
 
@@ -42,12 +38,23 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   const G4ThreeVector khat = aTrack.GetMomentumDirection();
   const G4ThreeVector phat = aTrack.GetPolarization();
 
-  // Crack-local basis for standard geometry: crack propagates along +x_world,
-  // short (b) dimension along z_world, long dimension along y_world.
-  // TODO: extract from touchable rotation matrix for general crack orientations.
-  const G4ThreeVector normal_hat(1., 0., 0.);  // exit face outward normal
-  const G4ThreeVector phi_hat  (0., 0., 1.);   // b / short dimension
-  const G4ThreeVector theta_hat(0., 1., 0.);   // long dimension
+  // Extract crack-local axes from the volume's rotation in world frame.
+  // Convention: local +X = propagation (normal_hat), +Y = long dim (theta_hat),
+  //             +Z = gap (phi_hat). InverseTransformAxis maps local → world.
+  const G4VTouchable*      touch = aStep.GetPostStepPoint()->GetTouchable();
+  const G4AffineTransform& xf    = touch->GetHistory()->GetTopTransform();
+  G4ThreeVector normal_hat = xf.InverseTransformAxis(G4ThreeVector(1., 0., 0.));
+  G4ThreeVector theta_hat  = xf.InverseTransformAxis(G4ThreeVector(0., 1., 0.));
+  G4ThreeVector phi_hat    = xf.InverseTransformAxis(G4ThreeVector(0., 0., 1.));
+  // Flip normal_hat to point outward (same half-space as khat, i.e. toward exit face).
+  if (khat.dot(normal_hat) < 0.) normal_hat = -normal_hat;
+
+  // Lazy-load the HFSS dataset for this crack volume.
+  const G4String volName   = touch->GetVolume()->GetName();
+  const G4String datasetId = volName.substr(0, volName.find(':'));
+  if (fHFSSCache.find(datasetId) == fHFSSCache.end())
+    fHFSSCache[datasetId] = std::make_unique<BBRHFSSData>("../HFSSSimData", datasetId);
+  BBRHFSSData& hfss = *fHFSSCache[datasetId];
 
   // --- incoming angles in crack-local frame (folded into HFSS quarter-symmetry) ---
   // HFSS convention: ẑ_i points OUT of the crack (= normal_hat = +x_world).
@@ -82,8 +89,8 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   else             { E_theta = M_SQRT1_2; E_phi = M_SQRT1_2; }
 
   // --- transmittance decision (Wang eq. 54) ---
-  G4double T = fHFSSData->GetTransmittance(E_theta, E_phi,
-                                           iwavePhi_deg, iwaveTheta_deg);
+  G4double T = hfss.GetTransmittance(E_theta, E_phi,
+                                     iwavePhi_deg, iwaveTheta_deg);
 
   static G4int sBBRTotal = 0, sBBRTransmit = 0;
   const G4bool transmitted = (G4UniformRand() < T);
@@ -96,14 +103,12 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   if (transmitted) {
     // Transmit: sample outgoing direction + polarization (Wang eqs. 56-57).
     G4ThreeVector pol_out;
-    G4ThreeVector dir_out = fHFSSData->SampleOutgoingDirection(
+    G4ThreeVector dir_out = hfss.SampleOutgoingDirection(
         E_theta, E_phi, iwavePhi_deg, iwaveTheta_deg,
         phi_hat, theta_hat, normal_hat, pol_out);
 
     // Sample exit-face position (Wang eq. 55).
-    // Exit face center: traverse the TEM_waveguide slab from the entry point.
-    const G4VTouchable* touch    = aStep.GetPostStepPoint()->GetTouchable();
-    const G4AffineTransform& xf  = touch->GetHistory()->GetTopTransform();
+    // Exit face center: traverse the crack slab from the entry point.
     const G4ThreeVector& entryGl = aStep.GetPostStepPoint()->GetPosition();
     G4ThreeVector localEntry     = xf.TransformPoint(entryGl);
     G4ThreeVector localNormal    = xf.TransformAxis(normal_hat);
@@ -114,7 +119,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
 
     // HFSS waveguide CSV: Y=long dim → +theta_hat, Z=gap/b → phi_hat.
     // (ŷ_i = −ŷ_world sign flip is for angle conventions only, not exit positions.)
-    G4ThreeVector pos_out = fHFSSData->SampleExitPosition(
+    G4ThreeVector pos_out = hfss.SampleExitPosition(
         E_theta, E_phi, iwavePhi_deg, iwaveTheta_deg,
         exitCenter, theta_hat, phi_hat);
 

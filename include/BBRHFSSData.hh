@@ -23,7 +23,10 @@
 class BBRHFSSData
 {
  public:
-  explicit BBRHFSSData(const G4String& dataDir);
+  // baseDir: path to HFSSSimData directory (e.g. "../HFSSSimData")
+  // datasetId: subdirectory prefix, e.g. "InfParallelPlate_crack1Rohan_500GHz"
+  //   Loads baseDir/datasetId_Ephi=0/ and baseDir/datasetId_Ephi=1/
+  BBRHFSSData(const G4String& baseDir, const G4String& datasetId);
 
   // Wang eq. 54: T = E_theta²·T₀ + E_phi²·T₁
   G4double GetTransmittance(G4double E_theta, G4double E_phi,
