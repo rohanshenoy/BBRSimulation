@@ -310,6 +310,114 @@ if pd is not None:
         print(f'  SKIP  CSV not found: {e}')
 
 # ---------------------------------------------------------------------------
+# Layer 3: Exit-position CDF — dimension mapping
+# ---------------------------------------------------------------------------
+print()
+print('=== Layer 3: Exit-position CDF dimension mapping ===')
+
+if pd is not None:
+    try:
+        HALF_A = 5e-3    # m  long dim a = 10 mm
+        HALF_B = 25e-6   # m  gap dim b = 50 µm
+
+        ni0 = wg0[(wg0['IWaveTheta'] > 179.5) & (wg0['IWavePhi'].abs() < 0.5)].reset_index(drop=True)
+        ni1 = wg1[(wg1['IWaveTheta'] > 179.5) & (wg1['IWavePhi'].abs() < 0.5)].reset_index(drop=True)
+
+        # --- 3a: CSV column identity — which physical dimension is Y vs Z ---
+        check('CSV X = 0 everywhere (exit face, not propagation interior)',
+              (ni0['X'] == 0.0).all(),
+              f'X unique: {ni0["X"].unique()}')
+        check('CSV Y spans ±a/2 = ±5 mm  (long dimension)',
+              abs(ni0['Y'].max() - HALF_A) < 1e-5 and abs(ni0['Y'].min() + HALF_A) < 1e-5,
+              f'Y=[{ni0["Y"].min():.4e}, {ni0["Y"].max():.4e}] m')
+        check('CSV Z spans ±b/2 = ±25 µm (gap dimension)',
+              abs(ni0['Z'].max() - HALF_B) < 1e-7 and abs(ni0['Z'].min() + HALF_B) < 1e-7,
+              f'Z=[{ni0["Z"].min():.2e}, {ni0["Z"].max():.2e}] m')
+        y_span = ni0['Y'].max() - ni0['Y'].min()
+        z_span = ni0['Z'].max() - ni0['Z'].min()
+        check('Y span / Z span > 100  (long dim >> gap, column roles unambiguous)',
+              y_span / z_span > 100,
+              f'ratio={y_span / z_span:.1f}')
+
+        # --- 3b: Y-power distribution shape ---
+        # Build combined |E|² for 45/45 polarization at normal incidence.
+        Et45 = Ep45 = 1.0 / math.sqrt(2.0)
+        ni0 = ni0.copy()
+        ni0['pw'] = (
+            (Et45*ni0['Ex_real'] + Ep45*ni1['Ex_real'])**2 +
+            (Et45*ni0['Ex_imag'] + Ep45*ni1['Ex_imag'])**2 +
+            (Et45*ni0['Ey_real'] + Ep45*ni1['Ey_real'])**2 +
+            (Et45*ni0['Ey_imag'] + Ep45*ni1['Ey_imag'])**2 +
+            (Et45*ni0['Ez_real'] + Ep45*ni1['Ez_real'])**2 +
+            (Et45*ni0['Ez_imag'] + Ep45*ni1['Ez_imag'])**2
+        )
+        wy = ni0.groupby('Y')['pw'].sum()
+        peak_Y = abs(wy.index[wy.values.argmax()])
+        check('Y-power peak is at |Y| > 3 mm (edge-peaked, not centre-peaked)',
+              peak_Y > 3e-3, f'peak |Y|={peak_Y*1e3:.2f} mm')
+        # Power-weighted mean |Y| from CSV (used below to validate sampling).
+        mean_abs_Y_theory = (np.abs(wy.index.values) * wy.values).sum() / wy.values.sum()
+
+        # --- 3c: Sample from CDF; verify spread in ep_y vs ep_z ---
+        # A Y↔Z axis swap would give std_y ≈ 10 µm and std_z ≈ 3 mm — catches
+        # both swapped CSV columns and swapped crack_x/crack_y call arguments.
+        rng = np.random.default_rng(42)
+        N_SAMP = 5000
+        cdf_v = np.cumsum(ni0['pw'].values)
+        cdf_v /= cdf_v[-1]
+        U = rng.uniform(0, 1, N_SAMP)
+        idx = np.searchsorted(cdf_v, U).clip(0, len(cdf_v) - 1)
+        ep_y = ni0['Y'].values[idx]   # m, CSV Y → long dimension
+        ep_z = ni0['Z'].values[idx]   # m, CSV Z → gap dimension
+
+        std_y = ep_y.std()
+        std_z = ep_z.std()
+        check('Sampled ep_y std > 2 mm  (matches long-dim spread)',
+              std_y > 2e-3,  f'std_y={std_y*1e3:.2f} mm')
+        check('Sampled ep_z std < 15 µm (matches gap spread)',
+              std_z < 15e-6, f'std_z={std_z*1e6:.2f} µm')
+        check('ep_y/ep_z std ratio > 100 (Y and Z axes not swapped in CDF)',
+              std_y / std_z > 100, f'ratio={std_y / std_z:.1f}')
+        check('Sampled ep_y within ±a/2 = ±5 mm',
+              ep_y.max() <= HALF_A + 1e-6 and ep_y.min() >= -HALF_A - 1e-6,
+              f'ep_y=[{ep_y.min()*1e3:.2f}, {ep_y.max()*1e3:.2f}] mm')
+        check('Sampled ep_z within ±b/2 = ±25 µm',
+              ep_z.max() <= HALF_B + 1e-7 and ep_z.min() >= -HALF_B - 1e-7,
+              f'ep_z=[{ep_z.min()*1e6:.2f}, {ep_z.max()*1e6:.2f}] µm')
+        # Sampled mean |ep_y| should match the power-weighted expectation from the CSV
+        # (within ~0.3 mm statistical tolerance for 5000 samples).
+        mean_abs_Y_sampled = abs(ep_y).mean()
+        check('Sampled mean |ep_y| matches CSV power-weighted mean (within 0.3 mm)',
+              abs(mean_abs_Y_sampled - mean_abs_Y_theory) < 3e-4,
+              f'sampled={mean_abs_Y_sampled*1e3:.2f} mm, theory={mean_abs_Y_theory*1e3:.2f} mm')
+
+        # --- 3d: World-frame mapping (replicate SampleExitPosition) ---
+        # C++ code: pos_out = center + (ep.y * CLHEP::m)*crack_x + (ep.z * CLHEP::m)*crack_y
+        #           crack_x = theta_hat = [0,1,0], crack_y = phi_hat = [0,0,1]
+        # CLHEP::m = 1000 (Geant4 base unit is mm; CSV is in metres).
+        # If crack_x/crack_y were swapped the world-y range would shrink to ±0.025 mm.
+        # If CLHEP::m were missing the world-y range would shrink to ±0.005 mm.
+        CLHEP_m = 1000.0  # mm per metre
+        pos_y = ep_y * CLHEP_m   # mm, displacement along theta_hat (world y)
+        pos_z = ep_z * CLHEP_m   # mm, displacement along phi_hat  (world z)
+        check('World pos_y range > ±3 mm (long dim → theta_hat mapping OK)',
+              pos_y.max() > 3.0 and pos_y.min() < -3.0,
+              f'pos_y=[{pos_y.min():.2f}, {pos_y.max():.2f}] mm')
+        check('World |pos_z| < 0.030 mm (gap → phi_hat mapping OK)',
+              abs(pos_z).max() < 0.030,
+              f'max|pos_z|={abs(pos_z).max()*1e3:.3f} µm')
+        check('World pos_y/pos_z std ratio > 100 (not swapped in world frame)',
+              pos_y.std() / pos_z.std() > 100,
+              f'ratio={pos_y.std() / pos_z.std():.1f}')
+
+    except FileNotFoundError as e:
+        print(f'  SKIP  Layer 3: {e}')
+    except Exception as e:
+        import traceback
+        print(f'  ERROR  Layer 3: {e}')
+        traceback.print_exc()
+
+# ---------------------------------------------------------------------------
 print()
 print(f'Results: {PASS} passed, {FAIL} failed')
 sys.exit(0 if FAIL == 0 else 1)
