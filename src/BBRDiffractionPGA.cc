@@ -7,11 +7,11 @@
 #include "G4ThreeVector.hh"
 #include "G4Event.hh"
 
-BBRDiffractionPGA::BBRDiffractionPGA()
+BBRDiffractionPGA::BBRDiffractionPGA(G4double gunZ_mm)
 {
   fGun = new G4ParticleGun(1);
   fGun->SetParticleDefinition(G4OpticalPhoton::OpticalPhotonDefinition());
-  fGun->SetParticlePosition(G4ThreeVector(-20.*mm, 0., 0.));
+  fGun->SetParticlePosition(G4ThreeVector(-20.*mm, 0., gunZ_mm));
   fGun->SetParticleMomentumDirection(G4ThreeVector(1., 0., 0.));
   fGun->SetParticleEnergy(2.068e-3 * eV);  // 500 GHz
 
