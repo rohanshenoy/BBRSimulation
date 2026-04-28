@@ -14,6 +14,7 @@
 #include "G4OpticalPhysics.hh"
 #include "G4RunManagerFactory.hh"
 #include "G4String.hh"
+#include "G4SystemOfUnits.hh"
 #include "G4Types.hh"
 #include "G4UIExecutive.hh"
 #include "G4UImanager.hh"
@@ -52,10 +53,13 @@ int main(int argc, char** argv)
 
   runManager->SetUserInitialization(physicsList);
 
-  if (argc > 1 && G4String(argv[1]).find("diffraction") != G4String::npos)
-    runManager->SetUserInitialization(new BBRDiffractionActionInit());
-  else
+  if (argc > 1 && G4String(argv[1]).find("diffraction") != G4String::npos) {
+    G4double gunZ = (G4String(argv[1]).find("crack2") != G4String::npos)
+                    ? 3.*mm : 0.;
+    runManager->SetUserInitialization(new BBRDiffractionActionInit(gunZ));
+  } else {
     runManager->SetUserInitialization(new ActionInitialization());
+  }
 
   G4VisManager* visManager = new G4VisExecutive;
   visManager->Initialize();
