@@ -27,24 +27,38 @@ G4VPhysicalVolume* BBRCrackDetectorConstruction::Construct()
                                          worldLogical, "World",
                                          nullptr, false, 0, true);
 
-  // Waveguide crack slab at origin. Material "vacuum_wg" marks it as a crack;
-  // BBSimOpBoundaryProcess detects the vacuum→vacuum_wg boundary and routes
-  // photons through the HFSS diffraction model.
+  // Two crack slabs placed side by side (same x-depth, separated in z).
+  // Each is named by its HFSS dataset ID; BBSimOpBoundaryProcess auto-loads
+  // the matching CSV from HFSSSimData/<name>_Ephi={0,1}/ by volume name.
+  // Material "vacuum_wg" marks the volume as a diffraction boundary.
   //
-  // Local coordinate convention: local +X = propagation (normal_hat),
-  //   local +Y = long dimension (theta_hat), local +Z = gap (phi_hat).
-  // With identity rotation: local axes align with world +x/+y/+z.
-  //   halfX = 5 mm    (crack depth along propagation axis)
-  //   halfY = 50 mm   (long dimension a, truncated from infinite)
-  //   halfZ = 0.025 mm (gap half-width b/2 = 25 µm)
+  // Local coordinate convention (identity rotation → world axes):
+  //   local +X = propagation (normal_hat)  ← HFSS Z axis
+  //   local +Y = long dimension (theta_hat) ← HFSS Y axis
+  //   local +Z = gap (phi_hat)              ← HFSS X axis
   //
-  // Volume name = HFSS dataset ID (path prefix under HFSSSimData/).
-  static const char* kDatasetId = "InfParallelPlate_crack1Rohan_500GHz";
-  auto crackSolid   = new G4Box(kDatasetId, 5.*mm, 50.*mm, 0.025*mm);
-  auto crackLogical = new G4LogicalVolume(crackSolid, BBRMaterials::GetVacuumWG(), kDatasetId);
-  new G4PVPlacement(nullptr, G4ThreeVector(),
-                    crackLogical, kDatasetId,
-                    worldLogical, false, 0, true);
+  // halfY margin (+0.1 mm) and halfZ margin (+1 µm) ensure HFSS exit positions
+  // land strictly inside the volume so Geant4 navigation is well-defined.
+  //
+  // crack1: HFSS ZSize=1 mm depth, XSize=0.05 mm gap, YSize=10 mm
+  //         centered at (x=0, y=0, z=0): photon at z=0 hits this crack.
+  {
+    static const char* kId = "InfParallelPlate_crack1Rohan_500GHz";
+    auto solid   = new G4Box(kId, 0.5*mm, 5.1*mm, 0.026*mm);
+    auto logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
+    new G4PVPlacement(nullptr, G4ThreeVector(0., 0., 0.),
+                      logical, kId, worldLogical, false, 0, true);
+  }
+
+  // crack2: HFSS ZSize=1.5 mm depth, XSize=0.1 mm gap, YSize=10 mm
+  //         centered at (x=0, y=0, z=3 mm): photon offset to z=3 mm hits this crack.
+  {
+    static const char* kId = "InfParallelPlate_crack2_500GHz";
+    auto solid   = new G4Box(kId, 0.751*mm, 5.1*mm, 0.051*mm);
+    auto logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
+    new G4PVPlacement(nullptr, G4ThreeVector(0., 0., 3.*mm),
+                      logical, kId, worldLogical, false, 0, true);
+  }
 
   return worldPhysical;
 }
