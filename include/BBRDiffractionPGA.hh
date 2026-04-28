@@ -1,6 +1,7 @@
 #ifndef BBRDiffractionPGA_hh
 #define BBRDiffractionPGA_hh
 
+#include "G4Types.hh"
 #include "G4VUserPrimaryGeneratorAction.hh"
 
 // Primary generator for the diffraction smoke test.
