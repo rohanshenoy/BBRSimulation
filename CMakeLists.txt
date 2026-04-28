@@ -60,6 +60,20 @@ foreach(_script ${OpNovice2_SCRIPTS})
     )
 endforeach()
 
+set(BBRSim_SCRIPTS
+    diffraction.mac
+    diffraction_crack2.mac
+    verify.mac
+  )
+
+foreach(_script ${BBRSim_SCRIPTS})
+  configure_file(
+    ${PROJECT_SOURCE_DIR}/${_script}
+    ${PROJECT_BINARY_DIR}/${_script}
+    COPYONLY
+    )
+endforeach()
+
 #----------------------------------------------------------------------------
 # Install the executable to 'bin' directory under CMAKE_INSTALL_PREFIX
 #
