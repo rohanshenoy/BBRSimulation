@@ -1,10 +1,11 @@
-# Diffraction smoke test — normal incidence, 45/45 polarization.
+# Diffraction smoke test — normal incidence, 45/45 polarization, crack1.
 # Expected: T_obs ≈ 0.50  (theory: 0.5*T_Ephi0 + 0.5*T_Ephi1 ≈ 0.5*1.055 + 0 ≈ 0.528)
 #
-# Photon: 500 GHz optical photon (E = 2.068 meV) traveling along +x.
-# Geometry: BBRCrackDetectorConstruction — TEM_waveguide slab at origin,
-#   entry face at x = -5 mm, exit face at x = +5 mm.
-# Source at x = -20 mm, safely upstream of the entry face.
+# Photon: 500 GHz optical photon (E = 2.068 meV) traveling along +x at z=0.
+# Geometry: BBRCrackDetectorConstruction — two TEM_waveguide slabs side by side:
+#   crack1 (b=50 µm,  depth=1 mm)   centered at (x=0, y=0, z=0 mm)   ← this test
+#   crack2 (b=100 µm, depth=1.5 mm) centered at (x=0, y=0, z=3 mm)
+# Source at x = -20 mm, z = 0: hits crack1 only.
 #
 # Polarization angle 225 deg → phat = (0, -cos45, -sin45) = (0, -0.7071, -0.7071)
 # so that E_theta = phat · ê_θ_in = 1/√2 and E_phi = phat · ê_φ_in = 1/√2.
