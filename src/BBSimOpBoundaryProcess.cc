@@ -1,5 +1,6 @@
 #include "BBSimOpBoundaryProcess.hh"
 
+#include "BBRCrackLibrary.hh"
 #include "G4AffineTransform.hh"
 #include "G4NavigationHistory.hh"
 #include "G4PhysicalConstants.hh"
@@ -52,9 +53,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // Lazy-load the HFSS dataset for this crack volume.
   const G4String volName   = touch->GetVolume()->GetName();
   const G4String datasetId = volName.substr(0, volName.find(':'));
-  if (fHFSSCache.find(datasetId) == fHFSSCache.end())
-    fHFSSCache[datasetId] = std::make_unique<BBRHFSSData>("../HFSSSimData", datasetId);
-  BBRHFSSData& hfss = *fHFSSCache[datasetId];
+  BBRHFSSData& hfss = BBRCrackLibrary::Instance().Lookup(datasetId);
 
   // --- incoming angles in crack-local frame (folded into HFSS quarter-symmetry) ---
   // HFSS convention: ẑ_i points OUT of the crack (= normal_hat = +x_world).
@@ -133,12 +132,14 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
         sDiffrOut.open("diffraction_output.csv");
         sDiffrOut << "dir_x,dir_y,dir_z,pos_y_m,pos_z_m\n";
       }
-      if (sDiffrOut.is_open())
+      if (sDiffrOut.is_open()) {
         sDiffrOut << dir_out.x()         << ","
                   << dir_out.y()         << ","
                   << dir_out.z()         << ","
                   << pos_out.y()/CLHEP::m << ","
                   << pos_out.z()/CLHEP::m << "\n";
+        sDiffrOut.flush();
+      }
     }
 
     fParticleChange.ProposeMomentumDirection(dir_out);
