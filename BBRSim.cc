@@ -32,9 +32,13 @@ int main(int argc, char** argv)
 
   auto runManager = G4RunManagerFactory::CreateRunManager();
 
-  // Use the crack diffraction geometry when running diffraction.mac.
+  // Use the crack diffraction geometry for diffraction*.mac and validation.mac.
+  G4String macName = argc > 1 ? G4String(argv[1]) : G4String("");
+  bool isBBR = macName.find("diffraction") != G4String::npos
+            || macName.find("validation")  != G4String::npos;
+
   G4VUserDetectorConstruction* detector;
-  if (argc > 1 && G4String(argv[1]).find("diffraction") != G4String::npos)
+  if (isBBR)
     detector = new BBRCrackDetectorConstruction();
   else
     detector = new DetectorConstruction();
@@ -53,9 +57,10 @@ int main(int argc, char** argv)
 
   runManager->SetUserInitialization(physicsList);
 
-  if (argc > 1 && G4String(argv[1]).find("diffraction") != G4String::npos) {
-    G4double gunZ = (G4String(argv[1]).find("crack2") != G4String::npos)
-                    ? 3.*mm : 0.;
+  if (isBBR) {
+    // validation.mac and diffraction.mac both start with gun at z=0 (crack1).
+    // diffraction_crack2.mac starts at z=3mm. /bbr/gun/setZ can change it mid-run.
+    G4double gunZ = macName.find("crack2") != G4String::npos ? 3.*mm : 0.;
     runManager->SetUserInitialization(new BBRDiffractionActionInit(gunZ));
   } else {
     runManager->SetUserInitialization(new ActionInitialization());
