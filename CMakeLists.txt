@@ -63,7 +63,8 @@ endforeach()
 set(BBRSim_SCRIPTS
     diffraction.mac
     diffraction_crack2.mac
-    verify.mac
+    validation.mac
+    verify_wrapper.mac
   )
 
 foreach(_script ${BBRSim_SCRIPTS})
