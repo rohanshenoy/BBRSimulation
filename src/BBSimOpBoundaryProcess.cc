@@ -99,6 +99,10 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     G4cout << "[BBR] diffraction events=" << sBBRTotal
            << " T_obs=" << G4double(sBBRTransmit)/sBBRTotal << G4endl;
 
+  G4ThreeVector dir_final;
+  G4ThreeVector pos_csv;
+  G4bool hasPos = false;
+
   if (transmitted) {
     // Transmit: sample outgoing direction + polarization (Wang eqs. 56-57).
     G4ThreeVector pol_out;
@@ -122,25 +126,9 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
         E_theta, E_phi, iwavePhi_deg, iwaveTheta_deg,
         exitCenter, theta_hat, phi_hat);
 
-    // Validation output — written only when TEM_waveguide volumes exist (not verify.mac).
-    // Single-threaded runs only (diffraction.mac sets /run/numberOfThreads 1).
-    {
-      static std::ofstream sDiffrOut;
-      static bool sHeaderWritten = false;
-      if (!sHeaderWritten) {
-        sHeaderWritten = true;
-        sDiffrOut.open("diffraction_output.csv");
-        sDiffrOut << "dir_x,dir_y,dir_z,pos_y_m,pos_z_m\n";
-      }
-      if (sDiffrOut.is_open()) {
-        sDiffrOut << dir_out.x()         << ","
-                  << dir_out.y()         << ","
-                  << dir_out.z()         << ","
-                  << pos_out.y()/CLHEP::m << ","
-                  << pos_out.z()/CLHEP::m << "\n";
-        sDiffrOut.flush();
-      }
-    }
+    dir_final = dir_out;
+    pos_csv   = pos_out;
+    hasPos    = true;
 
     fParticleChange.ProposeMomentumDirection(dir_out);
     fParticleChange.ProposePolarization(pol_out);
@@ -153,9 +141,36 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     if (pol_ref.mag() > 1e-30) pol_ref = pol_ref.unit();
     else                        pol_ref = phi_hat;
 
+    dir_final = dir_ref;
+
     fParticleChange.ProposeMomentumDirection(dir_ref);
     fParticleChange.ProposePolarization(pol_ref);
     fParticleChange.ProposeTrackStatus(fAlive);
+  }
+
+  // Validation CSV — written for every event (transmitted AND reflected).
+  // Single-threaded runs only (diffraction.mac sets /run/numberOfThreads 1).
+  {
+    static std::ofstream sDiffrOut;
+    static bool sHeaderWritten = false;
+    if (!sHeaderWritten) {
+      sHeaderWritten = true;
+      sDiffrOut.open("diffraction_output.csv");
+      sDiffrOut << "crack_id,transmitted,dir_x,dir_y,dir_z,pos_y_m,pos_z_m\n";
+    }
+    if (sDiffrOut.is_open()) {
+      sDiffrOut << datasetId << ","
+                << (transmitted ? 1 : 0) << ","
+                << dir_final.x() << ","
+                << dir_final.y() << ","
+                << dir_final.z() << ",";
+      if (hasPos)
+        sDiffrOut << pos_csv.y()/CLHEP::m << "," << pos_csv.z()/CLHEP::m;
+      else
+        sDiffrOut << ",";
+      sDiffrOut << "\n";
+      sDiffrOut.flush();
+    }
   }
 
   return &fParticleChange;
