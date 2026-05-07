@@ -86,60 +86,126 @@ in Chang Table 5.1 (roughly: a space is "open" if its smallest dimension is
   empirical loss-tangent-derived mean free path. Use `tan δ_Si = 1e-4`,
   `tan δ_Ge = 6e-5` as defaults (Chang §5.3.1.4).
 
-## Current repository state (2026-04-18)
+## Current repository state (2026-05-05)
 
-The repo is a thin BBR-oriented scaffold **on top of** the stock Geant4
-`optical/OpNovice2` example. This is honest — most of the physics in the
-list above is not yet implemented.
+The repo has progressed beyond the initial scaffold. The HFSS diffraction
+path is fully implemented and validated. A material framework (`BBRMaterials`,
+`vacuum_wg`) is in place. The next two pieces — material reflectance tables
+and the Planck emitter — are designed but not yet built.
 
-### BBR-specific additions
+### BBR-specific additions (implemented)
 
-- `BBRSim.cc` — new entry point. Registers `BBSimPhysics` after
-  `G4OpticalPhysics` so that `G4OpBoundaryProcess` already exists in the
-  optical-photon process manager.
+- `BBRSim.cc` — entry point. Routes to `BBRCrackDetectorConstruction` +
+  `BBRDiffractionActionInit` when the mac name contains `diffraction` or
+  `validation`; falls back to OpNovice2 geometry otherwise.
 - `include/BBSimPhysics.hh`, `src/BBSimPhysics.cc` — `G4VPhysicsConstructor`
-  subclass. `ConstructProcess()` locates `G4OpBoundaryProcess` in the
-  optical-photon process manager, removes it, wraps it in
-  `BBSimOpBoundaryProcess`, and re-registers the wrapper. Pattern follows
-  SuperSim's `CDMSRDecayPhysics::WrapRDMProcess()`.
+  that wraps `G4OpBoundaryProcess` with `BBSimOpBoundaryProcess`. Pattern
+  follows SuperSim's `CDMSRDecayPhysics::WrapRDMProcess()`.
 - `include/BBSimOpBoundaryProcess.hh`, `src/BBSimOpBoundaryProcess.cc` —
-  `G4WrapperProcess` subclass. **Currently a pure pass-through** whose
-  `PostStepDoIt` forwards verbatim to the wrapped `G4OpBoundaryProcess`.
-  This is the injection point where custom BBR boundary physics
-  (diffraction / vacuum→copper tabulated reflectance / HFSS interface)
-  will live.
-- `verify.mac` — fixed-seed regression macro. Output must be bit-identical
-  to an unwrapped run until the wrapper stops being a pass-through.
-- `CMakeLists.txt` — builds a single executable `BBRSim` from `BBRSim.cc`
-  plus everything in `src/`.
+  `G4WrapperProcess` subclass. Intercepts photons that enter a `vacuum_wg`
+  volume and routes them through `HandleDiffractionBoundary` (HFSS lookup).
+  Everything else falls through to the stock `G4OpBoundaryProcess`.
+- `include/BBRMaterials.hh` — static factory for `vacuum_wg` (a near-vacuum
+  material with RINDEX=1 used to flag crack volumes). Seed of the planned
+  `BBRMaterialDB`.
+- `include/BBRHFSSData.hh`, `src/BBRHFSSData.cc` — loads `far_field.csv` +
+  `waveguide.csv` for one HFSS dataset (indexed by `(IWavePhi, IWaveTheta)`
+  angle grid). Provides `GetTransmittance`, `SampleOutgoingDirection`,
+  `SampleExitPosition`. Runtime CDFs handle arbitrary polarization including
+  cross terms.
+- `include/BBRCrackLibrary.hh`, `src/BBRCrackLibrary.cc` — Meyer's singleton
+  that lazy-loads `BBRHFSSData` per dataset ID (= `vacuum_wg` volume name,
+  strip any `:N` suffix). Adding a new crack requires only placing a new
+  `vacuum_wg` volume — no code changes.
+- `include/BBRCrackDetectorConstruction.hh`, `src/BBRCrackDetectorConstruction.cc` —
+  world + two crack volumes: `InfParallelPlate_crack1_500GHz` (b=50 µm, z=0)
+  and `InfParallelPlate_crack2_500GHz` (b=100 µm, z=3 mm), both `vacuum_wg`.
+- `include/BBRDiffractionPGA.hh`, `src/BBRDiffractionPGA.cc` — fires one
+  optical photon per event at (−20 mm, 0, z) along +x; 500 GHz; polarization
+  (0, −1/√2, −1/√2). Gun Z exposed via `/bbr/gun/setZ <value> mm` messenger.
+- `include/BBRDiffractionActionInit.hh`, `src/BBRDiffractionActionInit.cc` —
+  wires `BBRDiffractionPGA` + stepping action; accepts `gunZ_mm` at construction.
+- `include/BBRDiffractionSteppingAction.hh`, `src/BBRDiffractionSteppingAction.cc` —
+  records transmitted photon position + crack ID to `diffraction_output.csv`.
+- `verify_wrapper.mac` — fixed-seed OpNovice2 regression (renamed from
+  `verify.mac`). Bit-identical output required before/after any wrapper change.
+- `diffraction.mac` — crack1 smoke test. T_obs ≈ 0.528, theory ≈ 0.527.
+- `diffraction_crack2.mac` — crack2 smoke test, gun at z=3 mm.
+- `validation.mac` — combined crack1 + crack2 in one session;
+  `/bbr/gun/setZ 3 mm` between runs. Output in `diffraction_output.csv`
+  with `crack_id` column. T_exp: crack1 ≈ 52.7%, crack2 ≈ 50.4%.
+- `plot_diffraction.py` — 3-panel plot: per-crack transmittance vs. event
+  count, exit-position distribution. Run with `conda run -n bbrsim python`.
 
-### Stock OpNovice2 pieces (still unchanged)
+### Stock OpNovice2 pieces (unchanged)
 
 - `OpNovice2.cc` — original entry point, retained for reference.
 - `DetectorConstruction`, `PrimaryGeneratorAction`, `SteppingAction`,
   `Run`, `HistoManager`, `TrackingAction`, and all three messenger
-  classes — unmodified OpNovice2. They shoot a single particle at a
-  configurable 1 m³ box inside a 10 m³ world and histogram Cerenkov /
-  scintillation / WLS / boundary-process outcomes.
+  classes — unmodified OpNovice2.
 - `.mac` files (`electron.mac`, `boundary.mac`, `fresnel.mac`, `wls.mac`,
   `coated.mac`, `complexRindex.mac`, `scint_by_particle.mac`,
-  `OpNovice2.mac`, `vis.mac`) — all stock OpNovice2 test cases. **None
+  `OpNovice2.mac`, `vis.mac`) — stock OpNovice2 test cases. **None
   exercise BBR physics.**
 
 ### What is explicitly *not* in the repo yet
 
-- No `ThermalSurface` / `GetBBSpecCDF` / `BBEvt` / `GeometricSurface` —
-  no way to emit a Planck-distributed photon from a surface today.
+- **No Planck emitter** — `BBRThermalPGA` / `BBRPlanckSampler` / `BBRThermalSurface`
+  not yet built. All current runs fire a monochromatic 500 GHz test photon.
+- **No material reflectance tables** — vacuum→OFHC Cu (Hagen-Rubens),
+  perfect absorber, perfect reflector not yet implemented. `BBR_REFLECTIVITY`
+  on `Material2`'s MPT is the planned injection point in `BBSimOpBoundaryProcess`.
 - No patched `G4OpBoundaryProcess` — `REFLECTIVITY` still lives only on
-  `G4OpticalSurface`.
+  `G4OpticalSurface` in stock Geant4 11.4.
 - No CADMesh integration, no `.STL` import.
-- No HFSS `.csv` loader, no bounded-volume handoff in `SteppingAction`.
-- No cryogenic-material optical-property database.
+- No cryogenic-material optical-property database beyond `vacuum_wg`.
+- No ROOT `TTree` output or leakage-current post-processing.
 - No BBR calibration geometry (BB source or mesh-TES detector model).
 
-Treat the repo as **scaffolding**: `BBSimOpBoundaryProcess` is the
-verified hook point, but the physics that will eventually live behind it
-is still to be written.
+## Implementation log
+
+Plans are stored in `~/.claude/plans/`. Completed plans are listed here for
+reference; do not re-implement work that is already in the git history.
+
+### [DONE] Pass-through wrapper skeleton
+`majestic-floating-reef.md` — `BBSimPhysics` + `BBSimOpBoundaryProcess`
+(pure pass-through). Verified bit-identical to unwrapped `G4OpBoundaryProcess`
+via `verify_wrapper.mac`.
+
+### [DONE] HFSS diffraction physics
+`scalable-wandering-shore.md` — `BBRHFSSData`, `HandleDiffractionBoundary`,
+coordinate-frame convention (HFSS ↔ Geant4 world). Validated T_obs ≈ 0.528
+at 500 GHz normal incidence (theory 52.7%).
+
+### [DONE] Generalized crack detection (`vacuum_wg` material)
+`dreamy-hopping-llama.md` — crack volumes identified by `vacuum_wg` material
+(not magic string). Volume name = HFSS dataset ID. Orientation extracted from
+touchable rotation at runtime.
+
+### [DONE] BBRCrackLibrary + crack2 geometry + combined validation macro
+`05072026-crack-library.md` (archived) — `BBRCrackLibrary` singleton owns
+dataset cache. crack2 placed at z=3 mm. `validation.mac` runs both cracks
+in one session via `/bbr/gun/setZ`. Per-crack CSV output + 3-panel plots.
+
+## Upcoming work
+
+Plans live in `docs/superpowers/plans/` (gitignored). Naming: `mmddyyyy-feature.md`.
+
+### [BLOCKED — awaiting Yen-Yung Chang's code] Material reflectance + Planck emitter
+`docs/superpowers/plans/05072026-reflectance-and-planck.md` —
+Full implementation plan covering both features. Decision: specular-only
+reflection (Rayleigh criterion: surface roughness << λ at trans-mm).
+
+**Reflectance scope:** `OFHC_Cu` material with Hagen-Rubens `BBR_REFLECTIVITY`
+table (20 log-spaced energies, 50 GHz–20 THz, σ=5.96×10⁹ S/m for RRR=100);
+`BBR_PerfectAbsorber`; `BBR_PerfectReflector`. Intercept in
+`BBSimOpBoundaryProcess::PostStepDoIt` before stock fall-through.
+New: `BBRReflectanceDetectorConstruction`, `reflectance.mac`.
+
+**Planck emitter scope:** `BBRPlanckSampler` (header-only CDF table for
+u³/(e^u−1)), `BBRThermalSurface` (POD struct), `BBRThermalPGA` (hardcoded
+4 K patch), `BBRPlanckActionInit`, `BBRPlanckDetectorConstruction`,
+`planck.mac`, `scripts/check_planck_spectrum.py`.
 
 ## Build
 
@@ -167,8 +233,12 @@ cd build
 
 Batch (explicit macro):
 ```bash
-./BBRSim electron.mac        # stock OpNovice2 test case
-./BBRSim verify.mac          # wrapper pass-through regression
+./BBRSim electron.mac          # stock OpNovice2 test case
+./BBRSim verify_wrapper.mac    # wrapper pass-through regression
+./BBRSim diffraction.mac       # crack1 HFSS diffraction smoke test
+./BBRSim validation.mac        # crack1 + crack2 combined validation
+./BBRSim reflectance.mac       # OFHC Cu reflectance smoke test (planned)
+./BBRSim planck.mac            # Planck emitter test, writes planck_output.csv (planned)
 ```
 
 The executable is `BBRSim`, **not** `OpNovice2`.
@@ -176,11 +246,10 @@ The executable is `BBRSim`, **not** `OpNovice2`.
 ## Verification discipline
 
 `BBSimOpBoundaryProcess` is a load-bearing hook: every subsequent piece of
-BBR physics will be added behind it. While it is a pass-through, the
-guarantee is **bit-identical output** against an unwrapped `G4OpBoundaryProcess`
-run. `verify.mac` is the regression harness — run with fixed seeds and
-compare histograms before merging anything that touches the wrapper or
-`BBSimPhysics::WrapOpBoundaryProcess`.
+BBR physics will be added behind it. `verify_wrapper.mac` is the regression
+harness — run with fixed seeds and compare histograms before merging anything
+that touches the wrapper or `BBSimPhysics::WrapOpBoundaryProcess`. Geometries
+without `vacuum_wg` volumes fall through identically to stock `G4OpBoundaryProcess`.
 
 When new physics is added behind the wrapper (e.g. a tabulated vacuum→Cu
 reflectance or an HFSS waveguide handoff), it must be selectable via a
@@ -218,3 +287,6 @@ messenger or surface flag so the pass-through path remains testable.
   onto `G4MaterialPropertiesTable`) is upstream-facing work; any local
   implementation should be isolated so it can be turned into a Geant4
   PR cleanly.
+- Python analysis scripts (`plot_diffraction.py`, future `plot_planck.py`)
+  must be run as `conda run -n bbrsim python <script>`. Plain `python3`
+  does not have the required packages even if they appear installed.
