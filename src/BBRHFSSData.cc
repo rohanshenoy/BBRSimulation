@@ -213,7 +213,6 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
 
   // Runtime CDF: combined power |E_theta·F₀ + E_phi·F₁|² per far-field point,
   // weighted by sinT to account for solid angle dΩ = sinT·dT·dPhi.
-  // Without sinT the poles (T=0°,180°) are overweighted by the 524 Phi rows
   // that all map to the same physical direction.
   std::vector<G4double> cdf(N);
   G4double sum = 0.;
@@ -240,7 +239,6 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
   G4double sinT = std::sin(T_rad), cosT = std::cos(T_rad);
   G4double sinP = std::sin(P_rad), cosP = std::cos(P_rad);
 
-  // World-frame outgoing direction (T=90°,P=0° → normal_hat; verified against CSV centroid).
   G4ThreeVector dir_out = sinT*cosP*normal_hat + sinT*sinP*theta_hat + cosT*phi_hat;
 
   // Outgoing spherical basis vectors at (T,P).
