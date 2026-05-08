@@ -1,5 +1,6 @@
 #include "ThermalSurface.hh"
 #include "globals.hh"
+#include "G4Exception.hh"
 #include "Randomize.hh"
 #include "G4SystemOfUnits.hh"
 #include <cmath>
