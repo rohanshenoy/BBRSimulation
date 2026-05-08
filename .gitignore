@@ -3,3 +3,4 @@ build/
 *.root
 transcribe_meeting.py
 scripts/
+.worktrees/
