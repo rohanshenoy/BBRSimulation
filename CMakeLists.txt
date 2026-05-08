@@ -65,6 +65,7 @@ set(BBRSim_SCRIPTS
     diffraction_crack2.mac
     validation.mac
     verify_wrapper.mac
+    reflectance.mac
   )
 
 foreach(_script ${BBRSim_SCRIPTS})
