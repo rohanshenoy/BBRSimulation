@@ -26,6 +26,11 @@ G4VParticleChange* BBSimOpBoundaryProcess::PostStepDoIt(const G4Track& aTrack,
   const G4Material* mat2 = aStep.GetPostStepPoint()->GetMaterial();
   if (mat2 && mat2->GetName() == "vacuum_wg")
     return HandleDiffractionBoundary(aTrack, aStep);
+  if (mat2) {
+    G4MaterialPropertiesTable* mpt = mat2->GetMaterialPropertiesTable();
+    if (mpt && mpt->GetProperty("REFLECTIVITY"))
+      return HandleReflectanceBoundary(aTrack, aStep);
+  }
   return pRegProcess->PostStepDoIt(aTrack, aStep);
 }
 
@@ -172,6 +177,62 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
       sDiffrOut.flush();
     }
   }
+
+  return &fParticleChange;
+}
+
+// ---------------------------------------------------------------------------
+
+G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
+    const G4Track& aTrack, const G4Step& aStep)
+{
+  fParticleChange.Initialize(aTrack);
+
+  // Read REFLECTIVITY from Material2's MPT (YYC pattern, adapted for G4 11.4).
+  const G4Material*          mat2 = aStep.GetPostStepPoint()->GetMaterial();
+  G4MaterialPropertiesTable* mpt  = mat2->GetMaterialPropertiesTable();
+  G4MaterialPropertyVector*  rvec =
+      mpt->GetProperty("REFLECTIVITY");
+  G4double E = aTrack.GetKineticEnergy();   // YYC: thePhotonMomentum
+  G4double R = rvec->Value(E);              // YYC: PropertyPointer->Value(thePhotonMomentum)
+
+  // Surface normal pointing away from mat2 back into the vacuum (opposes k).
+  // YYC: theGlobalNormal (computed internally by G4OpBoundaryProcess).
+  const G4VTouchable*      postTouch = aStep.GetPostStepPoint()->GetTouchable();
+  const G4AffineTransform& postXF   = postTouch->GetHistory()->GetTopTransform();
+  G4ThreeVector posLocal  = postXF.TransformPoint(
+                                aStep.GetPostStepPoint()->GetPosition());
+  G4ThreeVector normLocal = postTouch->GetSolid()->SurfaceNormal(posLocal);
+  G4ThreeVector nhat      = postXF.InverseTransformAxis(normLocal);
+  if (nhat.dot(aTrack.GetMomentumDirection()) > 0.) nhat = -nhat;
+
+  static G4int sN = 0, sAbs = 0;
+  ++sN;
+
+  // YYC dispatch: rand > R → DoAbsorption(); rand <= R → DoReflection() specular.
+  G4double rand = G4UniformRand();
+  if (rand > R) {
+    ++sAbs;
+    fParticleChange.ProposeLocalEnergyDeposit(E);
+    fParticleChange.ProposeTrackStatus(fStopAndKill);
+  } else {
+    // k_ref = k − 2(k·n)n;  p_ref = p − 2(p·n)n
+    const G4ThreeVector& k = aTrack.GetMomentumDirection(); // YYC: OldMomentum
+    const G4ThreeVector& p = aTrack.GetPolarization();      // YYC: OldPolarization
+    G4ThreeVector k_ref = (k - 2.*k.dot(nhat)*nhat).unit();
+    G4ThreeVector p_ref =  p - 2.*p.dot(nhat)*nhat;
+    if (p_ref.mag() > 1e-30) p_ref = p_ref.unit();
+    else                      p_ref = k_ref.cross(nhat).unit();
+    fParticleChange.ProposeMomentumDirection(k_ref);
+    fParticleChange.ProposePolarization(p_ref);
+    fParticleChange.ProposeTrackStatus(fAlive);
+  }
+
+  if (sN % 1000 == 0)
+    G4cout << "[BBR] reflectance mat=" << mat2->GetName()
+           << " N=" << sN
+           << " A_obs=" << G4double(sAbs)/sN
+           << " R_theory=" << R << G4endl;
 
   return &fParticleChange;
 }
