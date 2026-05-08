@@ -6,6 +6,8 @@
 #include "BBRCrackDetectorConstruction.hh"
 #include "BBRReflectanceDetectorConstruction.hh"
 #include "BBRDiffractionActionInit.hh"
+#include "BBRPlanckActionInit.hh"
+#include "BBRPlanckDetectorConstruction.hh"
 #include "BBSimPhysics.hh"
 #include "DetectorConstruction.hh"
 #include "FTFP_BERT.hh"
@@ -38,10 +40,12 @@ int main(int argc, char** argv)
   bool isBBR            = macName.find("diffraction") != G4String::npos
                        || macName.find("validation")  != G4String::npos;
   bool isReflectance    = macName.find("reflectance") != G4String::npos;
+  bool isPlanck         = macName.find("planck")      != G4String::npos;
 
   G4VUserDetectorConstruction* detector;
   if      (isBBR)         detector = new BBRCrackDetectorConstruction();
   else if (isReflectance) detector = new BBRReflectanceDetectorConstruction();
+  else if (isPlanck)      detector = new BBRPlanckDetectorConstruction();
   else                    detector = new DetectorConstruction();
   runManager->SetUserInitialization(detector);
 
@@ -62,8 +66,9 @@ int main(int argc, char** argv)
     G4double gunZ = macName.find("crack2") != G4String::npos ? 3.*mm : 0.;
     runManager->SetUserInitialization(new BBRDiffractionActionInit(gunZ));
   } else if (isReflectance) {
-    // Gun default: (−20 mm, 0, 0) along +x — fires at Cu face at x=0.
     runManager->SetUserInitialization(new BBRDiffractionActionInit(0.));
+  } else if (isPlanck) {
+    runManager->SetUserInitialization(new BBRPlanckActionInit());
   } else {
     runManager->SetUserInitialization(new ActionInitialization());
   }
