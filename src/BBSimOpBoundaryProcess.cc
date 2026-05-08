@@ -23,9 +23,17 @@ BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
 G4VParticleChange* BBSimOpBoundaryProcess::PostStepDoIt(const G4Track& aTrack,
                                                         const G4Step& aStep)
 {
+  const G4Material* mat1 = aStep.GetPreStepPoint()->GetMaterial();
   const G4Material* mat2 = aStep.GetPostStepPoint()->GetMaterial();
-  if (mat2 && mat2->GetName() == "vacuum_wg")
-    return HandleDiffractionBoundary(aTrack, aStep);
+  if (mat2 && mat2->GetName() == "vacuum_wg") {
+    // Skip diffraction when bouncing back out of a BBR_REFLECTIVITY material
+    // (e.g. Cu → vacuum_wg return step after specular reflection).  Let the
+    // stock process handle that step; equal RINDEX gives full transmission.
+    bool mat1IsReflector = mat1 && mat1->GetMaterialPropertiesTable()
+                           && mat1->GetMaterialPropertiesTable()->GetProperty("REFLECTIVITY");
+    if (!mat1IsReflector)
+      return HandleDiffractionBoundary(aTrack, aStep);
+  }
   if (mat2) {
     G4MaterialPropertiesTable* mpt = mat2->GetMaterialPropertiesTable();
     if (mpt && mpt->GetProperty("REFLECTIVITY"))
