@@ -1,0 +1,16 @@
+# reflectance.mac — smoke test: 500 GHz photon, normal incidence on OFHC Cu.
+# R_theory(500 GHz, RRR=100) ≈ 0.99981  →  A_theory ≈ 1.94e-4.
+# With 1000 events, ~0.2 absorptions expected.
+# Check: no crash; [BBR] reflectance line printed with R_theory in [0.9997, 1.0].
+
+/control/verbose 0
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+
+/run/numberOfThreads 1
+/run/initialize
+
+/random/setSeeds 1234 5678
+
+/run/beamOn 1000
