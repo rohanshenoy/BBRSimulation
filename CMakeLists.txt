@@ -66,6 +66,7 @@ set(BBRSim_SCRIPTS
     validation.mac
     verify_wrapper.mac
     reflectance.mac
+    planck.mac
   )
 
 foreach(_script ${BBRSim_SCRIPTS})
