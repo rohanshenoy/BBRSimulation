@@ -26,6 +26,8 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
  private:
   G4VParticleChange* HandleDiffractionBoundary(const G4Track& aTrack,
                                                const G4Step& aStep);
+  G4VParticleChange* HandleReflectanceBoundary(const G4Track& aTrack,
+                                               const G4Step& aStep);
 
   G4OpBoundaryProcess* GetWrappedProcess() const;
 
