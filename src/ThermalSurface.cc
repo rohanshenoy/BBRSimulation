@@ -41,7 +41,7 @@ BBEvt ThermalSurface::GenEvt()
   // ---- energy: inverse CDF with quadratic interpolation (YYC exact) ----
   G4double BBSpecProbBelow = G4UniformRand();
   G4int    nCDF            = (G4int)BBSpecCDF.cdf.size();
-  int      idx             = 0;
+  int      idx             = nCDF - 2;
   for (int i = 0; i < nCDF; ++i) {
     if (BBSpecCDF.cdf[i] > BBSpecProbBelow) { idx = i - 1; break; }
   }
@@ -59,6 +59,10 @@ BBEvt ThermalSurface::GenEvt()
     thisEvt.energy = BBSpecCDF.x[idx] - c / b;
 
   // ---- surface selection: area-weighted ----
+  if (surfaces.empty()) {
+    G4Exception("ThermalSurface::GenEvt", "BBR001", FatalException,
+                "No surfaces added. Call AddBoxSurface before GenEvt.");
+  }
   G4double totalArea  = 0.;
   int      N_surfaces = (int)surfaces.size();
   for (int i = 0; i < N_surfaces; ++i) totalArea += surfaces[i].area;
