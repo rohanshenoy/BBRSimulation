@@ -30,7 +30,7 @@ data = data[data > 0]
 u    = data / kT
 
 # Histogram in u
-n_bins = 100
+n_bins = 30
 counts, edges = np.histogram(u, bins=n_bins, range=(0, 20))
 centers = 0.5 * (edges[:-1] + edges[1:])
 
