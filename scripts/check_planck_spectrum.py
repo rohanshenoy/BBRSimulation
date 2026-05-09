@@ -20,18 +20,12 @@ k_eV = 8.6173e-5  # eV/K
 T    = 4.0         # K
 kT   = k_eV * T   # eV
 
-df   = pd.read_csv(CSV, on_bad_lines='skip')
+df = pd.read_csv(CSV, on_bad_lines='skip')
 df['energy_eV'] = pd.to_numeric(df['energy_eV'], errors='coerce')
 df['n_reflect'] = pd.to_numeric(df['n_reflect'], errors='coerce')
 df = df.dropna(subset=['energy_eV', 'n_reflect'])
-# n_reflect==1 selects the first boundary event per photon track = emitted energy.
-# If n_reflect is a global counter (not per-track), fall back to first row per event_id.
-if (df['n_reflect'] == 1).sum() < 2:
-    first = df.groupby('event_id', sort=False).first().reset_index()
-    data = first['energy_eV'].dropna().values
-else:
-    data = df[df['n_reflect'] == 1]['energy_eV'].values
-# Drop unphysical energies (corrupted rows)
+# n_reflect==1 is the first boundary crossing per track — captures emitted energy
+data = df[df['n_reflect'] == 1]['energy_eV'].values
 data = data[data > 0]
 u    = data / kT
 
