@@ -4,3 +4,4 @@ build/
 transcribe_meeting.py
 docs/superpowers/
 scripts/
+.worktrees/

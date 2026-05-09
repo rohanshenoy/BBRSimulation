@@ -11,7 +11,6 @@
 #include "Randomize.hh"
 
 #include <cmath>
-#include <fstream>
 
 BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
   : G4WrapperProcess(name)
@@ -151,31 +150,6 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     fParticleChange.ProposeMomentumDirection(dir_ref);
     fParticleChange.ProposePolarization(pol_ref);
     fParticleChange.ProposeTrackStatus(fAlive);
-  }
-
-  // Validation CSV — written for every event (transmitted AND reflected).
-  // Single-threaded runs only (diffraction.mac sets /run/numberOfThreads 1).
-  {
-    static std::ofstream sDiffrOut;
-    static bool sHeaderWritten = false;
-    if (!sHeaderWritten) {
-      sHeaderWritten = true;
-      sDiffrOut.open("diffraction_output.csv");
-      sDiffrOut << "crack_id,transmitted,dir_x,dir_y,dir_z,pos_y_m,pos_z_m\n";
-    }
-    if (sDiffrOut.is_open()) {
-      sDiffrOut << datasetId << ","
-                << (transmitted ? 1 : 0) << ","
-                << dir_final.x() << ","
-                << dir_final.y() << ","
-                << dir_final.z() << ",";
-      if (hasPos)
-        sDiffrOut << pos_csv.y()/CLHEP::m << "," << pos_csv.z()/CLHEP::m;
-      else
-        sDiffrOut << ",";
-      sDiffrOut << "\n";
-      sDiffrOut.flush();
-    }
   }
 
   return &fParticleChange;

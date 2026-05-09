@@ -22,14 +22,15 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4OpBoundaryProcessStatus GetStatus() const;
   // Forward SetInvokeSD to the wrapped G4OpBoundaryProcess (no getter in G4 API).
   void SetInvokeSD(G4bool flag);
+  // Public accessor so external observers (e.g. BBRTestSteppingAction) can
+  // query the inner process status directly.
+  G4OpBoundaryProcess* GetWrappedProcess() const;
 
  private:
   G4VParticleChange* HandleDiffractionBoundary(const G4Track& aTrack,
                                                const G4Step& aStep);
   G4VParticleChange* HandleReflectanceBoundary(const G4Track& aTrack,
                                                const G4Step& aStep);
-
-  G4OpBoundaryProcess* GetWrappedProcess() const;
 
   G4ParticleChange fParticleChange;
 };
