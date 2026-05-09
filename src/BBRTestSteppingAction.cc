@@ -8,6 +8,7 @@
 #include "G4Step.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4Track.hh"
+#include <cmath>
 #include <iomanip>
 
 namespace {
@@ -37,6 +38,7 @@ BBRTestSteppingAction::BBRTestSteppingAction()
   fOut.open("test_output.csv");
   fOut << "event_id,x_mm,y_mm,z_mm,energy_eV,"
           "px_pre,py_pre,pz_pre,px_post,py_post,pz_post,"
+          "theta_in_deg,phi_in_deg,"
           "vol_pre,mat_pre,vol_post,mat_post,status,n_reflect\n";
 }
 
@@ -65,6 +67,13 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
 
   G4int eventId = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
 
+  const G4StepPoint* pre  = step->GetPreStepPoint();
+  const G4StepPoint* post = step->GetPostStepPoint();
+  G4ThreeVector      pPre = pre->GetMomentumDirection();
+
+  // Skip StepTooSmall steps — pre-step momentum direction is undefined
+  if (std::abs(pPre.x()) > 1.1 || std::abs(pPre.y()) > 1.1 || std::abs(pPre.z()) > 1.1) return;
+
   // Per-track reflection counter — reset when either event or track changes
   if (eventId != fCurrentEventID || track->GetTrackID() != fCurrentTrackID) {
     fCurrentEventID = eventId;
@@ -73,14 +82,8 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   }
   ++fNReflect;
 
-  const G4StepPoint* pre  = step->GetPreStepPoint();
-  const G4StepPoint* post = step->GetPostStepPoint();
   G4ThreeVector      pos  = post->GetPosition();
-  G4ThreeVector      pPre = pre->GetMomentumDirection();
   G4ThreeVector      pPost= post->GetMomentumDirection();
-
-  // Skip StepTooSmall steps — pre-step momentum direction is undefined
-  if (std::abs(pPre.x()) > 1.1 || std::abs(pPre.y()) > 1.1 || std::abs(pPre.z()) > 1.1) return;
 
   G4String volPre  = pre->GetPhysicalVolume()
                        ? pre->GetPhysicalVolume()->GetName()  : "none";
@@ -92,12 +95,18 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
                        ? post->GetMaterial()->GetName()        : "none";
   G4String status  = fBoundary ? StatusStr(fBoundary->GetStatus()) : "unknown";
 
+  // theta: polar angle of incidence from the +x wall/crack normal (0° = head-on)
+  // phi:   azimuthal angle in the yz-plane
+  G4double theta_in = std::acos(std::abs(pPre.x())) * 180. / CLHEP::pi;
+  G4double phi_in   = std::atan2(pPre.y(), pPre.z()) * 180. / CLHEP::pi;
+
   fOut << eventId << ","
        << std::fixed << std::setprecision(6)
        << pos.x()/mm << "," << pos.y()/mm << "," << pos.z()/mm << ","
        << pre->GetKineticEnergy()/eV << ","
        << pPre.x()  << "," << pPre.y()  << "," << pPre.z()  << ","
        << pPost.x() << "," << pPost.y() << "," << pPost.z() << ","
+       << theta_in << "," << phi_in << ","
        << volPre << "," << matPre << ","
        << volPost << "," << matPost << ","
        << status << "," << fNReflect << "\n";
