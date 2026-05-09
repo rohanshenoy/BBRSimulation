@@ -1,0 +1,6 @@
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/random/setSeeds 9999 8888
+/run/initialize
+/run/beamOn 50000

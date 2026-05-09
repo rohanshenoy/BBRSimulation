@@ -61,12 +61,7 @@ foreach(_script ${OpNovice2_SCRIPTS})
 endforeach()
 
 set(BBRSim_SCRIPTS
-    diffraction.mac
-    diffraction_crack2.mac
-    validation.mac
-    verify_wrapper.mac
-    reflectance.mac
-    planck.mac
+    test.mac
   )
 
 foreach(_script ${BBRSim_SCRIPTS})
