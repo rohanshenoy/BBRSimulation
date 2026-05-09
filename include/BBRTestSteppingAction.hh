@@ -15,6 +15,7 @@ private:
   std::ofstream        fOut;
   G4OpBoundaryProcess* fBoundary       = nullptr;
   G4int                fCurrentTrackID = -1;
+  G4int                fCurrentEventID = -1;
   G4int                fNReflect       = 0;
 };
 #endif
