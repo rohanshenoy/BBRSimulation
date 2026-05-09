@@ -63,8 +63,11 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
     }
   }
 
-  // Per-track reflection counter
-  if (track->GetTrackID() != fCurrentTrackID) {
+  G4int eventId = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
+
+  // Per-track reflection counter — reset when either event or track changes
+  if (eventId != fCurrentEventID || track->GetTrackID() != fCurrentTrackID) {
+    fCurrentEventID = eventId;
     fCurrentTrackID = track->GetTrackID();
     fNReflect = 0;
   }
@@ -76,6 +79,9 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   G4ThreeVector      pPre = pre->GetMomentumDirection();
   G4ThreeVector      pPost= post->GetMomentumDirection();
 
+  // Skip StepTooSmall steps — pre-step momentum direction is undefined
+  if (std::abs(pPre.x()) > 1.1 || std::abs(pPre.y()) > 1.1 || std::abs(pPre.z()) > 1.1) return;
+
   G4String volPre  = pre->GetPhysicalVolume()
                        ? pre->GetPhysicalVolume()->GetName()  : "none";
   G4String matPre  = pre->GetMaterial()
@@ -85,8 +91,6 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   G4String matPost = post->GetMaterial()
                        ? post->GetMaterial()->GetName()        : "none";
   G4String status  = fBoundary ? StatusStr(fBoundary->GetStatus()) : "unknown";
-
-  G4int eventId = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
 
   fOut << eventId << ","
        << std::fixed << std::setprecision(6)
