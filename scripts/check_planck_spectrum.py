@@ -1,25 +1,38 @@
 """
-Validate that planck_output.csv contains energies drawn from the Planck photon-number
+Validate that test_output.csv contains energies drawn from the Planck photon-number
 spectrum at 4 K.  The number spectrum B ∝ ν²/(e^{hν/kT}−1) peaks at u = E/kT ≈ 1.5936.
 
 Usage:
-    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/planck_output.csv]
+    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/test_output.csv]
 """
 
 import sys
 import numpy as np
+import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-CSV = sys.argv[1] if len(sys.argv) > 1 else "build/planck_output.csv"
+CSV = sys.argv[1] if len(sys.argv) > 1 else "build/test_output.csv"
 
 # Physical constants
 k_eV = 8.6173e-5  # eV/K
 T    = 4.0         # K
 kT   = k_eV * T   # eV
 
-data = np.loadtxt(CSV, skiprows=1)
+df   = pd.read_csv(CSV, on_bad_lines='skip')
+df['energy_eV'] = pd.to_numeric(df['energy_eV'], errors='coerce')
+df['n_reflect'] = pd.to_numeric(df['n_reflect'], errors='coerce')
+df = df.dropna(subset=['energy_eV', 'n_reflect'])
+# n_reflect==1 selects the first boundary event per photon track = emitted energy.
+# If n_reflect is a global counter (not per-track), fall back to first row per event_id.
+if (df['n_reflect'] == 1).sum() < 2:
+    first = df.groupby('event_id', sort=False).first().reset_index()
+    data = first['energy_eV'].dropna().values
+else:
+    data = df[df['n_reflect'] == 1]['energy_eV'].values
+# Drop unphysical energies (corrupted rows)
+data = data[data > 0]
 u    = data / kT
 
 # Histogram in u
