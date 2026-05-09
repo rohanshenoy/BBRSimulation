@@ -32,7 +32,7 @@ G4VPhysicalVolume* BBRTestDetectorConstruction::Construct()
     static const char* kId = "InfParallelPlate_crack1Rohan_500GHz";
     auto* solid   = new G4Box(kId, 0.5*mm, 5.1*mm, 0.026*mm);
     auto* logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
-    new G4PVPlacement(nullptr, G4ThreeVector(-1.499*mm, 0., 0.),
+    new G4PVPlacement(nullptr, G4ThreeVector(-1.5*mm, 0., 0.),
                       logical, kId, cuLV, false, 0, true);
   }
 
@@ -41,7 +41,7 @@ G4VPhysicalVolume* BBRTestDetectorConstruction::Construct()
     static const char* kId = "InfParallelPlate_crack2_500GHz";
     auto* solid   = new G4Box(kId, 0.751*mm, 5.1*mm, 0.051*mm);
     auto* logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
-    new G4PVPlacement(nullptr, G4ThreeVector(-1.248*mm, 0., 3.*mm),
+    new G4PVPlacement(nullptr, G4ThreeVector(-1.249*mm, 0., 3.*mm),
                       logical, kId, cuLV, false, 0, true);
   }
 

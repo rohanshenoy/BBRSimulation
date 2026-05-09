@@ -3,4 +3,4 @@
 /tracking/verbose 0
 /random/setSeeds 9999 8888
 /run/initialize
-/run/beamOn 50000
+/run/beamOn 5000000
