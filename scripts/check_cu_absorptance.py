@@ -61,7 +61,7 @@ A_theory_planck = num / den
 
 ratio = A_obs / A_theory_planck
 lo, hi = 0.3, 3.0
-passed = lo <= ratio <= hi
+passed = lo < ratio < hi
 
 print(f"A_theory (Planck-weighted 4K) = {A_theory_planck:.6e}")
 print(f"A_obs                         = {A_obs:.6e}")
