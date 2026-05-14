@@ -52,7 +52,7 @@ ax.bar(centers, counts, width=1.0, alpha=0.75, color="steelblue")
 ax.set_yscale("log")
 ax.set_xlabel("n_reflect (reflections per track)")
 ax.set_ylabel("Counts (log scale)")
-ax.set_title(f"Per-track reflection count  (N_tracks={len(df['n_reflect'][df['n_reflect']==1])})")
+ax.set_title(f"Per-track reflection count  (N_tracks={len(df)})")
 fig.tight_layout()
 out = "nreflect_distribution.png"
 fig.savefig(out, dpi=150)
