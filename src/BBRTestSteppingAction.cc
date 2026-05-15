@@ -104,8 +104,10 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
        << std::fixed << std::setprecision(6)
        << pos.x()/mm << "," << pos.y()/mm << "," << pos.z()/mm << ","
        << pre->GetKineticEnergy()/eV << ","
+       << std::setprecision(10)
        << pPre.x()  << "," << pPre.y()  << "," << pPre.z()  << ","
        << pPost.x() << "," << pPost.y() << "," << pPost.z() << ","
+       << std::setprecision(6)
        << theta_in << "," << phi_in << ","
        << volPre << "," << matPre << ","
        << volPost << "," << matPost << ","
