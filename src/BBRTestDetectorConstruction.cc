@@ -27,21 +27,22 @@ G4VPhysicalVolume* BBRTestDetectorConstruction::Construct()
   new G4PVPlacement(nullptr, G4ThreeVector(2.*mm, 0., 0.),
                     cuLV, "CuSlab", worldLV, false, 0, true);
 
-  // crack1: daughter of CuSlab in Cu local frame
+  // crack1: full-span slab daughter so HFSS-transmitted photons exit into world at x=4mm.
+  // halfX=2mm matches Cu slab halfX; front face at x=0, back face at x=4mm.
   {
     static const char* kId = "InfParallelPlate_crack1Rohan_500GHz";
-    auto* solid   = new G4Box(kId, 0.5*mm, 5.1*mm, 0.026*mm);
+    auto* solid   = new G4Box(kId, 2.*mm, 5.1*mm, 0.026*mm);
     auto* logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
-    new G4PVPlacement(nullptr, G4ThreeVector(-1.5*mm, 0., 0.),
+    new G4PVPlacement(nullptr, G4ThreeVector(0., 0., 0.),
                       logical, kId, cuLV, false, 0, true);
   }
 
-  // crack2: daughter of CuSlab in Cu local frame
+  // crack2: full-span slab daughter (same reasoning as crack1).
   {
     static const char* kId = "InfParallelPlate_crack2_500GHz";
-    auto* solid   = new G4Box(kId, 0.751*mm, 5.1*mm, 0.051*mm);
+    auto* solid   = new G4Box(kId, 2.*mm, 5.1*mm, 0.051*mm);
     auto* logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
-    new G4PVPlacement(nullptr, G4ThreeVector(-1.249*mm, 0., 3.*mm),
+    new G4PVPlacement(nullptr, G4ThreeVector(0., 0., 3.*mm),
                       logical, kId, cuLV, false, 0, true);
   }
 

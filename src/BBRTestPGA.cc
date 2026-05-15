@@ -10,6 +10,14 @@
 // /bbr/thermal/setT (which updates the master-thread instance) propagates
 // to all workers before /run/beamOn starts.
 G4double BBRTestPGA::fTemperature_K = 4.0;
+G4bool   BBRTestPGA::fGunMode       = false;
+G4double BBRTestPGA::fGunPosX_mm    = -20.0;
+G4double BBRTestPGA::fGunPosY_mm    =   0.0;
+G4double BBRTestPGA::fGunPosZ_mm    =   0.0;
+G4double BBRTestPGA::fGunDirX       =   1.0;
+G4double BBRTestPGA::fGunDirY       =   0.0;
+G4double BBRTestPGA::fGunDirZ       =   0.0;
+G4double BBRTestPGA::fGunEnergy_eV  =   2.07e-3;  // 500 GHz
 
 BBRTestPGA::BBRTestPGA()
   : G4VUserPrimaryGeneratorAction()
@@ -35,10 +43,43 @@ BBRTestPGA::BBRTestPGA()
             .SetParameterName("T", false)
             .SetRange("T > 0")
             .SetDefaultValue("4.0");
+
+  fGunMessenger = std::make_unique<G4GenericMessenger>(this, "/bbr/gun/", "Fixed gun settings");
+  fGunMessenger->DeclareProperty("mode",      fGunMode,      "true = fixed gun, false = Planck")
+               .SetDefaultValue("false");
+  fGunMessenger->DeclareProperty("posX",      fGunPosX_mm,   "Gun X position [mm]")
+               .SetDefaultValue("-20.0");
+  fGunMessenger->DeclareProperty("posY",      fGunPosY_mm,   "Gun Y position [mm]")
+               .SetDefaultValue("0.0");
+  fGunMessenger->DeclareProperty("posZ",      fGunPosZ_mm,   "Gun Z position [mm]")
+               .SetDefaultValue("0.0");
+  fGunMessenger->DeclareProperty("dirX",      fGunDirX,      "Gun direction X component")
+               .SetDefaultValue("1.0");
+  fGunMessenger->DeclareProperty("dirY",      fGunDirY,      "Gun direction Y component")
+               .SetDefaultValue("0.0");
+  fGunMessenger->DeclareProperty("dirZ",      fGunDirZ,      "Gun direction Z component")
+               .SetDefaultValue("0.0");
+  fGunMessenger->DeclareProperty("energy_eV", fGunEnergy_eV, "Photon energy [eV]")
+               .SetDefaultValue("2.07e-3");
 }
 
 void BBRTestPGA::GeneratePrimaries(G4Event* event)
 {
+  if (fGunMode) {
+    G4ThreeVector pos(fGunPosX_mm*mm, fGunPosY_mm*mm, fGunPosZ_mm*mm);
+    G4ThreeVector dir(fGunDirX, fGunDirY, fGunDirZ);
+    dir = dir.unit();
+    G4ThreeVector perp = dir.orthogonal().unit();
+    G4double phi = G4UniformRand() * CLHEP::twopi;
+    G4ThreeVector pol = std::cos(phi)*perp + std::sin(phi)*dir.cross(perp).unit();
+    fGun->SetParticlePosition(pos);
+    fGun->SetParticleMomentumDirection(dir);
+    fGun->SetParticleEnergy(fGunEnergy_eV * eV);
+    fGun->SetParticlePolarization(pol);
+    fGun->GeneratePrimaryVertex(event);
+    return;
+  }
+
   // Re-initialize CDF if temperature changed via messenger
   if (fSurface.temp != fTemperature_K) {
     fSurface.temp = fTemperature_K;
