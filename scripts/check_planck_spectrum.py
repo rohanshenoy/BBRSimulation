@@ -1,11 +1,13 @@
 """
 Validate that test_output.csv contains energies drawn from the Planck photon-number
-spectrum at 4 K.  The number spectrum B ∝ ν²/(e^{hν/kT}−1) peaks at u = E/kT ≈ 1.5936.
+spectrum at the given temperature.  The number spectrum B ∝ ν²/(e^{hν/kT}−1) peaks
+at u = E/kT ≈ 1.5936.
 
 Usage:
-    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/test_output.csv]
+    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/test_output.csv] [--temp T]
 """
 
+import argparse
 import sys
 import numpy as np
 import pandas as pd
@@ -13,11 +15,16 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-CSV = sys.argv[1] if len(sys.argv) > 1 else "build/test_output.csv"
+parser = argparse.ArgumentParser()
+parser.add_argument("csv", nargs="?", default="build/test_output.csv")
+parser.add_argument("--temp", type=float, default=4.0, help="Emitter temperature in K")
+args = parser.parse_args()
+
+CSV = args.csv
+T   = args.temp
 
 # Physical constants
 k_eV = 8.6173e-5  # eV/K
-T    = 4.0         # K
 kT   = k_eV * T   # eV
 
 df = pd.read_csv(CSV, on_bad_lines='skip')
@@ -54,7 +61,7 @@ ax.axvline(u_peak_obs, color="tab:blue", linestyle="--", label=f"Obs peak u={u_p
 ax.axvline(u_peak_theory, color="tab:red", linestyle="-", label=f"Theory peak u={u_peak_theory:.4f}")
 ax.set_xlabel("u = E / kT")
 ax.set_ylabel("Counts")
-ax.set_title(f"Planck photon-number spectrum at T=4 K  (ratio={ratio:.3f})")
+ax.set_title(f"Planck photon-number spectrum at T={T:.4g} K  (ratio={ratio:.3f})")
 ax.legend()
 fig.tight_layout()
 out = "planck_spectrum_check.png"
