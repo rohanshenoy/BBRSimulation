@@ -30,7 +30,7 @@ BBRTestPGA::BBRTestPGA()
   // Energy range 50 GHz–20 THz in eV (bare eV, not Geant4 internal units)
   fSurface.BBSpecCDF.initialize(fSurface.temp, 4.14e-5, 2.07e-2);
 
-  fMessenger = new G4GenericMessenger(this, "/bbr/thermal/", "Thermal emitter settings");
+  fMessenger = std::make_unique<G4GenericMessenger>(this, "/bbr/thermal/", "Thermal emitter settings");
   fMessenger->DeclareProperty("setT", fTemperature_K, "Emitter temperature [K]")
             .SetParameterName("T", false)
             .SetRange("T > 0")
