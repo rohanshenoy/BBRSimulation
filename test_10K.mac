@@ -3,5 +3,6 @@
 /tracking/verbose 0
 /random/setSeeds 7777 6666
 /run/initialize
+# /bbr/thermal/setT fires after initialize: messenger is created during Build() inside initialize
 /bbr/thermal/setT 10
 /run/beamOn 1000000

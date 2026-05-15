@@ -16,7 +16,8 @@ public:
 private:
   std::unique_ptr<G4ParticleGun> fGun;
   ThermalSurface                 fSurface;
-  static G4double                fTemperature_K;  // shared across all worker threads
+  // static: shared across worker threads; messenger fires on master before beamOn
+  static G4double                fTemperature_K;
   G4GenericMessenger*            fMessenger     = nullptr;
 };
 #endif
