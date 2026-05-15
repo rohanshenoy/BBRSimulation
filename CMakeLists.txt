@@ -62,6 +62,7 @@ endforeach()
 
 set(BBRSim_SCRIPTS
     test.mac
+    test_10K.mac
   )
 
 foreach(_script ${BBRSim_SCRIPTS})
