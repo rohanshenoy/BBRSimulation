@@ -4,6 +4,7 @@
 #include "ThermalSurface.hh"
 #include "G4VUserPrimaryGeneratorAction.hh"
 #include "G4ParticleGun.hh"
+#include "G4GenericMessenger.hh"
 #include <memory>
 
 class BBRTestPGA : public G4VUserPrimaryGeneratorAction {
@@ -15,5 +16,7 @@ public:
 private:
   std::unique_ptr<G4ParticleGun> fGun;
   ThermalSurface                 fSurface;
+  static G4double                fTemperature_K;  // shared across all worker threads
+  G4GenericMessenger*            fMessenger     = nullptr;
 };
 #endif

@@ -6,6 +6,11 @@ GetBBSpecCDF::~GetBBSpecCDF() {}
 
 void GetBBSpecCDF::initialize(G4double temp, G4double emin, G4double emax)
 {
+  // Clear existing data before re-initializing (supports runtime temperature changes).
+  x.clear();
+  pdf.clear();
+  cdf.clear();
+
   const G4double n_bin  = 100000;
   const G4double erange = emax - emin;
   const G4double steps  = erange / n_bin;
