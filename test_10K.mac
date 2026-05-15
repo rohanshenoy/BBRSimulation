@@ -1,0 +1,7 @@
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/random/setSeeds 7777 6666
+/run/initialize
+/bbr/thermal/setT 10
+/run/beamOn 1000000
