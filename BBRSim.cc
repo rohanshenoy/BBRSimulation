@@ -3,6 +3,7 @@
 
 #include "BBRTestDetectorConstruction.hh"
 #include "BBRTestActionInit.hh"
+#include "BBRMaterials.hh"
 #include "BBSimPhysics.hh"
 #include "SteppingVerbose.hh"
 
@@ -13,6 +14,7 @@
 #include "G4UIExecutive.hh"
 #include "G4UImanager.hh"
 #include "G4VisExecutive.hh"
+#include <string>
 
 int main(int argc, char** argv)
 {
@@ -22,12 +24,22 @@ int main(int argc, char** argv)
   auto* steppingVerbose = new SteppingVerbose;
   auto* runManager      = G4RunManagerFactory::CreateRunManager();
 
-  runManager->SetUserInitialization(new BBRTestDetectorConstruction());
+  // Select Cu wall material from mac filename.
+  G4Material* cuMat = nullptr;
+  if (argc > 1) {
+    std::string mac(argv[1]);
+    if (mac.find("of_cu") != std::string::npos)
+      cuMat = BBRMaterials::GetOFCopperSerov();
+    else if (mac.find("hp_cu") != std::string::npos)
+      cuMat = BBRMaterials::GetHPCopperSerov();
+    // else nullptr → BBRTestDetectorConstruction defaults to OFHC_Cu
+  }
+
+  runManager->SetUserInitialization(new BBRTestDetectorConstruction(cuMat));
 
   auto* physicsList = new FTFP_BERT;
   physicsList->ReplacePhysics(new G4EmStandardPhysics_option4());
   physicsList->RegisterPhysics(new G4OpticalPhysics());
-  // BBSimPhysics must be registered after G4OpticalPhysics.
   physicsList->RegisterPhysics(new BBSimPhysics());
   runManager->SetUserInitialization(physicsList);
 

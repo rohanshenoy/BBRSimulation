@@ -8,6 +8,11 @@
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
 
+BBRTestDetectorConstruction::BBRTestDetectorConstruction(G4Material* cuMat)
+  : G4VUserDetectorConstruction()
+  , fCuMat(cuMat ? cuMat : BBRMaterials::GetOFHCCopper())
+{}
+
 G4VPhysicalVolume* BBRTestDetectorConstruction::Construct()
 {
   // World: 50 cm cube of G4_Galactic with RINDEX=1
@@ -23,12 +28,11 @@ G4VPhysicalVolume* BBRTestDetectorConstruction::Construct()
 
   // Cu wall: center at (2mm,0,0), front face at x=0, back face at x=4mm
   auto* cuBox = new G4Box("CuSlab", 2.*mm, 25.*mm, 25.*mm);
-  auto* cuLV  = new G4LogicalVolume(cuBox, BBRMaterials::GetOFHCCopper(), "CuSlab");
+  auto* cuLV  = new G4LogicalVolume(cuBox, fCuMat, "CuSlab");
   new G4PVPlacement(nullptr, G4ThreeVector(2.*mm, 0., 0.),
                     cuLV, "CuSlab", worldLV, false, 0, true);
 
   // crack1: full-span slab daughter so HFSS-transmitted photons exit into world at x=4mm.
-  // halfX=2mm matches Cu slab halfX; front face at x=0, back face at x=4mm.
   {
     static const char* kId = "InfParallelPlate_crack1Rohan_500GHz";
     auto* solid   = new G4Box(kId, 2.*mm, 5.1*mm, 0.026*mm);
@@ -37,7 +41,7 @@ G4VPhysicalVolume* BBRTestDetectorConstruction::Construct()
                       logical, kId, cuLV, false, 0, true);
   }
 
-  // crack2: full-span slab daughter (same reasoning as crack1).
+  // crack2: full-span slab daughter.
   {
     static const char* kId = "InfParallelPlate_crack2_500GHz";
     auto* solid   = new G4Box(kId, 2.*mm, 5.1*mm, 0.051*mm);
