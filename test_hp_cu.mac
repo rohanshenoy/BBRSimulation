@@ -1,0 +1,18 @@
+# test_hp_cu.mac
+# Smoke test for HP_Cu (Serov 2016 HP annealed copper at 4 K, sigma_eff back-calc).
+# Gun mode: every photon hits solid Cu at z=5mm (away from cracks at z=0, z=3mm).
+# 2000 events → 2000 Cu hits → 2 [BBR] reflectance lines.
+# Expect A_obs ~ 5.5e-4 (better reflectance than OF_Cu, worse than OFHC_Cu at 500 GHz).
+/run/verbose 0
+/event/verbose 0
+/random/setSeeds 12345 67890
+/run/initialize
+/bbr/gun/mode true
+/bbr/gun/posX -20.0
+/bbr/gun/posY 0.0
+/bbr/gun/posZ 5.0
+/bbr/gun/dirX 1.0
+/bbr/gun/dirY 0.0
+/bbr/gun/dirZ 0.0
+/bbr/gun/energy_eV 2.07e-3
+/run/beamOn 2000
