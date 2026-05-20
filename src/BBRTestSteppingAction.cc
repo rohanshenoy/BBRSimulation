@@ -1,4 +1,5 @@
 #include "BBRTestSteppingAction.hh"
+#include "BBRRunAction.hh"
 #include "BBSimOpBoundaryProcess.hh"
 
 #include "G4OpticalPhoton.hh"
@@ -32,20 +33,10 @@ G4String StatusStr(G4OpBoundaryProcessStatus s) {
 }
 } // namespace
 
-BBRTestSteppingAction::BBRTestSteppingAction()
+BBRTestSteppingAction::BBRTestSteppingAction(BBRRunAction* runAction)
   : G4UserSteppingAction()
-{
-  fOut.open("test_output.csv");
-  fOut << "event_id,x_mm,y_mm,z_mm,energy_eV,"
-          "px_pre,py_pre,pz_pre,px_post,py_post,pz_post,"
-          "theta_in_deg,phi_in_deg,"
-          "vol_pre,mat_pre,vol_post,mat_post,status,n_reflect\n";
-}
-
-BBRTestSteppingAction::~BBRTestSteppingAction()
-{
-  if (fOut.is_open()) fOut.close();
-}
+  , fRunAction(runAction)
+{}
 
 void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
 {
@@ -53,7 +44,7 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   if (track->GetDefinition() != G4OpticalPhoton::OpticalPhoton()) return;
   if (step->GetPostStepPoint()->GetStepStatus() != fGeomBoundary)  return;
 
-  // Lazy-init: find G4OpBoundaryProcess via BBSimOpBoundaryProcess wrapper
+  // Lazy-init: find BBSimOpBoundaryProcess wrapper on first boundary step
   if (!fBoundary) {
     G4ProcessVector* pv = track->GetDefinition()
                                ->GetProcessManager()->GetProcessList();
@@ -74,7 +65,7 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   // Skip StepTooSmall steps — pre-step momentum direction is undefined
   if (std::abs(pPre.x()) > 1.1 || std::abs(pPre.y()) > 1.1 || std::abs(pPre.z()) > 1.1) return;
 
-  // Per-track reflection counter — reset when either event or track changes
+  // Per-track reflection counter — reset when event or track changes
   if (eventId != fCurrentEventID || track->GetTrackID() != fCurrentTrackID) {
     fCurrentEventID = eventId;
     fCurrentTrackID = track->GetTrackID();
@@ -82,34 +73,33 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   }
   ++fNReflect;
 
-  G4ThreeVector      pos  = post->GetPosition();
-  G4ThreeVector      pPost= post->GetMomentumDirection();
+  const G4ThreeVector pos   = post->GetPosition();
+  const G4ThreeVector pPost = post->GetMomentumDirection();
 
-  G4String volPre  = pre->GetPhysicalVolume()
-                       ? pre->GetPhysicalVolume()->GetName()  : "none";
-  G4String matPre  = pre->GetMaterial()
-                       ? pre->GetMaterial()->GetName()         : "none";
-  G4String volPost = post->GetPhysicalVolume()
-                       ? post->GetPhysicalVolume()->GetName() : "none";
-  G4String matPost = post->GetMaterial()
-                       ? post->GetMaterial()->GetName()        : "none";
-  G4String status  = fBoundary ? StatusStr(fBoundary->GetStatus()) : "unknown";
+  const G4String volPre  = pre->GetPhysicalVolume()
+                             ? pre->GetPhysicalVolume()->GetName()  : "none";
+  const G4String matPre  = pre->GetMaterial()
+                             ? pre->GetMaterial()->GetName()         : "none";
+  const G4String volPost = post->GetPhysicalVolume()
+                             ? post->GetPhysicalVolume()->GetName() : "none";
+  const G4String matPost = post->GetMaterial()
+                             ? post->GetMaterial()->GetName()        : "none";
+  const G4String status  = fBoundary ? StatusStr(fBoundary->GetStatus()) : "unknown";
 
-  // theta: polar angle of incidence from the +x wall/crack normal (0° = head-on)
-  // phi:   azimuthal angle in the yz-plane
-  G4double theta_in = std::acos(std::abs(pPre.x())) * 180. / CLHEP::pi;
-  G4double phi_in   = std::atan2(pPre.y(), pPre.z()) * 180. / CLHEP::pi;
+  const G4double theta_in = std::acos(std::abs(pPre.x())) * 180. / CLHEP::pi;
+  const G4double phi_in   = std::atan2(pPre.y(), pPre.z()) * 180. / CLHEP::pi;
 
-  fOut << eventId << ","
-       << std::fixed << std::setprecision(6)
-       << pos.x()/mm << "," << pos.y()/mm << "," << pos.z()/mm << ","
-       << pre->GetKineticEnergy()/eV << ","
-       << std::setprecision(10)
-       << pPre.x()  << "," << pPre.y()  << "," << pPre.z()  << ","
-       << pPost.x() << "," << pPost.y() << "," << pPost.z() << ","
-       << std::setprecision(6)
-       << theta_in << "," << phi_in << ","
-       << volPre << "," << matPre << ","
-       << volPost << "," << matPost << ","
-       << status << "," << fNReflect << "\n";
+  std::ofstream& out = fRunAction->GetOutputStream();
+  out << eventId << ","
+      << std::fixed << std::setprecision(6)
+      << pos.x()/mm << "," << pos.y()/mm << "," << pos.z()/mm << ","
+      << pre->GetKineticEnergy()/eV << ","
+      << std::setprecision(10)
+      << pPre.x()  << "," << pPre.y()  << "," << pPre.z()  << ","
+      << pPost.x() << "," << pPost.y() << "," << pPost.z() << ","
+      << std::setprecision(6)
+      << theta_in << "," << phi_in << ","
+      << volPre << "," << matPre << ","
+      << volPost << "," << matPost << ","
+      << status << "," << fNReflect << "\n";
 }
