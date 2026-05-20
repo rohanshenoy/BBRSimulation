@@ -17,9 +17,9 @@ BBRTestDetectorConstruction::BBRTestDetectorConstruction()
   fMessenger->DeclareMethod("setCuMaterial",
                              &BBRTestDetectorConstruction::SetCuMaterial,
                              "Set Cu wall material: OFHC_Cu | OF_Cu | HP_Cu")
-            .SetParameterName("name", false)
+            .SetParameterName("name", true)
             .SetDefaultValue("OFHC_Cu")
-            .SetStates(G4State_PreInit, G4State_Idle);
+            .SetStates(G4State_PreInit);
 }
 
 void BBRTestDetectorConstruction::SetCuMaterial(const G4String& name)
