@@ -95,13 +95,12 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   G4double T = hfss.GetTransmittance(E_theta, E_phi,
                                      iwavePhi_deg, iwaveTheta_deg);
 
-  static G4int sBBRTotal = 0, sBBRTransmit = 0;
   const G4bool transmitted = (G4UniformRand() < T);
-  ++sBBRTotal;
-  if (transmitted) ++sBBRTransmit;
-  if (sBBRTotal % 100 == 0)
-    G4cout << "[BBR] diffraction events=" << sBBRTotal
-           << " T_obs=" << G4double(sBBRTransmit)/sBBRTotal << G4endl;
+  ++fNDiffraction;
+  if (transmitted) ++fNDiffractionTransmit;
+  if (fNDiffraction % 100 == 0)
+    G4cout << "[BBR] diffraction events=" << fNDiffraction
+           << " T_obs=" << G4double(fNDiffractionTransmit)/fNDiffraction << G4endl;
 
   G4ThreeVector dir_final;
   G4ThreeVector pos_csv;
@@ -180,13 +179,12 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
   G4ThreeVector nhat      = postXF.InverseTransformAxis(normLocal);
   if (nhat.dot(aTrack.GetMomentumDirection()) > 0.) nhat = -nhat;
 
-  static G4int sN = 0, sAbs = 0;
-  ++sN;
+  ++fNReflectance;
 
   // YYC dispatch: rand > R → DoAbsorption(); rand <= R → DoReflection() specular.
   G4double rand = G4UniformRand();
   if (rand > R) {
-    ++sAbs;
+    ++fNReflectanceAbsorb;
     fParticleChange.ProposeLocalEnergyDeposit(E);
     fParticleChange.ProposeTrackStatus(fStopAndKill);
   } else {
@@ -202,10 +200,10 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
     fParticleChange.ProposeTrackStatus(fAlive);
   }
 
-  if (sN % 1000 == 0)
+  if (fNReflectance % 1000 == 0)
     G4cout << "[BBR] reflectance mat=" << mat2->GetName()
-           << " N=" << sN
-           << " A_obs=" << G4double(sAbs)/sN
+           << " N=" << fNReflectance
+           << " A_obs=" << G4double(fNReflectanceAbsorb)/fNReflectance
            << " R_theory=" << R << G4endl;
 
   return &fParticleChange;

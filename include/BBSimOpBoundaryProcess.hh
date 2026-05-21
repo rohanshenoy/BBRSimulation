@@ -33,6 +33,12 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
                                                const G4Step& aStep);
 
   G4ParticleChange fParticleChange;
+
+  // Per-instance counters (safe in MT — each thread gets its own process clone).
+  G4int fNDiffraction         = 0;
+  G4int fNDiffractionTransmit = 0;
+  G4int fNReflectance         = 0;
+  G4int fNReflectanceAbsorb   = 0;
 };
 
 #endif
