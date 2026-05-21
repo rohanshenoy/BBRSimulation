@@ -1,6 +1,5 @@
 #include "BBRRunAction.hh"
 #include "G4Run.hh"
-#include "G4SystemOfUnits.hh"
 
 BBRRunAction::BBRRunAction() : G4UserRunAction() {}
 
@@ -12,6 +11,7 @@ BBRRunAction::~BBRRunAction()
 void BBRRunAction::BeginOfRunAction(const G4Run* run)
 {
   G4cout << "=== BBR Run " << run->GetRunID() << " begin ===" << G4endl;
+  if (fOut.is_open()) fOut.close();
   fOut.open("test_output.csv");
   fOut << "event_id,x_mm,y_mm,z_mm,energy_eV,"
           "px_pre,py_pre,pz_pre,px_post,py_post,pz_post,"

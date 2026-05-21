@@ -43,6 +43,7 @@ inline G4Material* BuildHagRubMaterial(const G4String& name,
     G4double R     = 1. - 2.*std::sqrt(2.*eps0*omega/sigma_SI);
     refls[i]       = std::max(0., std::min(1., R));
   }
+  // RINDEX is flat — two boundary points suffice; REFLECTIVITY uses all N.
   const std::vector<G4double> e2 = {Emin, Emax};
   const std::vector<G4double> ri = {1., 1.};
 
