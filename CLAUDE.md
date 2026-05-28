@@ -290,3 +290,348 @@ messenger or surface flag so the pass-through path remains testable.
 - Python analysis scripts (`plot_diffraction.py`, future `plot_planck.py`)
   must be run as `conda run -n bbrsim python <script>`. Plain `python3`
   does not have the required packages even if they appear installed.
+
+## Geant4 API Reference
+
+This section is a practical reference for the Geant4 11.x APIs used in BBRsim,
+derived from the Geant4 Beginner Course and BBRsim's own codebase.
+
+### Mandatory initialization pattern
+
+Every application registers exactly three things with the run manager:
+
+```cpp
+auto* runManager = G4RunManagerFactory::CreateRunManager(); // auto-selects MT/sequential
+runManager->SetUserInitialization(new YourDetectorConstruction());
+runManager->SetUserInitialization(physicsListPtr);          // G4VModularPhysicsList
+runManager->SetUserInitialization(new YourActionInitialization());
+// Then: runManager->Initialize(); runManager->BeamOn(N);
+```
+
+Use `G4PhysListFactory` to get a reference physics list by name (e.g. `"FTFP_BERT_EMZ"`).
+For BBRsim, `BBSimPhysics` is a `G4VPhysicsConstructor` added to a modular list.
+
+### Geometry: solid → logical → physical
+
+```cpp
+// 1. Solid (shape, no material, no position)
+G4Box* solid = new G4Box("name", halfX, halfY, halfZ);   // args are HALF-lengths
+
+// 2. Logical volume (solid + material, no position)
+G4LogicalVolume* lv = new G4LogicalVolume(solid, material, "name");
+
+// 3. Physical volume (logical + position inside a mother)
+new G4PVPlacement(
+    nullptr,               // rotation (G4RotationMatrix* or nullptr)
+    G4ThreeVector(x,y,z),  // translation
+    lv,                    // logical volume to place
+    "name",                // physical volume name
+    motherLV,              // mother logical volume (nullptr for world)
+    false,                 // pMany (unused, always false)
+    0);                    // copy number
+```
+
+World volume: mother = `nullptr`. `Construct()` must return the world
+`G4VPhysicalVolume*`. Other common solids: `G4Tubs`, `G4Sphere`, `G4Trd`,
+`G4SubtractionSolid` (CSG boolean).
+
+Rotations:
+```cpp
+G4RotationMatrix* rot = new G4RotationMatrix();
+rot->rotateX(90.*deg);   // then pass to G4PVPlacement
+```
+
+### Materials
+
+**NIST database** (preferred for standard materials):
+```cpp
+G4Material* mat = G4NistManager::Instance()->FindOrBuildMaterial("G4_Si");
+// Names: G4_Si, G4_Ge, G4_Cu, G4_STAINLESS-STEEL, G4_AIR, G4_WATER, etc.
+```
+
+**Custom material by hand:**
+```cpp
+G4Material* mat = new G4Material("name", Z, A_g_per_mole*g/mole,
+                                  density*g/cm3, kStateSolid, temperature*kelvin);
+// Multi-element:
+G4Element* el = new G4Element("name","symbol", Z, A*g/mole);
+G4Material* mat = new G4Material("name", density*g/cm3, nComponents);
+mat->AddElement(el, massFraction);
+```
+
+**Material Properties Table** (required for optical photons):
+```cpp
+G4MaterialPropertiesTable* mpt = new G4MaterialPropertiesTable();
+// Constant property:
+mpt->AddConstProperty("RINDEX", 1.0);
+// Energy-indexed vector (energies in ASCENDING order):
+std::vector<G4double> energies = {1.0*eV, 2.0*eV, 3.0*eV};
+std::vector<G4double> rindex   = {1.5,    1.5,    1.5};
+mpt->AddProperty("RINDEX", energies, rindex);
+mat->SetMaterialPropertiesTable(mpt);
+```
+
+Key optical property names on `G4Material` MPT: `RINDEX`, `ABSLENGTH`,
+`SCINTILLATIONYIELD`, `RAYLEIGH`. BBRsim adds `BBR_REFLECTIVITY` as a
+custom property read by `BBSimOpBoundaryProcess`.
+
+### Optical surfaces and boundary process
+
+```cpp
+// Logical surface between two logical volumes:
+G4OpticalSurface* opSurf = new G4OpticalSurface("name");
+opSurf->SetType(dielectric_metal);   // dielectric_metal, dielectric_dielectric, etc.
+opSurf->SetModel(unified);           // unified, glisur, LUT, davis
+opSurf->SetFinish(polished);         // polished, ground, polishedfrontpainted, etc.
+
+G4MaterialPropertiesTable* surfMPT = new G4MaterialPropertiesTable();
+surfMPT->AddProperty("REFLECTIVITY", energies, reflectivities);
+opSurf->SetMaterialPropertiesTable(surfMPT);
+
+// Attach to a pair of volumes (border surface: directed vol1→vol2):
+new G4LogicalBorderSurface("name", physVol1, physVol2, opSurf);
+// OR skin surface (wraps an entire logical volume):
+new G4LogicalSkinSurface("name", logVol, opSurf);
+```
+
+`G4OpBoundaryProcess` runs automatically when `G4OpticalPhoton` crosses a
+boundary. It checks for a `G4LogicalBorderSurface` or `G4LogicalSkinSurface`
+first; if none, it uses the `RINDEX` of both materials to compute Fresnel.
+
+BBRsim overrides this via `BBSimOpBoundaryProcess` (`G4WrapperProcess`
+subclass). The wrapper intercepts `PostStepDoIt`, checks if the volume
+material is `vacuum_wg`, and routes to HFSS lookup before (or instead of)
+calling the stock process.
+
+### Physics list / constructor pattern
+
+```cpp
+// G4VPhysicsConstructor subclass:
+class BBSimPhysics : public G4VPhysicsConstructor {
+public:
+    void ConstructParticle() override { /* define particles if needed */ }
+    void ConstructProcess() override  {
+        // Wrap or register processes:
+        WrapOpBoundaryProcess();
+    }
+private:
+    void WrapOpBoundaryProcess();
+};
+
+// Registering in a modular list:
+auto* pl = new G4VModularPhysicsList();
+pl->RegisterPhysics(new G4OpticsPhysics());   // stock optical
+pl->RegisterPhysics(new BBSimPhysics());      // BBR-specific override
+runManager->SetUserInitialization(pl);
+```
+
+### G4WrapperProcess pattern
+
+```cpp
+class BBSimOpBoundaryProcess : public G4WrapperProcess {
+public:
+    G4VParticleChange* PostStepDoIt(const G4Track& track,
+                                     const G4Step& step) override {
+        // intercept:
+        if (IsVacuumWG(track)) return HandleDiffractionBoundary(track, step);
+        // fall through to stock:
+        return G4WrapperProcess::PostStepDoIt(track, step);
+    }
+};
+
+// Wrapping the existing process (in BBSimPhysics::ConstructProcess):
+G4ProcessManager* pm = G4OpticalPhoton::OpticalPhoton()->GetProcessManager();
+G4int idx = pm->GetProcessIndex(stockBoundaryProc, idxPostStep);
+auto* wrapper = new BBSimOpBoundaryProcess();
+wrapper->RegisterProcess(stockBoundaryProc);   // store original inside wrapper
+pm->RemoveProcess(stockBoundaryProc);
+pm->AddDiscreteProcess(wrapper);
+```
+
+### Action initialization (MT-safe pattern)
+
+```cpp
+class YourActionInitialization : public G4VUserActionInitialization {
+public:
+    // Called once by master thread only — register RunAction for master:
+    void BuildForMaster() const override {
+        SetUserAction(new YourRunAction());
+    }
+    // Called by each worker thread — register all actions:
+    void Build() const override {
+        auto* pg = new YourPrimaryGeneratorAction();
+        SetUserAction(pg);
+        auto* run = new YourRunAction(pg);
+        SetUserAction(run);
+        auto* evt = new YourEventAction();
+        SetUserAction(evt);
+        SetUserAction(new YourSteppingAction(evt));
+    }
+};
+```
+
+Rule: objects created in `Build()` are **worker-thread-local**. Never share
+mutable state between them without a mutex. The detector construction pointer
+is safe to pass down (it's read-only after `Construct()` returns).
+
+### Stepping action
+
+```cpp
+void YourSteppingAction::UserSteppingAction(const G4Step* step) {
+    // Volume check:
+    auto* preVol = step->GetPreStepPoint()->GetTouchableHandle()->GetVolume();
+
+    // Per-step data:
+    G4double eDep   = step->GetTotalEnergyDeposit();
+    G4double trackL = step->GetStepLength();
+
+    // Track / particle info:
+    const G4Track* track = step->GetTrack();
+    const G4ParticleDefinition* pDef = track->GetParticleDefinition();
+    G4ThreeVector pos  = track->GetPosition();
+    G4ThreeVector dir  = track->GetMomentumDirection();
+    G4double      eKin = track->GetKineticEnergy();
+
+    // Kill a track:
+    track->SetTrackStatus(fStopAndKill);  // via non-const pointer
+
+    // Post-step point (after the step):
+    auto* post = step->GetPostStepPoint();
+    G4String procName = post->GetProcessDefinedStep()->GetProcessName();
+}
+```
+
+### Run accumulation (MT merge pattern)
+
+```cpp
+// In ActionInitialization::Build(), RunAction::GenerateRun() returns a custom run:
+G4Run* YourRunAction::GenerateRun() {
+    fYourRun = new YourRun();
+    return fYourRun;
+}
+
+// YourRun::Merge() is called by master to accumulate all worker runs:
+void YourRun::Merge(const G4Run* run) {
+    const YourRun* local = static_cast<const YourRun*>(run);
+    fSum  += local->fSum;
+    fSum2 += local->fSum2;
+    G4Run::Merge(run);   // always call base last
+}
+
+// Access current run from EventAction:
+YourRun* r = static_cast<YourRun*>(
+    G4RunManager::GetRunManager()->GetNonConstCurrentRun());
+```
+
+### Messengers (UI command framework)
+
+```cpp
+class YourMessenger : public G4UImessenger {
+public:
+    YourMessenger(YourClass* obj) : fObj(obj) {
+        fDir = new G4UIdirectory("/bbr/");
+        fDir->SetGuidance("BBRsim commands");
+
+        fCmd = new G4UIcmdWithADoubleAndUnit("/bbr/setZ", this);
+        fCmd->SetParameterName("Z", false);   // false = not omittable
+        fCmd->SetUnitCategory("Length");
+        fCmd->AvailableForStates(G4State_PreInit, G4State_Idle);
+        fCmd->SetToBeBroadcasted(false);      // geometry: workers don't need it
+    }
+    ~YourMessenger() { delete fCmd; delete fDir; }
+
+    void SetNewValue(G4UIcommand* cmd, G4String val) override {
+        if (cmd == fCmd)
+            fObj->SetZ(fCmd->GetNewDoubleValue(val));
+    }
+private:
+    YourClass* fObj;
+    G4UIdirectory*              fDir;
+    G4UIcmdWithADoubleAndUnit*  fCmd;
+};
+```
+
+Common command types: `G4UIcmdWithADoubleAndUnit`, `G4UIcmdWithADouble`,
+`G4UIcmdWithAnInteger`, `G4UIcmdWithAString`, `G4UIcmdWithABool`,
+`G4UIcmdWithoutParameter`.
+
+`SetToBeBroadcasted(false)` — geometry-changing commands don't need to go to
+workers because `Construct()` is called on the master. Physics/scoring
+commands that affect worker-local objects should be `true` (default).
+
+### Units and constants
+
+```cpp
+#include "G4SystemOfUnits.hh"   // mm, cm, m, eV, keV, MeV, GeV, ns, ps, deg, rad, K, ...
+#include "G4PhysicalConstants.hh"  // c_light, h_Planck, k_Boltzmann, ...
+
+// CLHEP equivalents (always valid):
+#include "CLHEP/Units/SystemOfUnits.hh"
+using CLHEP::mm; using CLHEP::MeV; // etc.
+
+// Photon energy ↔ frequency: E = h*nu
+G4double freq  = 500.e9;   // Hz
+G4double energy = CLHEP::h_Planck * freq;   // in Geant4 internal units (MeV)
+// Or: energy = 6.62607e-34 * freq / 1.602e-13 * MeV;
+```
+
+Geant4 internal length unit is **mm**; energy unit is **MeV**; time is **ns**.
+Always multiply by unit when assigning: `G4double x = 3.0*cm;`.
+
+### Key optical photon facts
+
+- Particle name: `"opticalphoton"` — retrieved via
+  `G4ParticleTable::GetParticleTable()->FindParticle("opticalphoton")`.
+- `G4ParticleGun` for optical photons: set `SetParticleEnergy(E)` where E
+  is the photon energy (not kinetic energy in the usual sense).
+- `SetParticleMomentumDirection` sets the k-direction; `SetParticlePolarization`
+  sets the E-field polarization vector (must be perpendicular to k).
+- `G4OpticsPhysics` (or `G4OpticalPhysics`) registers all optical processes:
+  `G4OpAbsorption`, `G4OpRayleigh`, `G4OpMieHG`, `G4OpBoundaryProcess`,
+  `G4OpWLS`, `G4Scintillation`, `G4Cerenkov`.
+- To disable all optical processes except boundary (BBRsim ray-trace mode):
+  use `G4OpticalPhysics` then call `optPhys->Configure(kAbsorption, false)`,
+  etc., or disable them in the physics constructor.
+- `RINDEX` must be defined for **both** materials at a boundary for Fresnel
+  to work. If one material has no `RINDEX`, the photon is absorbed at the boundary.
+
+### Touchable / volume navigation
+
+```cpp
+// In stepping action — find volume name:
+G4String volName = step->GetPreStepPoint()
+    ->GetTouchableHandle()->GetVolume()->GetName();
+
+// Get material:
+G4Material* mat = step->GetPreStepPoint()->GetMaterial();
+
+// Get volume copy number:
+G4int copyNo = step->GetPreStepPoint()
+    ->GetTouchableHandle()->GetCopyNumber();
+
+// Get rotation of the volume in world frame (used in BBRsim for crack orientation):
+G4ThreeVector localDir = step->GetPreStepPoint()
+    ->GetTouchableHandle()->GetHistory()->GetTopTransform()
+    .TransformAxis(worldDir);
+```
+
+### Geometry reinitialisation (messenger-driven changes)
+
+When a messenger command changes detector geometry at runtime:
+```
+/run/reinitializeGeometry   # full re-construction (needed when Construct() recomputes sizes)
+/run/geometryModified        # lighter: flags geometry as dirty without re-running Construct()
+```
+
+In `SetTargetThickness()`, store the new value; the next `Initialize()` call
+will re-run `Construct()` which reads the stored value.
+
+### Debugging tips
+
+- `G4cout` / `G4cerr` — use these instead of `std::cout`; they integrate with
+  the Geant4 verbosity system.
+- `/run/verbose 2`, `/event/verbose 2`, `/tracking/verbose 2` — progressively
+  more stepping output in macro files.
+- `/process/list` — lists all registered processes for all particles.
+- Fixed-seed reproducibility: `G4Random::setTheSeed(seed)` before
+  `BeamOn()`; or in macro: `/random/setSeeds seed1 seed2`.
