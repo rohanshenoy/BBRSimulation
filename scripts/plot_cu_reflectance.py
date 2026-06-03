@@ -3,6 +3,7 @@ plot_cu_reflectance.py
 Plot copper reflectance (R) and absorptance (D = 1-R) vs frequency,
 overlaying all available data sources:
   - Hagen-Rubens analytical curves (OFHC_Cu, OF_Cu, HP_Cu)
+  - Full Drude model for OFHC Cu (RRR=100, 4 K) — shows where H-R diverges
   - Geant4 IR reflectivity table (yyc / Geant4_copper_IR_reflectivity.ods)
   - Palik Handbook of Optical Constants, Vol. 1 Table 1 (room temperature)
   - Serov et al. (2016) cryogenic reference points at 4 K
@@ -25,12 +26,36 @@ args = parser.parse_args()
 
 # ── physical constants ────────────────────────────────────────────────────────
 eps0 = 8.8541878128e-12   # F/m
+m_e  = 9.109e-31          # kg
+n_e  = 8.49e28            # free electrons/m³ (copper)
+e_C  = 1.602e-19          # C
 
 # ── Hagen-Rubens model ────────────────────────────────────────────────────────
 def hagen_rubens_R(freq_Hz, sigma_SI):
     omega = 2.0 * np.pi * freq_Hz
     D = 2.0 * np.sqrt(2.0 * eps0 * omega / sigma_SI)
     return 1.0 - np.clip(D, 0, 1)
+
+# ── Full Drude model (Griffiths §9.4) ────────────────────────────────────────
+def drude_R(freq_Hz, sigma_DC):
+    """Normal-incidence reflectance from the full Drude model.
+    sigma_DC: DC conductivity [S/m]; tau derived from Drude formula.
+    """
+    tau   = sigma_DC * m_e / (n_e * e_C**2)
+    omega = 2.0 * np.pi * freq_Hz
+    # AC conductivity: sigma(omega) = sigma_DC / (1 - i*omega*tau)
+    sigma_ac = sigma_DC / (1.0 - 1j * omega * tau)
+    sigma_r  = np.real(sigma_ac)
+    # Griffiths k and kappa (real and imaginary parts of k_tilde)
+    ratio = sigma_r / (eps0 * omega)
+    root  = np.sqrt(1.0 + ratio**2)
+    c     = 2.998e8  # m/s
+    k     = (omega / c) * np.sqrt(0.5 * (root + 1.0))
+    kappa = (omega / c) * np.sqrt(0.5 * (root - 1.0))
+    n_re  = c * k   / omega
+    n_im  = c * kappa / omega
+    R = ((n_re - 1.0)**2 + n_im**2) / ((n_re + 1.0)**2 + n_im**2)
+    return np.clip(R, 0.0, 1.0)
 
 # Conductivities from BBRMaterials.hh
 materials_HR = {
@@ -55,7 +80,7 @@ fig, (ax_R, ax_D) = plt.subplots(1, 2, figsize=(14, 6))
 fig.suptitle("Copper reflectance & absorptance vs frequency", fontsize=13)
 
 for ax, qty, ylabel, ylim, yscale in [
-    (ax_R, "R", "Reflectance  R",       (0.94, 1.002), "linear"),
+    (ax_R, "R", "Reflectance  R",       (0.93, 1.002), "log"),
     (ax_D, "D", "Absorptance  D = 1−R", (1e-5, 0.1),   "log"),
 ]:
     ax.set_xscale("log")
@@ -72,6 +97,13 @@ for ax, qty, ylabel, ylim, yscale in [
         vals = hagen_rubens_R(freq_Hz, cfg["sigma"])
         y = vals if qty == "R" else 1 - vals
         ax.plot(freq_GHz, y, color=cfg["color"], ls=cfg["ls"], lw=2, label=label)
+
+    # Full Drude model — OFHC Cu (RRR=100, 4K); shows divergence from H-R above ~64 GHz
+    sigma_ofhc = 5.96e9  # S/m, RRR=100 × σ_RT
+    drude_vals = drude_R(freq_Hz, sigma_ofhc)
+    y_drude = drude_vals if qty == "R" else 1 - drude_vals
+    ax.plot(freq_GHz, y_drude, color="steelblue", ls=":", lw=2.5,
+            label="OFHC_Cu (RRR=100, full Drude, 4K)")
 
     # Geant4 IR reflectivity table
     y_g4 = g4ir["R"] if qty == "R" else g4ir["D"]
