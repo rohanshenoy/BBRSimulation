@@ -74,10 +74,15 @@ in Chang Table 5.1 (roughly: a space is "open" if its smallest dimension is
 - **Open↔bounded interface** — custom hooks in `UserSteppingAction` that
   sample HFSS-tabulated reflection/transmission when a photon enters a
   flagged gap volume.
-- **Material optical-property database** — one shared class; current
-  materials targeted are vacuum, OFHC Cu, Cirlex (polymer proxy), PCB,
-  crystalline Si/Ge, perfect reflector/absorber. Literature data on 20+
-  other mm-wave absorbers is compiled for future use.
+- **Material optical-property database** — one shared class (`BBRMaterials`
+  namespace, header-only). Metals use the full **Drude model** (Griffiths
+  §9.4) parameterized by (RRR, T_K); Hagen-Rubens is only the low-frequency
+  limit (ωτ << 1) and breaks down above ~64 GHz for OFHC Cu at 4 K. For
+  copper: `σ_DC(T) = RRR × σ_RT` where σ_RT = 5.96×10⁷ S/m is universal;
+  τ = σ_DC × mₑ/(nₑ e²); R = |(ñ−1)/(ñ+1)|² from the full complex
+  refractive index. Current materials: vacuum, OFHC Cu, Cirlex (polymer
+  proxy), PCB, crystalline Si/Ge, perfect reflector/absorber. See
+  `docs/physics/copper_reflectance_model.md` for the full derivation.
 - **Absorption / leakage-current post-processing** — photon termination
   events in Si/Ge are recorded via a ROOT `TTree` (`ABSPoint` struct:
   energy, momentum, position, reflection count, terminating volume), and
@@ -207,6 +212,16 @@ u³/(e^u−1)), `BBRThermalSurface` (POD struct), `BBRThermalPGA` (hardcoded
 4 K patch), `BBRPlanckActionInit`, `BBRPlanckDetectorConstruction`,
 `planck.mac`, `scripts/check_planck_spectrum.py`.
 
+### [UNBLOCKED] Drude copper reflectance model
+
+Replace `BuildHagRubMaterial` (Hagen-Rubens) with `BuildDrudeMaterial` in
+`include/BBRMaterials.hh`. Parameters: `(name, RRR, T_K)`. Derives σ_DC via
+Matthiessen's rule, τ from the Drude formula, then evaluates full Griffiths
+§9.4 reflectance at each frequency. Replaces all three named Cu getters with
+a single `GetCopper(RRR, T_K)`. Update `GetCopperByName()` messenger to
+accept RRR as integer and optional temperature. See
+`docs/physics/copper_reflectance_model.md`.
+
 ## Build
 
 ```bash
@@ -290,6 +305,24 @@ messenger or surface flag so the pass-through path remains testable.
 - Python analysis scripts (`plot_diffraction.py`, future `plot_planck.py`)
   must be run as `conda run -n bbrsim python <script>`. Plain `python3`
   does not have the required packages even if they appear installed.
+
+### Copper reflectance physics
+
+- σ_RT = 5.96×10⁷ S/m — universal for all Cu grades at 273 K; does **not**
+  depend on material quality.
+- σ(4 K) = RRR × σ_RT. RRR range: 1 (disordered) → ~10 (commercial) →
+  ~100 (OFHC) → ~500 (ultra-pure crystal).
+- τ = σ_DC × mₑ / (nₑ e²). Cu constants: nₑ = 8.49×10²⁸ m⁻³,
+  mₑ = 9.109×10⁻³¹ kg.
+- Hagen-Rubens valid only for f << 1/(2πτ). OFHC Cu at 4 K (RRR=100):
+  τ ≈ 2.5 ps → H-R valid below ~64 GHz. BBRsim starts at 50 GHz — always
+  use the full Drude model.
+- Matthiessen's rule: 1/σ(T) = 1/σ_impurity + 1/σ_phonon(T), where
+  1/σ_impurity = 1/(RRR × σ_RT) and σ_phonon(T) ≈ σ_RT × 273/T (T > 50 K).
+- Full Drude: σ(ω) = σ_DC/(1−iωτ); insert into Griffiths §9.4 to get k̃;
+  R = |(ñ−1)/(ñ+1)|² where ñ = c·k̃/ω.
+- **Do NOT hardcode σ per Cu variant.** Derive everything from (RRR, T_K).
+  See `docs/physics/copper_reflectance_model.md`.
 
 ## Geant4 API Reference
 
