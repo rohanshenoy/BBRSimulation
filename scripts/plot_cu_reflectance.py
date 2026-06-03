@@ -1,9 +1,14 @@
 """
 plot_cu_reflectance.py
-Plot copper reflectance (R) and absorptance (D = 1-R) vs frequency,
-overlaying all available data sources:
+Plot copper reflectance (R) and absorptance (D = 1-R) vs frequency.
+Three panels:
+  1. Reflectance R — Hagen-Rubens + full Drude + tabulated data
+  2. Absorptance D = 1-R — same data
+  3. Temperature dependence — full Drude for OFHC Cu (RRR=100) at 4, 20, 77, 300 K
+
+Data sources:
   - Hagen-Rubens analytical curves (OFHC_Cu, OF_Cu, HP_Cu)
-  - Full Drude model for OFHC Cu (RRR=100, 4 K) — shows where H-R diverges
+  - Full Drude model for OFHC Cu (RRR=100) — shows where H-R diverges
   - Geant4 IR reflectivity table (yyc / Geant4_copper_IR_reflectivity.ods)
   - Palik Handbook of Optical Constants, Vol. 1 Table 1 (room temperature)
   - Serov et al. (2016) cryogenic reference points at 4 K
@@ -37,16 +42,22 @@ def hagen_rubens_R(freq_Hz, sigma_SI):
     return 1.0 - np.clip(D, 0, 1)
 
 # ── Full Drude model (Griffiths §9.4) ────────────────────────────────────────
+sigma_RT = 5.96e7   # S/m — universal for all Cu grades at 273 K
+
+def sigma_drude(T_K, RRR):
+    """DC conductivity via Matthiessen's rule."""
+    sigma_impurity = RRR * sigma_RT
+    sigma_phonon   = sigma_RT * 273.0 / max(T_K, 1.0)
+    return 1.0 / (1.0/sigma_impurity + 1.0/sigma_phonon)
+
 def drude_R(freq_Hz, sigma_DC):
     """Normal-incidence reflectance from the full Drude model.
     sigma_DC: DC conductivity [S/m]; tau derived from Drude formula.
     """
     tau   = sigma_DC * m_e / (n_e * e_C**2)
     omega = 2.0 * np.pi * freq_Hz
-    # AC conductivity: sigma(omega) = sigma_DC / (1 - i*omega*tau)
     sigma_ac = sigma_DC / (1.0 - 1j * omega * tau)
     sigma_r  = np.real(sigma_ac)
-    # Griffiths k and kappa (real and imaginary parts of k_tilde)
     ratio = sigma_r / (eps0 * omega)
     root  = np.sqrt(1.0 + ratio**2)
     c     = 2.998e8  # m/s
@@ -75,8 +86,8 @@ serov  = pd.read_csv(os.path.join(data_dir, "cu_serov_reference_points.csv"))
 freq_GHz = np.logspace(-1, 5, 600)   # 0.1 GHz to 100 THz
 freq_Hz  = freq_GHz * 1e9
 
-# ── figure: two panels (R and D = 1-R) ───────────────────────────────────────
-fig, (ax_R, ax_D) = plt.subplots(1, 2, figsize=(14, 6))
+# ── figure: three panels ─────────────────────────────────────────────────────
+fig, (ax_R, ax_D, ax_T) = plt.subplots(1, 3, figsize=(20, 6))
 fig.suptitle("Copper reflectance & absorptance vs frequency", fontsize=13)
 
 for ax, qty, ylabel, ylim, yscale in [
@@ -130,8 +141,41 @@ for ax, qty, ylabel, ylim, yscale in [
 
     ax.legend(fontsize=7.5, loc="lower left" if qty == "R" else "upper left")
 
+# ── panel 3: temperature dependence (Drude, OFHC Cu RRR=100) ─────────────────
+temps = [4, 20, 77, 300]
+cmap  = plt.cm.plasma
+tcolors = [cmap(0.05), cmap(0.3), cmap(0.6), cmap(0.9)]
+
+ax_T.set_xscale("log")
+ax_T.set_yscale("log")
+ax_T.set_xlabel("Frequency [GHz]")
+ax_T.set_ylabel("Absorptance  D = 1−R")
+ax_T.set_xlim(0.1, 1e5)
+ax_T.set_ylim(1e-5, 0.1)
+ax_T.grid(True, which="both", ls=":", alpha=0.4)
+ax_T.axvspan(50, 20000, alpha=0.06, color="gray", label="BBRsim range")
+ax_T.set_title("OFHC Cu (RRR=100) — temperature dependence", fontsize=10)
+
+for T, col in zip(temps, tcolors):
+    sig = sigma_drude(T, RRR=100)
+    D_drude = 1.0 - drude_R(freq_Hz, sig)
+    tau_ps  = sig * m_e / (n_e * e_C**2) * 1e12
+    f_break = 1.0 / (2.0 * np.pi * sig * m_e / (n_e * e_C**2)) / 1e9
+    ax_T.plot(freq_GHz, D_drude, color=col, lw=2,
+              label=f"T = {T} K  (σ={sig:.2e} S/m, f_break={f_break:.0f} GHz)")
+
+# Serov 4K reference points on temperature panel
+serov_colors = {"OF_Cu": "darkorange", "HP_Cu": "forestgreen"}
+for _, row in serov.iterrows():
+    ax_T.scatter(row["freq_GHz"], row["D"], s=80, zorder=5,
+                 color=serov_colors.get(row["material"], "red"),
+                 edgecolors="black", linewidths=0.8,
+                 label=f"{row['material']} @ {row['freq_GHz']:.0f} GHz (Serov 4K)")
+
+ax_T.legend(fontsize=7.5, loc="upper left")
+
 # ── frequency tick labels ─────────────────────────────────────────────────────
-for ax in (ax_R, ax_D):
+for ax in (ax_R, ax_D, ax_T):
     ax.set_xticks([1, 10, 100, 1000, 10000, 100000])
     ax.set_xticklabels(["1 GHz", "10", "100", "1 THz", "10", "100 THz"])
 
