@@ -1,0 +1,129 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage[margin=1in]{geometry}
+\usepackage{parskip}
+
+\title{\textbf{Copper Reflectance Model --- BBRsim Brief}}
+\author{Golwala / Mirabolfathi group}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{1.\quad Conductivity}
+
+Room-temperature conductivity of copper (universal across grades):
+\[
+  \sigma_\mathrm{RT} = 5.96\times10^{7}\ \mathrm{S/m}
+\]
+
+At cryogenic temperature $T$ with residual resistance ratio $\mathrm{RRR}$,
+Matthiessen's rule gives:
+\[
+  \frac{1}{\sigma(T,\mathrm{RRR})}
+  = \frac{1}{\sigma_\mathrm{impurity}} + \frac{1}{\sigma_\mathrm{phonon}(T)}
+\]
+\[
+  \sigma_\mathrm{impurity} = \mathrm{RRR}\times\sigma_\mathrm{RT},
+  \qquad
+  \sigma_\mathrm{phonon}(T) \approx \sigma_\mathrm{RT}\,\frac{273\,\mathrm{K}}{T}
+  \quad (T \gtrsim 50\ \mathrm{K})
+\]
+
+At $T = 4\ \mathrm{K}$, phonon scattering is frozen out and
+$\sigma(4\,\mathrm{K}) \simeq \mathrm{RRR}\times\sigma_\mathrm{RT}$.
+
+\section*{2.\quad Drude scattering time}
+
+The electron scattering time $\tau$ is set by the DC conductivity
+and free-electron parameters of copper:
+\[
+  \tau = \frac{\sigma_\mathrm{DC}\, m_e}{n_e\, e^2}
+\]
+
+\begin{center}
+\begin{tabular}{lll}
+  $n_e = 8.49\times10^{28}\ \mathrm{m}^{-3}$ & free electron density \\
+  $m_e = 9.109\times10^{-31}\ \mathrm{kg}$    & electron mass \\
+  $e   = 1.602\times10^{-19}\ \mathrm{C}$     & electron charge
+\end{tabular}
+\end{center}
+
+For OFHC Cu ($\mathrm{RRR}=100$) at $4\ \mathrm{K}$:
+$\tau \approx 2.5\ \mathrm{ps}$.
+
+\section*{3.\quad Drude AC conductivity}
+
+The frequency-dependent (AC) conductivity:
+\[
+  \sigma(\omega) = \frac{\sigma_\mathrm{DC}}{1 - i\omega\tau}
+\]
+
+\section*{4.\quad Complex wave vector (Griffiths \S9.4)}
+
+For a plane wave in a conductor with real part of AC conductivity
+$\sigma_r = \mathrm{Re}[\sigma(\omega)]$, the complex wave vector
+$\tilde{k} = k + i\kappa$ satisfies (Griffiths eqs.\ 9.126):
+\[
+  k = \frac{\omega}{c}\sqrt{\frac{\varepsilon_0\mu_0}{2}}
+      \sqrt{\,\sqrt{1 + \!\left(\frac{\sigma_r}{\varepsilon_0\omega}\right)^{\!2}} + 1\,}
+  \qquad
+  \kappa = \frac{\omega}{c}\sqrt{\frac{\varepsilon_0\mu_0}{2}}
+      \sqrt{\,\sqrt{1 + \!\left(\frac{\sigma_r}{\varepsilon_0\omega}\right)^{\!2}} - 1\,}
+\]
+
+The complex refractive index:
+\[
+  \tilde{n} = n + ik_\mathrm{opt} = \frac{c\,\tilde{k}}{\omega}
+  \quad\Longrightarrow\quad
+  n = \frac{c\,k}{\omega},\quad k_\mathrm{opt} = \frac{c\,\kappa}{\omega}
+\]
+
+\section*{5.\quad Reflectance}
+
+Normal-incidence Fresnel reflectance from vacuum into the conductor:
+\[
+  \boxed{R = \left|\frac{\tilde{n}-1}{\tilde{n}+1}\right|^2
+           = \frac{(n-1)^2 + k_\mathrm{opt}^2}{(n+1)^2 + k_\mathrm{opt}^2}}
+\]
+
+Absorptance: $D = 1 - R$.
+
+\section*{6.\quad Hagen-Rubens limit}
+
+In the limit $\omega\tau \ll 1$ (low frequency), $\sigma(\omega)\to\sigma_\mathrm{DC}$
+and $n \approx k_\mathrm{opt} \gg 1$, giving:
+\[
+  D = 1 - R \approx 2\sqrt{\frac{2\varepsilon_0\omega}{\sigma_\mathrm{DC}}}
+\]
+
+This limit breaks down above the scattering frequency:
+\[
+  f_\mathrm{break} = \frac{1}{2\pi\tau}
+  \approx \frac{n_e e^2}{2\pi\,m_e\,\sigma_\mathrm{DC}}
+\]
+
+For OFHC Cu ($\mathrm{RRR}=100$) at $4\ \mathrm{K}$:
+$f_\mathrm{break}\approx 64\ \mathrm{GHz}$.
+BBRsim spans $50\ \mathrm{GHz}$--$20\ \mathrm{THz}$;
+Hagen-Rubens is inadequate for essentially the entire range at
+cryogenic temperatures.
+
+\section*{7.\quad Summary of inputs}
+
+\begin{center}
+\begin{tabular}{ll}
+  \hline
+  \textbf{Parameter} & \textbf{Meaning} \\
+  \hline
+  $\mathrm{RRR}$ & residual resistance ratio; characterises Cu purity \\
+  $T\ [\mathrm{K}]$ & temperature of the copper surface \\
+  $\omega = 2\pi f$ & photon angular frequency \\
+  \hline
+\end{tabular}
+\end{center}
+
+All other quantities ($\sigma$, $\tau$, $\tilde{n}$, $R$) are derived
+from $(T,\mathrm{RRR},\omega)$ via the equations above.
+
+\end{document}
