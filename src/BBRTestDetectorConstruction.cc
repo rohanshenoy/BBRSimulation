@@ -10,7 +10,7 @@
 
 BBRTestDetectorConstruction::BBRTestDetectorConstruction()
   : G4VUserDetectorConstruction()
-  , fCuMat(BBRMaterials::GetOFHCCopper())
+  , fCuMat(BBRMaterials::GetCopperByName("OFHC_Cu"))
 {
   fMessenger = std::make_unique<G4GenericMessenger>(
       this, "/bbr/det/", "BBR detector geometry commands");

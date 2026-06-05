@@ -6,49 +6,98 @@
 #include "G4SystemOfUnits.hh"
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <vector>
 
 namespace BBRMaterials {
 
 // ---------------------------------------------------------------------------
 // Internal helper — not part of the public API.
-// Builds a single-element material with Hagen-Rubens reflectance table.
-//   name             : G4Material name (checked for existence first)
-//   Z, A_g_mol       : atomic number and mass [g/mol]
-//   density_g_cm3    : density [g/cm³]
-//   sigma_SI         : electrical conductivity at 4 K [S/m]
+// Builds a single-element material with a Drude-model REFLECTIVITY table.
+//   name          : G4Material name (returned as-is if it already exists)
+//   Z, A_g_mol    : atomic number and mass [g/mol]
+//   density_g_cm3 : density [g/cm³]
+//   RRR           : Residual Resistance Ratio (material quality parameter)
+//   T_K           : temperature [K]
+//
+// Physics (Griffiths §9.4 + Matthiessen's rule):
+//   σ_DC = RRR × σ_RT               (T < 50 K, phonons frozen out)
+//   τ    = σ_DC × mₑ / (nₑ e²)
+//   σ_r(ω) = σ_DC / (1 + ω²τ²)     (Re[Drude AC conductivity])
+//   R(ω) = |(ñ−1)/(ñ+1)|²          (Fresnel, normal incidence)
+//   ñ from k̃ = k+iκ via Griffiths eqs. 9.126
 // ---------------------------------------------------------------------------
-inline G4Material* BuildHagRubMaterial(const G4String& name,
-                                        G4double Z,
-                                        G4double A_g_mol,
-                                        G4double density_g_cm3,
-                                        G4double sigma_SI)
+inline G4Material* BuildDrudeMaterial(const G4String& name,
+                                       G4double Z,
+                                       G4double A_g_mol,
+                                       G4double density_g_cm3,
+                                       G4int    RRR,
+                                       G4double T_K)
 {
   G4Material* mat = G4Material::GetMaterial(name, false);
   if (mat) return mat;
   mat = new G4Material(name, Z, A_g_mol*g/mole, density_g_cm3*g/cm3);
 
+  // SI constants — CLHEP values are not SI, so use literals.
+  const G4double sigma_RT = 5.96e7;            // S/m, universal for Cu at 273 K
+  const G4double n_e      = 8.49e28;           // m^-3, free electron density
+  const G4double m_e_kg   = 9.109e-31;         // kg
+  const G4double e_C      = 1.602e-19;         // C
+  const G4double eps0_SI  = 8.8541878128e-12;  // F/m
+  const G4double c_SI     = 2.998e8;           // m/s
+  const G4double h_eVs    = 4.13566769692e-15; // eV·s (Planck constant)
+
+  // DC conductivity via Matthiessen's rule.
+  // The linear σ_phonon(T) ≈ σ_RT × 273/T is only valid above ~50 K.
+  // Below 50 K phonons are frozen out and σ_DC ≈ σ_imp = RRR × σ_RT.
+  const G4double sigma_imp = static_cast<G4double>(RRR) * sigma_RT;
+  G4double sigma_DC;
+  if (T_K >= 50.) {
+    const G4double sigma_ph = sigma_RT * 273. / T_K;
+    sigma_DC = 1. / (1./sigma_imp + 1./sigma_ph);
+  } else {
+    sigma_DC = sigma_imp;
+  }
+
+  // Drude scattering time: τ = σ_DC mₑ / (nₑ e²)
+  const G4double tau = sigma_DC * m_e_kg / (n_e * e_C * e_C);
+
+  // Build 20 log-spaced reflectivity points from 50 GHz to 20 THz.
   const int      N     = 20;
-  const G4double Emin  = 2.07e-4*eV;         // 50 GHz
-  const G4double Emax  = 8.27e-2*eV;         // 20 THz
-  const G4double eps0  = 8.8541878128e-12;   // F/m (SI)
-  const G4double h_eVs = 4.13566769692e-15;  // eV·s (Planck constant)
+  const G4double Emin  = 2.07e-4*eV;   // 50 GHz
+  const G4double Emax  = 8.27e-2*eV;   // 20 THz
 
   std::vector<G4double> energies(N), refls(N);
   const G4double logMin = std::log(Emin), logMax = std::log(Emax);
   for (int i = 0; i < N; ++i) {
-    energies[i]    = std::exp(logMin + i*(logMax - logMin)/(N - 1.));
-    G4double nu    = (energies[i]/eV) / h_eVs;
-    G4double omega = 2.*CLHEP::pi*nu;
-    G4double R     = 1. - 2.*std::sqrt(2.*eps0*omega/sigma_SI);
-    refls[i]       = std::max(0., std::min(1., R));
+    energies[i]          = std::exp(logMin + i*(logMax - logMin)/(N - 1.));
+    const G4double nu    = (energies[i]/eV) / h_eVs;    // Hz
+    const G4double omega = 2. * CLHEP::pi * nu;          // rad/s
+
+    // Re[σ(ω)] from Drude AC conductivity: σ_DC/(1−iωτ)
+    const G4double ot      = omega * tau;
+    const G4double sigma_r = sigma_DC / (1. + ot*ot);
+
+    // Griffiths §9.4 eqs. 9.126: k̃ = k + iκ in good-conductor limit
+    const G4double ratio  = sigma_r / (eps0_SI * omega);
+    const G4double root   = std::sqrt(1. + ratio*ratio);
+    const G4double k_wav  = (omega/c_SI) * std::sqrt(0.5*(root + 1.));
+    const G4double kappa  = (omega/c_SI) * std::sqrt(0.5*(root - 1.));
+    const G4double n_re   = c_SI * k_wav / omega;
+    const G4double n_im   = c_SI * kappa  / omega;
+
+    // Normal-incidence Fresnel: R = |(ñ−1)/(ñ+1)|²
+    const G4double R = ((n_re-1.)*(n_re-1.) + n_im*n_im) /
+                       ((n_re+1.)*(n_re+1.) + n_im*n_im);
+    refls[i] = std::max(0., std::min(1., R));
   }
-  // RINDEX is flat — two boundary points suffice; REFLECTIVITY uses all N.
+
+  // RINDEX flat at 1 (two boundary points suffice); REFLECTIVITY uses all N.
   const std::vector<G4double> e2 = {Emin, Emax};
   const std::vector<G4double> ri = {1., 1.};
 
   auto* mpt = new G4MaterialPropertiesTable();
-  mpt->AddProperty("RINDEX",       e2,      ri);
+  mpt->AddProperty("RINDEX",       e2,       ri);
   mpt->AddProperty("REFLECTIVITY", energies, refls);
   mat->SetMaterialPropertiesTable(mpt);
   return mat;
@@ -58,15 +107,15 @@ inline G4Material* BuildHagRubMaterial(const G4String& name,
 // Public API
 // ---------------------------------------------------------------------------
 
-// Near-vacuum material that flags crack volumes.
-// RINDEX=1, no absorption, distinct name detected by BBSimOpBoundaryProcess.
+// Near-vacuum material that flags crack volumes for HFSS diffraction routing.
+// RINDEX=1, no REFLECTIVITY — identified by name "vacuum_wg" in PostStepDoIt.
 inline G4Material* GetVacuumWG()
 {
   G4Material* mat = G4Material::GetMaterial("vacuum_wg", false);
   if (mat) return mat;
   mat = new G4Material("vacuum_wg", 1., 1.008*g/mole, 1e-25*g/cm3);
   const std::vector<G4double> e  = {1e-6*eV, 1.0*eV};
-  const std::vector<G4double> ri = {1.0,     1.0};
+  const std::vector<G4double> ri = {1.0, 1.0};
   auto* mpt = new G4MaterialPropertiesTable();
   mpt->AddProperty("RINDEX", e, ri);
   mat->SetMaterialPropertiesTable(mpt);
@@ -105,25 +154,28 @@ inline G4Material* GetPerfectReflector()
   return mat;
 }
 
-// OFHC Cu at 4 K, RRR=100. σ = 100 × σ_RT(Cu) = 5.96×10⁹ S/m.
-inline G4Material* GetOFHCCopper()
-{ return BuildHagRubMaterial("OFHC_Cu", 29., 63.546, 8.96, 5.96e9); }
+// Copper with full Drude reflectance model, parameterized by (RRR, T_K).
+// Material name is deterministic ("Cu_RRR{RRR}_T{int(T_K)}K") so repeated
+// calls with the same arguments return the cached G4Material.
+// T_K defaults to 4.0 K (cryogenic baseline for BBRsim).
+// Below 50 K: σ_DC = RRR × σ_RT (phonons frozen).  Above 50 K: Matthiessen.
+inline G4Material* GetCopper(G4int RRR, G4double T_K = 4.0)
+{
+  G4String name = "Cu_RRR" + std::to_string(RRR)
+                + "_T"     + std::to_string(static_cast<int>(T_K)) + "K";
+  return BuildDrudeMaterial(name, 29., 63.546, 8.96, RRR, T_K);
+}
 
-// OF copper at 4 K (Serov 2016, Fig. 6). σ_eff = 1/ρ₀, ρ₀=0.56×10⁻⁸ Ω·m.
-inline G4Material* GetOFCopperSerov()
-{ return BuildHagRubMaterial("OF_Cu",   29., 63.546, 8.96, 1.786e8); }
-
-// HP (hydrogen-annealed) copper at 4 K (Serov 2016, Fig. 8).
-// σ_eff back-calculated from D=0.55×10⁻³ at 230 GHz.
-inline G4Material* GetHPCopperSerov()
-{ return BuildHagRubMaterial("HP_Cu",   29., 63.546, 8.96, 3.383e8); }
-
-// Lookup by name string — used by BBRTestDetectorConstruction messenger.
+// Name-to-RRR mapping for backward compatibility and messenger use.
+// RRR values derived from Serov 2016 measured D at 4 K:
+//   OFHC_Cu: σ_eff = 5.96×10⁹ S/m → RRR = 100
+//   OF_Cu:   σ_eff = 1.79×10⁸ S/m → RRR =   3
+//   HP_Cu:   σ_eff = 3.38×10⁸ S/m → RRR =   6
 inline G4Material* GetCopperByName(const G4String& name)
 {
-  if (name == "OFHC_Cu") return GetOFHCCopper();
-  if (name == "OF_Cu")   return GetOFCopperSerov();
-  if (name == "HP_Cu")   return GetHPCopperSerov();
+  if (name == "OFHC_Cu") return GetCopper(100, 4.0);
+  if (name == "OF_Cu")   return GetCopper(  3, 4.0);
+  if (name == "HP_Cu")   return GetCopper(  6, 4.0);
   return nullptr;
 }
 
