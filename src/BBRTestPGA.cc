@@ -35,8 +35,9 @@ BBRTestPGA::BBRTestPGA()
     0., 0., 0.,                      // no rotation
     1.0);                            // emissivity=1
 
-  // Energy range 50 GHz–20 THz in eV (bare eV, not Geant4 internal units)
-  fSurface.BBSpecCDF.initialize(fSurface.temp, 4.14e-5, 2.07e-2);
+  // Energy range 10 GHz–20 THz in eV (bare eV, not Geant4 internal units).
+  // Upper bound 8.27e-2 eV = 20 THz (h * 20e12 Hz).
+  fSurface.BBSpecCDF.initialize(fSurface.temp, 4.14e-5, 8.27e-2);
 
   fMessenger = std::make_unique<G4GenericMessenger>(this, "/bbr/thermal/", "Thermal emitter settings");
   fMessenger->DeclareProperty("setT", fTemperature_K, "Emitter temperature [K]")
@@ -83,7 +84,7 @@ void BBRTestPGA::GeneratePrimaries(G4Event* event)
   // Re-initialize CDF if temperature changed via messenger
   if (fSurface.temp != fTemperature_K) {
     fSurface.temp = fTemperature_K;
-    fSurface.BBSpecCDF.initialize(fTemperature_K, 4.14e-5, 2.07e-2);
+    fSurface.BBSpecCDF.initialize(fTemperature_K, 4.14e-5, 8.27e-2);
   }
 
   BBEvt evt = fSurface.GenEvt();

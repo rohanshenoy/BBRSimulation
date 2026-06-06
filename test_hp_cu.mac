@@ -1,8 +1,8 @@
 # test_hp_cu.mac
-# Smoke test for HP_Cu (Serov 2016 HP annealed copper at 4 K, sigma_eff back-calc).
+# Smoke test for HP_Cu (RRR=6, full Drude model at 4K via BBRMaterials::GetCopper(6,4.0)).
 # Gun mode: every photon hits solid Cu at z=5mm (away from cracks at z=0, z=3mm).
 # 2000 events → 2000 Cu hits → 2 [BBR] reflectance lines.
-# Expect A_obs ~ 5.5e-4 (better reflectance than OF_Cu, worse than OFHC_Cu at 500 GHz).
+# Expect A_obs: OF_Cu > HP_Cu > OFHC_Cu (higher RRR → higher σ → lower loss).
 /run/verbose 0
 /event/verbose 0
 /random/setSeeds 12345 67890

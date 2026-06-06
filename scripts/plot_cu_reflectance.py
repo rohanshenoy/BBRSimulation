@@ -2,13 +2,18 @@
 plot_cu_reflectance.py
 Plot copper reflectance (R) and absorptance (D = 1-R) vs frequency.
 Three panels:
-  1. Reflectance R — Hagen-Rubens + full Drude + tabulated data
+  1. Reflectance R — full Drude for OFHC/OF/HP Cu + tabulated data
   2. Absorptance D = 1-R — same data
   3. Temperature dependence — full Drude for OFHC Cu (RRR=100) at 4, 20, 77, 300 K
 
+All Cu curves use the full Drude model parameterized by RRR (Griffiths §9.4).
+Hagen-Rubens is shown only for OFHC_Cu as a low-frequency reference.
+σ_phonon ~ 1/T is the simple power-law approximation valid for T > ~50 K;
+below ~50 K umklapp scattering dominates — the simple formula is not used
+(σ_DC = RRR × σ_RT is used instead). This only matters for warm shield layers.
+
 Data sources:
-  - Hagen-Rubens analytical curves (OFHC_Cu, OF_Cu, HP_Cu)
-  - Full Drude model for OFHC Cu (RRR=100) — shows where H-R diverges
+  - Full Drude model for Cu at RRR=100 (OFHC_Cu), RRR=3 (OF_Cu), RRR=6 (HP_Cu)
   - Geant4 IR reflectivity table (yyc / Geant4_copper_IR_reflectivity.ods)
   - Palik Handbook of Optical Constants, Vol. 1 Table 1 (room temperature)
   - Serov et al. (2016) cryogenic reference points at 4 K
@@ -35,7 +40,7 @@ m_e  = 9.109e-31          # kg
 n_e  = 8.49e28            # free electrons/m³ (copper)
 e_C  = 1.602e-19          # C
 
-# ── Hagen-Rubens model ────────────────────────────────────────────────────────
+# ── Hagen-Rubens model (low-frequency limit only) ────────────────────────────
 def hagen_rubens_R(freq_Hz, sigma_SI):
     omega = 2.0 * np.pi * freq_Hz
     D = 2.0 * np.sqrt(2.0 * eps0 * omega / sigma_SI)
@@ -43,12 +48,21 @@ def hagen_rubens_R(freq_Hz, sigma_SI):
 
 # ── Full Drude model (Griffiths §9.4) ────────────────────────────────────────
 sigma_RT = 5.96e7   # S/m — universal for all Cu grades at 273 K
+# RRR is the primary user parameter. σ_DC = RRR × σ_RT at 4K (impurity dominated).
+# σ_phonon ~ 1/T (simple power law) is only valid above ~50K.
+# Below ~50K umklapp scattering makes the phonon term more complex (Bloch-Grüneisen)
+# but it is negligible vs the impurity term at 4K anyway.
 
 def sigma_drude(T_K, RRR):
-    """DC conductivity via Matthiessen's rule."""
-    sigma_impurity = RRR * sigma_RT
-    sigma_phonon   = sigma_RT * 273.0 / max(T_K, 1.0)
-    return 1.0 / (1.0/sigma_impurity + 1.0/sigma_phonon)
+    """DC conductivity via Matthiessen's rule.
+    Linear phonon approximation valid for T >= 50 K.
+    Below 50 K phonons are frozen; sigma_DC = RRR * sigma_RT.
+    """
+    sigma_imp = RRR * sigma_RT
+    if T_K >= 50.0:
+        sigma_ph = sigma_RT * 273.0 / T_K
+        return 1.0 / (1.0/sigma_imp + 1.0/sigma_ph)
+    return sigma_imp
 
 def drude_R(freq_Hz, sigma_DC):
     """Normal-incidence reflectance from the full Drude model.
@@ -68,11 +82,12 @@ def drude_R(freq_Hz, sigma_DC):
     R = ((n_re - 1.0)**2 + n_im**2) / ((n_re + 1.0)**2 + n_im**2)
     return np.clip(R, 0.0, 1.0)
 
-# Conductivities from BBRMaterials.hh
-materials_HR = {
-    "OFHC_Cu (RRR=100, Hagen-Rubens)": {"sigma": 5.96e9,  "color": "steelblue",   "ls": "-"},
-    "OF_Cu (Serov 2016, Hagen-Rubens)": {"sigma": 1.786e8, "color": "darkorange",  "ls": "--"},
-    "HP_Cu (Serov 2016, Hagen-Rubens)": {"sigma": 3.383e8, "color": "forestgreen", "ls": "-."},
+# Drude materials — RRR is the primary parameter; σ_DC = RRR × σ_RT at 4K.
+# Named aliases match GetCopperByName() in BBRMaterials.hh.
+materials_drude = {
+    "OFHC_Cu (RRR=100, Drude, 4K)": {"rrr": 100, "color": "steelblue",   "ls": "-"},
+    "OF_Cu   (RRR=3,   Drude, 4K)": {"rrr":   3, "color": "darkorange",  "ls": "--"},
+    "HP_Cu   (RRR=6,   Drude, 4K)": {"rrr":   6, "color": "forestgreen", "ls": "-."},
 }
 
 # ── load tabulated data ───────────────────────────────────────────────────────
@@ -103,18 +118,41 @@ for ax, qty, ylabel, ylim, yscale in [
     ax.grid(True, which="both", ls=":", alpha=0.4)
     ax.axvspan(50, 20000, alpha=0.06, color="gray", label="BBRsim range (50 GHz–20 THz)")
 
-    # Hagen-Rubens curves
-    for label, cfg in materials_HR.items():
-        vals = hagen_rubens_R(freq_Hz, cfg["sigma"])
-        y = vals if qty == "R" else 1 - vals
+    # Drude curves — one per RRR alias; this is what BBRMaterials.hh computes
+    for label, cfg in materials_drude.items():
+        sig  = sigma_drude(4.0, cfg["rrr"])
+        vals = drude_R(freq_Hz, sig)
+        y    = vals if qty == "R" else 1 - vals
         ax.plot(freq_GHz, y, color=cfg["color"], ls=cfg["ls"], lw=2, label=label)
 
-    # Full Drude model — OFHC Cu (RRR=100, 4K); shows divergence from H-R above ~64 GHz
-    sigma_ofhc = 5.96e9  # S/m, RRR=100 × σ_RT
-    drude_vals = drude_R(freq_Hz, sigma_ofhc)
-    y_drude = drude_vals if qty == "R" else 1 - drude_vals
-    ax.plot(freq_GHz, y_drude, color="steelblue", ls=":", lw=2.5,
-            label="OFHC_Cu (RRR=100, full Drude, 4K)")
+    # Hagen-Rubens for OFHC_Cu — shown as dashed reference to mark where it diverges
+    sigma_ofhc = 100 * sigma_RT
+    hr_vals = hagen_rubens_R(freq_Hz, sigma_ofhc)
+    y_hr = hr_vals if qty == "R" else 1 - hr_vals
+    ax.plot(freq_GHz, y_hr, color="steelblue", ls=":", lw=1.5, alpha=0.5,
+            label="OFHC_Cu Hagen-Rubens (low-f limit, ref only)")
+
+    # G4 REFLECTIVITY table: the 20 log-spaced points stored by BuildDrudeMaterial
+    # (same Drude formula evaluated at discrete energies — what Geant4 actually interpolates)
+    N_tab      = 20
+    E_tab_eV   = np.exp(np.linspace(np.log(2.07e-4), np.log(8.27e-2), N_tab))  # eV
+    h_eVs_loc  = 4.13566769692e-15
+    nu_tab     = E_tab_eV / h_eVs_loc
+    fGHz_tab   = nu_tab / 1e9
+    R_tab      = drude_R(nu_tab * 1e9, sigma_ofhc)
+    y_tab = R_tab if qty == "R" else 1 - R_tab
+    ax.plot(fGHz_tab, y_tab, "P", color="steelblue", ms=6, alpha=0.9, zorder=6,
+            markeredgecolor="navy", markeredgewidth=0.6,
+            label="G4 Drude table (20 pts, Cu_RRR100_T4K in BBRMaterials)")
+
+    # Simulation observation from reflectance.mac (10 000 events, 500 GHz normal incidence)
+    sim_fGHz = 500.0
+    sim_R    = 9984.0 / 10000.0   # reflected / total
+    sim_D    = 1.0 - sim_R
+    y_sim = sim_R if qty == "R" else sim_D
+    ax.scatter([sim_fGHz], [y_sim], s=120, marker="*", color="crimson",
+               edgecolors="darkred", linewidths=0.8, zorder=7,
+               label=f"BBRsim obs (500 GHz, N=10k, {'R' if qty=='R' else 'D'}={y_sim:.4f})")
 
     # Geant4 IR reflectivity table
     y_g4 = g4ir["R"] if qty == "R" else g4ir["D"]
@@ -161,8 +199,19 @@ for T, col in zip(temps, tcolors):
     D_drude = 1.0 - drude_R(freq_Hz, sig)
     tau_ps  = sig * m_e / (n_e * e_C**2) * 1e12
     f_break = 1.0 / (2.0 * np.pi * sig * m_e / (n_e * e_C**2)) / 1e9
-    ax_T.plot(freq_GHz, D_drude, color=col, lw=2,
+    linestyle = "-" if T >= 50 else "--"  # solid above ~50K (1/T valid), dashed below
+    ax_T.plot(freq_GHz, D_drude, color=col, lw=2, ls=linestyle,
               label=f"T = {T} K  (σ={sig:.2e} S/m, f_break={f_break:.0f} GHz)")
+
+# Mark the ~50K boundary below which σ_phonon ~ 1/T breaks down (umklapp regime)
+ax_T.axhline(y=0, alpha=0)  # invisible anchor
+ax_T.annotate(
+    "Below ~50 K: σ_phonon ~ 1/T\nbreaks down (umklapp/Bloch-Grüneisen).\n"
+    "σ_DC = RRR × σ_RT used instead.",
+    xy=(0.3, 0.03), xycoords="axes fraction",
+    fontsize=7, color="gray",
+    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.7),
+)
 
 # Serov 4K reference points on temperature panel
 serov_colors = {"OF_Cu": "darkorange", "HP_Cu": "forestgreen"}
