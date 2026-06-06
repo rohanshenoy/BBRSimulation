@@ -67,6 +67,7 @@ set(BBRSim_SCRIPTS
     test_of_cu.mac
     test_hp_cu.mac
     reflectance.mac
+    planck.mac
   )
 
 foreach(_script ${BBRSim_SCRIPTS})

@@ -94,9 +94,10 @@ in Chang Table 5.1 (roughly: a space is "open" if its smallest dimension is
 ## Current repository state (2026-05-05)
 
 The repo has progressed beyond the initial scaffold. The HFSS diffraction
-path is fully implemented and validated. A material framework (`BBRMaterials`,
-`vacuum_wg`) is in place. The next two pieces — material reflectance tables
-and the Planck emitter — are designed but not yet built.
+path is fully implemented and validated. The Cu reflectance model (full Drude,
+RRR-parameterized) and the Planck thermal emitter are both operational.
+The next pieces are the non-Cu material database (Cirlex, Si, Ge) and the
+validation geometry.
 
 ### BBR-specific additions (implemented)
 
@@ -155,11 +156,9 @@ and the Planck emitter — are designed but not yet built.
 
 ### What is explicitly *not* in the repo yet
 
-- **No Planck emitter** — `BBRThermalPGA` / `BBRPlanckSampler` / `BBRThermalSurface`
-  not yet built. All current runs fire a monochromatic 500 GHz test photon.
-- **No material reflectance tables** — vacuum→OFHC Cu (Hagen-Rubens),
-  perfect absorber, perfect reflector not yet implemented. `BBR_REFLECTIVITY`
-  on `Material2`'s MPT is the planned injection point in `BBSimOpBoundaryProcess`.
+- **No material reflectance tables for non-Cu materials** — Si, Ge, Cirlex, PCB
+  not yet in `BBRMaterials`. Cu (full Drude), perfect absorber, and perfect
+  reflector are implemented.
 - No patched `G4OpBoundaryProcess` — `REFLECTIVITY` still lives only on
   `G4OpticalSurface` in stock Geant4 11.4.
 - No CADMesh integration, no `.STL` import.
@@ -215,12 +214,15 @@ u³/(e^u−1)), `BBRThermalSurface` (POD struct), `BBRThermalPGA` (hardcoded
 ### [UNBLOCKED] Drude copper reflectance model
 
 Replace `BuildHagRubMaterial` (Hagen-Rubens) with `BuildDrudeMaterial` in
-`include/BBRMaterials.hh`. Parameters: `(name, RRR, T_K)`. Derives σ_DC via
-Matthiessen's rule, τ from the Drude formula, then evaluates full Griffiths
-§9.4 reflectance at each frequency. Replaces all three named Cu getters with
-a single `GetCopper(RRR, T_K)`. Update `GetCopperByName()` messenger to
-accept RRR as integer and optional temperature. See
-`docs/physics/copper_reflectance_model.md`.
+`include/BBRMaterials.hh`. Parameters: `(name, RRR, T_K=4.0)`. Derives
+σ_DC = RRR × σ_RT (impurity-dominated at 4 K), τ from the Drude formula,
+then evaluates full Griffiths §9.4 reflectance at each frequency. T_K is
+optional and defaults to 4 K; supply a different value for warmer shield
+layers and create a separate `G4MaterialPropertiesTable` per temperature
+stage. Replaces all three named Cu getters with a single `GetCopper(RRR, T_K)`.
+Update `GetCopperByName()` messenger to accept RRR as integer and optional
+temperature. RRR is the **only required** user input; do not require users to
+supply σ_DC directly. See `docs/physics/copper_reflectance_model.md`.
 
 ## Build
 
@@ -310,19 +312,110 @@ messenger or surface flag so the pass-through path remains testable.
 
 - σ_RT = 5.96×10⁷ S/m — universal for all Cu grades at 273 K; does **not**
   depend on material quality.
-- σ(4 K) = RRR × σ_RT. RRR range: 1 (disordered) → ~10 (commercial) →
-  ~100 (OFHC) → ~500 (ultra-pure crystal).
+- **RRR is the primary user-facing parameter.** Users supply an integer RRR
+  per cryostat component (different components use different quality Cu).
+  RRR range: 1 (disordered) → ~10 (commercial) → ~100 (OFHC) → ~500 (ultra-pure crystal).
+- σ(4 K) ≈ RRR × σ_RT. At 4 K for high-RRR Cu the impurity term dominates,
+  so this is an excellent approximation.
 - τ = σ_DC × mₑ / (nₑ e²). Cu constants: nₑ = 8.49×10²⁸ m⁻³,
   mₑ = 9.109×10⁻³¹ kg.
 - Hagen-Rubens valid only for f << 1/(2πτ). OFHC Cu at 4 K (RRR=100):
   τ ≈ 2.5 ps → H-R valid below ~64 GHz. BBRsim starts at 50 GHz — always
   use the full Drude model.
 - Matthiessen's rule: 1/σ(T) = 1/σ_impurity + 1/σ_phonon(T), where
-  1/σ_impurity = 1/(RRR × σ_RT) and σ_phonon(T) ≈ σ_RT × 273/T (T > 50 K).
+  1/σ_impurity = 1/(RRR × σ_RT).
+  - σ_phonon ~ 1/T is only the simple power-law limit, valid above ~50 K.
+  - At 10s of Kelvin (the cryostat shield regime), umklapp scattering
+    (phonon–phonon) breaks the 1/T law — see the Bloch-Grüneisen model.
+    This matters for shield layers but **not** for the detector (mK stage),
+    where phonon contribution is negligible and σ ≈ RRR × σ_RT anyway.
+  - Do **not** ask users to specify temperature-dependent σ directly;
+    it is administratively tedious and they will not have the data. Accept
+    RRR as the sole user input; use separate `G4MaterialPropertiesTable`
+    instances if different temperature stages need different optical tables.
 - Full Drude: σ(ω) = σ_DC/(1−iωτ); insert into Griffiths §9.4 to get k̃;
   R = |(ñ−1)/(ñ+1)|² where ñ = c·k̃/ω.
 - **Do NOT hardcode σ per Cu variant.** Derive everything from (RRR, T_K).
   See `docs/physics/copper_reflectance_model.md`.
+
+## BBRsim messenger quick-reference
+
+All commands must be issued **before** `/run/initialize`.
+
+### `/bbr/det/` — detector geometry
+
+| Command | Argument | Default | Description |
+|---------|----------|---------|-------------|
+| `/bbr/det/setCuMaterial` | `OFHC_Cu \| OF_Cu \| HP_Cu` | `OFHC_Cu` | Named alias; resolves to an RRR value and resets temperature to 4 K |
+| `/bbr/det/setCuRRR` | integer ≥ 1 | 100 | Direct RRR input; σ_DC = RRR × 5.96×10⁷ S/m |
+| `/bbr/det/setCuStageT` | value + unit (e.g. `77 K`) | `4 K` | Temperature stage for the reflectance table |
+
+**Named alias → RRR mapping:**
+
+| Alias | RRR | Grade |
+|-------|-----|-------|
+| `OFHC_Cu` | 100 | Standard oxygen-free high-conductivity |
+| `OF_Cu` | 3 | Low-purity / cold-worked |
+| `HP_Cu` | 6 | Hydrogen-annealed 99.999% |
+
+**Typical usage in a mac file:**
+
+```mac
+# Option A — named alias (most common)
+/bbr/det/setCuMaterial OFHC_Cu
+/run/initialize
+
+# Option B — direct RRR (user knows their sample spec)
+/bbr/det/setCuRRR 300
+/run/initialize
+
+# Option C — warm shield layer (RRR + temperature stage)
+/bbr/det/setCuRRR 50
+/bbr/det/setCuStageT 40 K
+/run/initialize
+```
+
+**Physics note on temperature:**
+- Below 50 K: σ_DC = RRR × σ_RT (impurity dominated; phonon contribution negligible)
+- Above 50 K: Matthiessen's rule adds σ_phonon ≈ σ_RT × 273/T
+- At 10–50 K the 1/T approximation is approximate (umklapp/Bloch-Grüneisen); only relevant for warm shield layers, not the detector stage
+- σ_RT = 5.96×10⁷ S/m is a universal constant for all Cu grades — users never supply it
+
+### `/bbr/thermal/` — Planck emitter
+
+| Command | Argument | Default | Description |
+|---------|----------|---------|-------------|
+| `/bbr/thermal/setT` | value in K | 4.0 | Emitter temperature; re-initializes the Planck CDF at the next event |
+
+**Ordering constraint:** `/bbr/thermal/setT` must be issued **after** `/run/initialize`.
+The messenger is registered inside `BBRTestPGA`'s constructor, which runs during
+`Build()` inside `Initialize()`. The default temperature is 4 K; the command is
+optional for 4 K runs. The CDF range is fixed at 10 GHz–20 THz (8.27×10⁻² eV).
+
+Angular direction is sampled uniformly over the outward hemisphere (θ uniform in
+[0°, 90°], φ uniform in [0°, 360°]) — this is YYC's original convention and is
+intentional. It is a known approximation; the exact distribution at emission becomes
+less important after multiple reflections inside the cryostat cavity.
+
+```mac
+/run/initialize
+/bbr/thermal/setT 10.0    # 10 K emitter
+/run/beamOn 10000
+```
+
+### `/bbr/gun/` — particle gun
+
+| Command | Argument | Default | Description |
+|---------|----------|---------|-------------|
+| `/bbr/gun/mode` | `true \| false` | false | `true` = direct-hit mode (solid Cu at z=5 mm); `false` = crack-test mode |
+| `/bbr/gun/posX` | mm | -20 | Gun X position |
+| `/bbr/gun/posY` | mm | 0 | Gun Y position |
+| `/bbr/gun/posZ` | mm | 0 | Gun Z position |
+| `/bbr/gun/dirX/Y/Z` | dimensionless | (1,0,0) | Momentum direction (will be normalized) |
+| `/bbr/gun/energy_eV` | eV | 2.07×10⁻³ | Photon energy (500 GHz = 2.07×10⁻³ eV) |
+| `/bbr/gun/setZ` | value + `mm` | 0 mm | Shortcut for Z position (crack-test mode) |
+
+---
 
 ## Geant4 API Reference
 

@@ -1,8 +1,8 @@
 # test_of_cu.mac
-# Smoke test for OF_Cu (Serov 2016 OF copper at 4 K, sigma_eff = 1/rho_0).
+# Smoke test for OF_Cu (RRR=3, full Drude model at 4K via BBRMaterials::GetCopper(3,4.0)).
 # Gun mode: every photon hits solid Cu at z=5mm (away from cracks at z=0, z=3mm).
 # 2000 events → 2000 Cu hits → 2 [BBR] reflectance lines.
-# Expect A_obs ~ 1.1e-3 (higher loss than OFHC_Cu at 500 GHz).
+# Expect A_obs higher than OFHC_Cu (lower RRR → lower σ → higher loss).
 /run/verbose 0
 /event/verbose 0
 /random/setSeeds 12345 67890

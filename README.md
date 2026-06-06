@@ -9,52 +9,60 @@ Superconducting Circuits and Cryogenic Detectors* (2025).
 ## Why this exists
 
 Superconducting-circuit qubits and sub-Kelvin phonon-mediated particle
-detectors are limited by non-thermal quasiparticle / charge-carrier
-populations. One cause is free-space BBR that leaks through machining
-gaps, cable slots, and flange-lid joints in otherwise "sealed" cryostat
-chambers. BBR from a 4 K surface peaks near λ = 1.3 mm, comparable to or
-larger than typical mating tolerances, so every nominally closed chamber
-behaves as a leaky waveguide for long-wavelength photons. Existing tools
-do not handle this well: ray-trace simulators assume open propagation,
-and non-sequential optical simulators assume discrete sources rather than
-an "everywhere" thermal source.
+detectors are limited by non-thermal quasiparticle populations. One cause is
+free-space BBR leaking through machining gaps, cable slots, and flange-lid
+joints in otherwise "sealed" cryostat chambers. BBR from a 4 K surface peaks
+near λ = 1.3 mm, comparable to or larger than typical mating tolerances, so
+every nominally closed chamber behaves as a leaky waveguide for long-wavelength
+photons. Existing tools handle either open-volume ray-tracing or wave
+propagation in gaps — not both consistently on CAD-accurate geometry.
 
-BBRsim's goal is to do both — ray-trace in open volumes, wave propagation
-(via pre-computed HFSS S-parameters) in gaps — on CAD-accurate geometry,
-so apparatus can be designed *against* BBR backgrounds instead of
-debugging them afterward.
+BBRsim does both: ray-trace in open volumes via Geant4 optical photons, and
+wave propagation through gaps via pre-computed HFSS S-parameters — on the same
+event-by-event footing, so BBR backgrounds can be simulated rather than
+debugged after the fact.
 
-## Status
+## Status (June 2026)
 
-**Early scaffolding on top of Geant4's `optical/OpNovice2` example.**
+Core physics is operational. The HFSS diffraction path is validated; the Cu
+reflectance model is implemented and tested. A Planck emitter and CAD import
+are the next milestones.
 
-What exists:
+### Working
 
-- `BBRSim.cc` — executable entry point.
-- `BBSimPhysics` — `G4VPhysicsConstructor` that wraps the
-  `G4OpBoundaryProcess` registered by `G4OpticalPhysics`.
-- `BBSimOpBoundaryProcess` — `G4WrapperProcess` subclass; pure
-  pass-through today. This is the hook point where BBR-specific boundary
-  physics (tabulated cryogenic metal reflectance, HFSS waveguide
-  transmission, diffraction) will be injected.
-- `verify.mac` — fixed-seed regression to prove the wrapper stays
-  bit-identical to an unwrapped run while it is a pass-through.
-- Unmodified OpNovice2 `DetectorConstruction`, `PrimaryGenerator`,
-  `SteppingAction`, `Run`, `HistoManager`, messengers, and `.mac` test
-  cases — retained as a known-good baseline.
+- **HFSS diffraction** — `BBRHFSSData` loads far-field + waveguide CSVs; `BBRCrackLibrary`
+  lazy-loads datasets by volume name; `BBSimOpBoundaryProcess` intercepts photons entering
+  `vacuum_wg` crack volumes and routes them through the HFSS lookup.
+  Validated: T_obs ≈ 52.8% at 500 GHz normal incidence (theory 52.7%).
 
-What is **not** here yet (all planned): a Planck-distributed
-`ThermalSurface` emission system; the patched `G4OpBoundaryProcess` that
-moves `REFLECTIVITY` from `G4OpticalSurface` to
-`G4MaterialPropertiesTable`; CADMesh / SOLIDWORKS `.STL` import; an HFSS
-`.csv` loader and open↔bounded interface in `UserSteppingAction`; a
-cryogenic-material optical-property database; and the BB source +
-mesh-TES detector geometries needed for validation.
+- **Cu reflectance** — Full Drude model (Griffiths §9.4) parameterized by RRR and
+  temperature. `BBRMaterials::GetCopper(RRR, T_K)` builds a 20-point log-spaced
+  REFLECTIVITY table from 50 GHz to 20 THz. Three named grades available; users
+  may also supply any integer RRR directly. See [docs/physics/copper_reflectance_model.md](docs/physics/copper_reflectance_model.md).
 
-`CLAUDE.md` has a more detailed breakdown of the physics architecture
-and the implementation gap.
+- **Test geometry** — `BBRTestDetectorConstruction`: 50 cm world, 4 mm Cu slab,
+  two `vacuum_wg` crack daughters at z = 0 and z = 3 mm. Cu material and gun
+  position fully configurable via messenger before `/run/initialize`.
+
+- **Wrapper regression** — `verify_wrapper.mac` checks that `BBSimOpBoundaryProcess`
+  is bit-identical to the unwrapped `G4OpBoundaryProcess` on geometries with no
+  `vacuum_wg` volumes.
+
+### Not yet implemented
+
+- Planck-distributed thermal emitter (`BBRThermalPGA`, `BBRPlanckSampler`)
+- CADMesh / SOLIDWORKS `.STL` import
+- Patched `G4OpBoundaryProcess` with `REFLECTIVITY` on `G4MaterialPropertiesTable`
+  (upstream Geant4 PR target)
+- ROOT `TTree` absorption output and leakage-current post-processing
+- Full cryogenic material database beyond Cu (Si, Ge, Cirlex, PCB)
+- BBR calibration geometry (BB source + mesh-TES detector models)
 
 ## Build
+
+**Prerequisites:** Geant4 11.x (built with optical physics), CMake ≥ 3.16,
+a C++17 compiler. Python scripts require the `bbrsim` conda environment
+(NumPy, SciPy, Matplotlib, Pandas).
 
 ```bash
 mkdir build && cd build
@@ -69,65 +77,116 @@ cmake -DWITH_GEANT4_UIVIS=OFF ..
 make
 ```
 
-CMake copies all `.mac` files to the build directory alongside the
-executable.
+CMake copies all `.mac` files to the build directory alongside the executable.
 
 ## Run
 
-Interactive (UI + vis):
+The executable is `BBRSim` (not `OpNovice2`). All commands below run from the
+`build/` directory.
+
+### Diffraction smoke tests
 
 ```bash
-cd build
+./BBRSim diffraction.mac         # crack1, 500 GHz normal incidence
+./BBRSim diffraction_crack2.mac  # crack2, gun at z = 3 mm
+./BBRSim validation.mac          # both cracks in one session
+```
+
+Expected transmittances: crack1 ≈ 52.7%, crack2 ≈ 50.4%.
+Output: `diffraction_output.csv` with columns `crack_id, x, y`.
+
+```bash
+conda run -n bbrsim python ../scripts/plot_diffraction.py
+```
+
+### Cu reflectance smoke test
+
+```bash
+./BBRSim test.mac            # OFHC_Cu (RRR=100), 500 GHz, 10 000 events
+./BBRSim test_of_cu.mac      # OF_Cu   (RRR=3),   500 GHz, 2 000 events
+./BBRSim test_hp_cu.mac      # HP_Cu   (RRR=6),   500 GHz, 2 000 events
+```
+
+Output: `[BBR] reflectance mat=... N=... A_obs=... R_theory=...` printed to stdout.
+Compare against Drude theory:
+
+```bash
+./BBRSim test.mac >out.txt 2>&1
+conda run -n bbrsim python ../scripts/check_cu_absorptance.py out.txt --rrr 100
+```
+
+Plot reflectance vs frequency across Cu grades and temperatures:
+
+```bash
+conda run -n bbrsim python ../scripts/plot_cu_reflectance.py
+# output: build/cu_reflectance_plots.png
+```
+
+### Setting Cu material at runtime
+
+In any mac file, before `/run/initialize`:
+
+```mac
+# Named alias (sets RRR and temperature to 4 K)
+/bbr/det/setCuMaterial OFHC_Cu
+
+# Direct RRR input (any integer >= 1)
+/bbr/det/setCuRRR 300
+
+# Warm shield layer: set temperature first, then RRR
+/bbr/det/setCuStageT 40 K
+/bbr/det/setCuRRR 50
+```
+
+Valid aliases: `OFHC_Cu` (RRR=100), `OF_Cu` (RRR=3), `HP_Cu` (RRR=6).
+σ_DC is derived automatically as RRR × 5.96×10⁷ S/m.
+
+### Wrapper regression
+
+```bash
+./BBRSim verify_wrapper.mac
+```
+
+Run before and after any change to `BBSimOpBoundaryProcess` or `BBSimPhysics`.
+Output must be bit-identical to the baseline.
+
+### Interactive (UI + visualization)
+
+```bash
 ./BBRSim
 ```
 
-Batch:
-
-```bash
-./BBRSim electron.mac     # stock OpNovice2 — Cerenkov + scintillation from e-
-./BBRSim boundary.mac     # stock OpNovice2 — boundary process sweep
-./BBRSim verify.mac       # fixed-seed wrapper regression
-```
-
-The executable is `BBRSim`. (The original OpNovice2 `main()` is also
-present as `OpNovice2.cc` for reference; it is not built by the default
-`CMakeLists.txt`.)
+Requires a Geant4 build with UI and visualization drivers enabled.
 
 ## Project plan and team
 
 From the NSF proposal, period of performance 2026Q4–2029Q3:
 
-- **O1** — Complete BBRsim development.
-- **O2** — Validate against a temperature-controlled TK-RAM / OFHC-Cu BB
-  source (4–20 K, ~160 cm² emitting area, CFRP thermal break) plus
-  purpose-built mesh-TES photon detectors (W TES, 3 mm on Si, three
-  designs optimized for 4 / 9 / 20 K peak emission). First stages use
-  manufactured test geometries at TAMU; the final stage uses a
-  SuperCDMS SNOLAB Pathfinder detector tower at SLAC.
-- **O3** — Publish and release BBRsim as a Geant4 module; upstream the
-  `G4OpBoundaryProcess` `REFLECTIVITY` change via the Geant4 EM Physics
-  Working Group.
+- **O1** — Complete BBRsim development (this repository).
+- **O2** — Validate against a temperature-controlled OFHC-Cu BB source (4–20 K)
+  plus purpose-built mesh-TES photon detectors at TAMU's DR and the SuperCDMS
+  SNOLAB Pathfinder tower at SLAC.
+- **O3** — Release BBRsim as a Geant4 module; upstream the `G4OpBoundaryProcess`
+  `REFLECTIVITY` change via the Geant4 EM Physics Working Group.
 
-Team: Golwala (PI, Caltech), Mirabolfathi (co-PI, TAMU), Shenoy (student
-lead, Caltech), Xiong (Brinson postdoc, Caltech), Kurinsky / Partridge
-(SLAC SuperCDMS, unfunded collaborators), Chang (BBRsim originator,
-unfunded advisor).
+Team: Golwala (PI, Caltech), Mirabolfathi (co-PI, TAMU), Shenoy (student lead,
+Caltech), Xiong (Brinson postdoc, Caltech), Kurinsky / Partridge (SLAC
+SuperCDMS, unfunded collaborators), Chang (BBRsim originator, unfunded advisor).
 
 ## References
 
-- Chang, Y.-Y., *SuperCDMS HVeV Run 2 Low-Mass Dark Matter Search,
-  Highly Multiplexed Phonon-mediated Particle Detector with Kinetic
-  Inductance Detector, and the Blackbody Radiation in Cryogenic
-  Experiments* (Caltech PhD thesis, 2023). Chapter 5 is the primary
-  reference for BBRsim physics and the particle-like simulation design.
+- Chang, Y.-Y. (2023). *SuperCDMS HVeV Run 2 Low-Mass Dark Matter Search,
+  Highly Multiplexed Phonon-mediated Particle Detector with Kinetic Inductance
+  Detector, and the Blackbody Radiation in Cryogenic Experiments*. PhD thesis,
+  Caltech. Chapter 5 is the primary physics reference.
 - Golwala & Mirabolfathi, *BBRsim* NSF QIS proposal (2025).
-- Agostinelli et al., "GEANT4 — a simulation toolkit," *NIM A* **506**,
-  250 (2003).
+- Agostinelli et al., "GEANT4 — a simulation toolkit," *NIM A* **506**, 250 (2003).
+- Griffiths, D.J. (2017). *Introduction to Electrodynamics*, 4th ed. §9.4.
+- Serov, Y.L. et al. (2016). *IEEE Trans. Microwave Theory Tech.* **64**(11), 3828.
 - Poole et al., CADMesh (2nd ver.) — CAD → Geant4 geometry import.
 
 ## License
 
-Portions derived from the Geant4 `examples/extended/optical/OpNovice2`
-example retain Geant4's license terms. BBRsim-specific additions will be
-released under a compatible open-source license with the final Geant4
-module publication.
+Portions derived from the Geant4 `examples/extended/optical/OpNovice2` example
+retain Geant4's license terms. BBRsim-specific additions will be released under
+a compatible open-source license with the final Geant4 module publication.

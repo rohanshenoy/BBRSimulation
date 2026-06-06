@@ -1,0 +1,26 @@
+# planck.mac
+# Smoke test for the Planck emitter at 4 K.
+# Fires 10 000 photons from a 1x20x20 mm box surface at x=-50 mm (in_out=true).
+# Energy sampled from the Planck photon-number spectrum (10 GHz - 20 THz).
+# Angular direction sampled uniformly over the outward hemisphere (YYC convention).
+#
+# Expected output:
+#   test_output.csv — one row per boundary crossing
+# Validate spectrum peak:
+#   conda run -n bbrsim python scripts/check_planck_spectrum.py build/test_output.csv --temp 4
+#
+# Note: /bbr/thermal/setT must come AFTER /run/initialize because the
+# messenger is registered inside BBRTestPGA(), which is constructed during
+# Build() inside Initialize(). The default temperature is 4 K so this
+# command is optional for a 4 K run but shown for clarity.
+
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/random/setSeeds 42 1337
+
+/run/initialize
+
+/bbr/thermal/setT 4.0
+
+/run/beamOn 10000
