@@ -2,9 +2,11 @@
 #include "BBRRunAction.hh"
 #include "BBSimOpBoundaryProcess.hh"
 
+#include "G4GeometryTolerance.hh"
 #include "G4OpticalPhoton.hh"
 #include "G4ProcessManager.hh"
 #include "G4ProcessVector.hh"
+#include "G4Run.hh"
 #include "G4RunManager.hh"
 #include "G4Step.hh"
 #include "G4SystemOfUnits.hh"
@@ -44,29 +46,37 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   if (track->GetDefinition() != G4OpticalPhoton::OpticalPhoton()) return;
   if (step->GetPostStepPoint()->GetStepStatus() != fGeomBoundary)  return;
 
+  // Skip tolerance-scale re-steps at the same surface (StepTooSmall in the
+  // boundary process): no physics happens on them and they would inflate
+  // n_reflect / duplicate rows.
+  const G4double kCarTolerance =
+      G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
+  if (step->GetStepLength() <= kCarTolerance / 2.) return;
+
   // Lazy-init: find BBSimOpBoundaryProcess wrapper on first boundary step
-  if (!fBoundary) {
+  if (!fWrapper) {
     G4ProcessVector* pv = track->GetDefinition()
                                ->GetProcessManager()->GetProcessList();
     for (std::size_t i = 0; i < pv->size(); ++i) {
       if (auto* w = dynamic_cast<BBSimOpBoundaryProcess*>((*pv)[i])) {
-        fBoundary = dynamic_cast<G4OpBoundaryProcess*>(w->GetWrappedProcess());
+        fWrapper  = w;
+        fBoundary = w->GetWrappedProcess();
         break;
       }
     }
   }
 
+  G4int runId   = G4RunManager::GetRunManager()->GetCurrentRun()->GetRunID();
   G4int eventId = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
 
   const G4StepPoint* pre  = step->GetPreStepPoint();
   const G4StepPoint* post = step->GetPostStepPoint();
   G4ThreeVector      pPre = pre->GetMomentumDirection();
 
-  // Skip StepTooSmall steps — pre-step momentum direction is undefined
-  if (std::abs(pPre.x()) > 1.1 || std::abs(pPre.y()) > 1.1 || std::abs(pPre.z()) > 1.1) return;
-
-  // Per-track reflection counter — reset when event or track changes
-  if (eventId != fCurrentEventID || track->GetTrackID() != fCurrentTrackID) {
+  // Per-track reflection counter — reset when run, event, or track changes
+  if (runId != fCurrentRunID || eventId != fCurrentEventID ||
+      track->GetTrackID() != fCurrentTrackID) {
+    fCurrentRunID   = runId;
     fCurrentEventID = eventId;
     fCurrentTrackID = track->GetTrackID();
     fNReflect = 0;
@@ -84,13 +94,23 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
                              ? post->GetPhysicalVolume()->GetName() : "none";
   const G4String matPost = post->GetMaterial()
                              ? post->GetMaterial()->GetName()        : "none";
-  const G4String status  = fBoundary ? StatusStr(fBoundary->GetStatus()) : "unknown";
+
+  // Status: if the wrapper handled this boundary itself the wrapped stock
+  // process never ran, so its GetStatus() would be stale — prefer the
+  // wrapper's own record of what it did.
+  G4String status = "unknown";
+  if (fWrapper) {
+    status = fWrapper->GetLastBBRStatusString();
+    if (status.empty() && fBoundary) status = StatusStr(fBoundary->GetStatus());
+  } else if (fBoundary) {
+    status = StatusStr(fBoundary->GetStatus());
+  }
 
   const G4double theta_in = std::acos(std::abs(pPre.x())) * 180. / CLHEP::pi;
   const G4double phi_in   = std::atan2(pPre.y(), pPre.z()) * 180. / CLHEP::pi;
 
   std::ofstream& out = fRunAction->GetOutputStream();
-  out << eventId << ","
+  out << runId << "," << eventId << ","
       << std::fixed << std::setprecision(6)
       << pos.x()/mm << "," << pos.y()/mm << "," << pos.z()/mm << ","
       << pre->GetKineticEnergy()/eV << ","

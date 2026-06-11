@@ -31,20 +31,21 @@ def drude_sigma_dc(RRR, T_K):
     return sigma_imp
 
 def drude_R(energy_eV, RRR, T_K):
-    """Normal-incidence Fresnel reflectance from the Drude model."""
+    """Normal-incidence Fresnel reflectance from the full complex Drude model.
+
+    σ(ω) = σ_DC/(1−iωτ) inserted as a complex quantity:
+      ε̃ = 1 + iσ/(ε₀ω);  ñ = √ε̃;  R = |(ñ−1)/(ñ+1)|².
+    Im σ supplies the plasma term in Re ε̃ — dropping it (the old behaviour)
+    overestimates absorptance by ~30× at 500 GHz for RRR=100 at 4 K.
+    """
     sigma_dc = drude_sigma_dc(RRR, T_K)
     tau      = sigma_dc * m_e / (n_e * e_C**2)
     nu       = energy_eV / h_eVs          # Hz
     omega    = 2.0 * np.pi * nu
-    ot       = omega * tau
-    sigma_r  = sigma_dc / (1.0 + ot**2)
-    ratio    = sigma_r / (eps0 * omega)
-    root     = np.sqrt(1.0 + ratio**2)
-    k_       = (omega / c_light) * np.sqrt(0.5 * (root + 1.0))
-    kap      = (omega / c_light) * np.sqrt(0.5 * (root - 1.0))
-    n_re     = c_light * k_  / omega
-    n_im     = c_light * kap / omega
-    R = ((n_re - 1.0)**2 + n_im**2) / ((n_re + 1.0)**2 + n_im**2)
+    sigma    = sigma_dc / (1.0 - 1j * omega * tau)
+    eps_t    = 1.0 + 1j * sigma / (eps0 * omega)
+    n_t      = np.sqrt(eps_t)
+    R        = np.abs((n_t - 1.0) / (n_t + 1.0)) ** 2
     return float(np.clip(R, 0.0, 1.0))
 
 # ── parse args ────────────────────────────────────────────────────────────────
@@ -64,6 +65,14 @@ if not os.path.exists(args.csv):
 
 df = pd.read_csv(args.csv)
 
+# CSVs written since the multi-run fix carry a run_id column; key events on
+# (run_id, event_id) so two runs in one session don't merge. Older CSVs
+# without run_id fall back to event_id alone.
+if "run_id" in df.columns:
+    df["evt_key"] = list(zip(df["run_id"], df["event_id"]))
+else:
+    df["evt_key"] = df["event_id"]
+
 # ── identify Cu boundary hits ─────────────────────────────────────────────────
 # With Drude model, Cu materials are named "Cu_RRR{N}_T{T}K".
 cu_mask = df["mat_post"].str.startswith("Cu_RRR", na=False)
@@ -74,15 +83,18 @@ if df_cu.empty:
     sys.exit(1)
 
 # ── classify events: absorbed vs reflected ────────────────────────────────────
-# For the reflectance.mac geometry (normal incidence, no cracks in path):
-#   Absorbed:  Cu boundary is the ONLY boundary step for that track (max n_reflect == 1).
-#   Reflected: Cu boundary + world-exit step → max n_reflect == 2.
-max_nr  = df.groupby("event_id")["n_reflect"].max()
-cu_evts = set(df_cu["event_id"].unique())
-
-n_hit      = len(cu_evts)
-n_absorbed = sum(1 for eid in cu_evts if max_nr[eid] == 1)
-n_reflect  = n_hit - n_absorbed
+# The status column records what the wrapper did at the Cu boundary:
+# BBRAbsorb (track killed) or BBRReflect (specular reflection). Older CSVs
+# without BBR statuses fall back to the row-count heuristic (absorbed = Cu
+# boundary is the only logged step; note world-exit steps are fWorldBoundary
+# and are not logged, so that heuristic is unreliable — prefer fresh CSVs).
+n_hit = df_cu["evt_key"].nunique()
+if df_cu["status"].isin(["BBRAbsorb", "BBRReflect"]).any():
+    n_absorbed = df_cu[df_cu["status"] == "BBRAbsorb"]["evt_key"].nunique()
+else:
+    max_nr     = df.groupby("evt_key")["n_reflect"].max()
+    n_absorbed = sum(1 for eid in df_cu["evt_key"].unique() if max_nr[eid] == 1)
+n_reflect = n_hit - n_absorbed
 
 R_obs  = n_reflect / n_hit if n_hit > 0 else float("nan")
 D_obs  = 1.0 - R_obs
@@ -99,7 +111,7 @@ wt        = 2.0 * np.pi * args.freq * 1e9 * (tau_ps * 1e-12)
 
 # ── report ────────────────────────────────────────────────────────────────────
 print(f"\n{'─'*60}")
-print(f"  BBRsim reflectance check — Cu_RRR{args.RRR}_T{int(args.T_K)}K")
+print(f"  BBRsim reflectance check — Cu_RRR{args.RRR}_T{args.T_K:g}K")
 print(f"{'─'*60}")
 print(f"  σ_DC    = {sigma_dc:.3e} S/m")
 print(f"  τ       = {tau_ps:.3f} ps")
@@ -115,10 +127,16 @@ print()
 print(f"  R_obs    = {R_obs:.6f}   (D_obs    = {D_obs:.4e})")
 print(f"  R_theory = {R_theory:.6f}   (D_theory = {D_theory:.4e})")
 
-# Statistical uncertainty on R_obs
-sigma_R = np.sqrt(R_obs * (1.0 - R_obs) / n_hit) if n_hit > 0 else float("nan")
-pull    = (R_obs - R_theory) / sigma_R if sigma_R > 0 else float("nan")
-print(f"  σ(R)     = {sigma_R:.2e}   pull = {pull:+.2f} σ")
+# Statistical test on the absorbed COUNT (Poisson). With the full Drude model
+# D_theory ~ 5e-5, so the expected number of absorptions in a 10k-event run is
+# O(1) and the binomial pull on R_obs degenerates (σ→0 when R_obs = 1).
+lam = n_hit * D_theory
+if lam > 0:
+    pull = (n_absorbed - lam) / np.sqrt(lam)
+else:
+    pull = float("nan")
+print(f"  expected absorbed (λ = N·D_theory) = {lam:.2f}   observed = {n_absorbed}")
+print(f"  Poisson pull = {pull:+.2f} σ")
 
 tol = 5.0
 print()

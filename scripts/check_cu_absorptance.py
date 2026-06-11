@@ -61,16 +61,15 @@ sigma_DC = args.rrr * sigma_RT
 tau      = sigma_DC * m_e / (n_e * e_C * e_C)
 
 def drude_R(omega):
-    """Normal-incidence reflectance from full Drude model (Griffiths §9.4)."""
-    ot      = omega * tau
-    sigma_r = sigma_DC / (1.0 + ot * ot)
-    ratio   = sigma_r / (eps0 * omega)
-    root    = np.sqrt(1.0 + ratio * ratio)
-    k_wav   = (omega / c) * np.sqrt(0.5 * (root + 1.0))
-    kappa   = (omega / c) * np.sqrt(0.5 * (root - 1.0))
-    n_re    = c * k_wav / omega
-    n_im    = c * kappa  / omega
-    return np.clip(((n_re - 1.0)**2 + n_im**2) / ((n_re + 1.0)**2 + n_im**2), 0.0, 1.0)
+    """Normal-incidence reflectance from the full complex Drude model.
+
+    σ(ω) = σ_DC/(1−iωτ) kept complex: ε̃ = 1 + iσ/(ε₀ω), ñ = √ε̃,
+    R = |(ñ−1)/(ñ+1)|². Must match BuildDrudeMaterial in BBRMaterials.hh.
+    """
+    sigma = sigma_DC / (1.0 - 1j * omega * tau)
+    eps_t = 1.0 + 1j * sigma / (eps0 * omega)
+    n_t   = np.sqrt(eps_t)
+    return np.clip(np.abs((n_t - 1.0) / (n_t + 1.0)) ** 2, 0.0, 1.0)
 
 def planck_weight(omega):
     x = hbar * omega / (k_B * T_K)

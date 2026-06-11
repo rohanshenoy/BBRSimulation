@@ -23,23 +23,30 @@ for col in ["theta_in_deg", "n_reflect"]:
     df[col] = pd.to_numeric(df[col], errors="coerce")
 df = df.dropna(subset=["theta_in_deg", "n_reflect"])
 
-# First-hit Cu events only
-cu_first = df[(df["n_reflect"] == 1) & (df["mat_pre"] == "OFHC_Cu")]
+# First-hit Cu events only. The photon arrives from the vacuum, so Cu is the
+# POST-step material; Drude materials are named "Cu_RRR{N}_T{T}K".
+cu_first = df[(df["n_reflect"] == 1)
+              & df["mat_post"].str.startswith("Cu_RRR", na=False)]
 theta = cu_first["theta_in_deg"].values
 
-# KS test against sin(2θ) CDF for θ ∈ [0, 45°] only (avoid wall-clipping bias)
-theta_lo = theta[(theta >= 0) & (theta < 45)]
+# The emitter samples θ UNIFORMLY in [0°, 90°] (YYC's intentional convention,
+# NOT Lambertian — see CLAUDE.md, /bbr/thermal/ notes). The incidence angle on
+# the x=0 Cu wall equals the emission θ, so the expected θ_in density is
+# uniform — up to finite-wall clipping. With the 20×20 mm emitter patch at
+# x=−50 mm and the 50×50 mm wall, every direction with tanθ < 15/50 reaches
+# the wall, so the distribution is exactly uniform for θ < ~16.7°. KS-test
+# against a uniform CDF on [0°, 15°].
+TH_MAX = 15.0
+theta_lo = theta[(theta >= 0) & (theta < TH_MAX)]
 
-# CDF of sin(2θ) on [0, 45°]: F(θ) = (1 - cos(2θ)) / (1 - cos(90°)) = (1 - cos(2θ)) / 1
-def cdf_lambert(theta_deg):
-    t = np.radians(theta_deg)
-    return (1 - np.cos(2 * t)) / 1.0  # normalised to [0,45°] window
+def cdf_uniform(theta_deg):
+    return theta_deg / TH_MAX
 
-stat, p_value = kstest(theta_lo, cdf_lambert)
+stat, p_value = kstest(theta_lo, cdf_uniform)
 passed = p_value > 0.01
 
 print(f"First-hit Cu events : {len(theta)}")
-print(f"Events θ < 45°      : {len(theta_lo)}")
+print(f"Events θ < {TH_MAX:.0f}°      : {len(theta_lo)}")
 print(f"KS stat             : {stat:.4f}")
 print(f"KS p-value          : {p_value:.4f}  (threshold 0.01)")
 print(f"RESULT              : {'PASS' if passed else 'FAIL'}")
@@ -50,14 +57,12 @@ bins = np.linspace(0, 90, 46)
 counts, edges = np.histogram(theta, bins=bins, density=True)
 centers = 0.5 * (edges[:-1] + edges[1:])
 ax.bar(centers, counts, width=2.0, alpha=0.7, color="darkorange", label=f"Simulated (N={len(theta)})")
-t_th = np.linspace(0, 90, 300)
-pdf_th = np.sin(np.radians(2 * t_th)) * np.pi / 180  # convert to per-deg
-# Normalise over [0,90]: integral = 1 by construction
-ax.plot(t_th, pdf_th, "r-", lw=2, label="sin(2θ) Lambert")
-ax.axvline(45, color="gray", ls="--", lw=1, label="45° KS limit")
+ax.axhline(1.0 / 90.0, color="r", lw=2,
+           label="uniform-θ emission (YYC convention), no clipping")
+ax.axvline(TH_MAX, color="gray", ls="--", lw=1, label=f"{TH_MAX:.0f}° KS window (clipping-free)")
 ax.set_xlabel("theta_in (deg from Cu normal)")
 ax.set_ylabel("Probability density (per deg)")
-ax.set_title(f"Incidence angle vs Lambert cosine law  (KS p={p_value:.3f})")
+ax.set_title(f"Incidence angle vs uniform-θ emission  (KS p={p_value:.3f})")
 ax.legend(fontsize=9)
 fig.tight_layout()
 out = "angle_distribution_check.png"

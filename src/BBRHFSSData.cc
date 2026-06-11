@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -194,7 +195,10 @@ G4double BBRHFSSData::GetTransmittance(G4double E_theta, G4double E_phi,
                                        G4double iwaveTheta_deg) const
 {
   const auto& ds = FindDataset(iwavePhi_deg, iwaveTheta_deg);
-  return E_theta*E_theta * ds.T_Ephi0 + E_phi*E_phi * ds.T_Ephi1;
+  // HFSS power ratios can slightly exceed 1 (e.g. 1.055 at normal incidence,
+  // a numerical artefact of the port normalization) — clamp to a probability.
+  G4double T = E_theta*E_theta * ds.T_Ephi0 + E_phi*E_phi * ds.T_Ephi1;
+  return std::min(1., std::max(0., T));
 }
 
 // ---------------------------------------------------------------------------
@@ -226,12 +230,18 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
     sum    += sinT * (Eth_re*Eth_re + Eth_im*Eth_im + Eph_re*Eph_re + Eph_im*Eph_im);
     cdf[i]  = sum;
   }
-  for (auto& c : cdf) c /= sum;
 
-  G4double U = G4UniformRand();
-  std::size_t k = (std::size_t)(
-      std::lower_bound(cdf.begin(), cdf.end(), U) - cdf.begin());
-  if (k >= N) k = N - 1;
+  std::size_t k;
+  if (sum > 0.) {
+    for (auto& c : cdf) c /= sum;
+    G4double U = G4UniformRand();
+    k = (std::size_t)(
+        std::lower_bound(cdf.begin(), cdf.end(), U) - cdf.begin());
+    if (k >= N) k = N - 1;
+  } else {
+    // Degenerate dataset (all amplitudes zero): fall back to a uniform pick.
+    k = std::min<std::size_t>(N - 1, (std::size_t)(G4UniformRand() * N));
+  }
 
   const auto& fp = ff[k];
   G4double T_rad = fp.theta_deg * CLHEP::pi / 180.;
@@ -245,9 +255,19 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
   G4ThreeVector eTh_out =  cosT*cosP*normal_hat + cosT*sinP*theta_hat - sinT*phi_hat;
   G4ThreeVector ePh_out = -sinP*normal_hat       + cosP*theta_hat;
 
-  G4double Eth_re = E_theta*fp.rEtheta_re_0 + E_phi*fp.rEtheta_re_1;
-  G4double Eph_re = E_theta*fp.rEphi_re_0   + E_phi*fp.rEphi_re_1;
-  pol_out = Eth_re*eTh_out + Eph_re*ePh_out;
+  // Geant4 wants a real polarization vector, but the sampled far-field
+  // amplitude is complex (elliptical in general). Use the major axis of the
+  // polarization ellipse: |Re[(a êθ + b êφ) e^{iψ}]| is maximal at
+  // ψ = −arg(a² + b²)/2. (Using only the real parts — the previous behaviour
+  // — fails when the amplitudes are predominantly imaginary.)
+  std::complex<G4double> a(E_theta*fp.rEtheta_re_0 + E_phi*fp.rEtheta_re_1,
+                           E_theta*fp.rEtheta_im_0 + E_phi*fp.rEtheta_im_1);
+  std::complex<G4double> b(E_theta*fp.rEphi_re_0   + E_phi*fp.rEphi_re_1,
+                           E_theta*fp.rEphi_im_0   + E_phi*fp.rEphi_im_1);
+  std::complex<G4double> s = a*a + b*b;
+  G4double psi = (std::abs(s) > 0.) ? -0.5 * std::arg(s) : 0.;
+  std::complex<G4double> rot = std::polar(1., psi);
+  pol_out = std::real(a*rot)*eTh_out + std::real(b*rot)*ePh_out;
   if (pol_out.mag() > 1e-30) pol_out = pol_out.unit();
   else                        pol_out = eTh_out;  // degenerate fallback
 
@@ -282,12 +302,17 @@ G4ThreeVector BBRHFSSData::SampleExitPosition(
             + pz_re*pz_re + pz_im*pz_im;
     cdf[j]  = sum;
   }
-  for (auto& c : cdf) c /= sum;
 
-  G4double U = G4UniformRand();
-  std::size_t j = (std::size_t)(
-      std::lower_bound(cdf.begin(), cdf.end(), U) - cdf.begin());
-  if (j >= M) j = M - 1;
+  std::size_t j;
+  if (sum > 0.) {
+    for (auto& c : cdf) c /= sum;
+    G4double U = G4UniformRand();
+    j = (std::size_t)(
+        std::lower_bound(cdf.begin(), cdf.end(), U) - cdf.begin());
+    if (j >= M) j = M - 1;
+  } else {
+    j = std::min<std::size_t>(M - 1, (std::size_t)(G4UniformRand() * M));
+  }
 
   const auto& ep = eps[j];
   // HFSS coordinates are SI (meters). Geant4 base unit is mm → multiply by CLHEP::m.

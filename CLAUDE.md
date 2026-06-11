@@ -94,54 +94,66 @@ in Chang Table 5.1 (roughly: a space is "open" if its smallest dimension is
 ## Current repository state (2026-05-05)
 
 The repo has progressed beyond the initial scaffold. The HFSS diffraction
-path is fully implemented and validated. The Cu reflectance model (full Drude,
-RRR-parameterized) and the Planck thermal emitter are both operational.
-The next pieces are the non-Cu material database (Cirlex, Si, Ge) and the
-validation geometry.
+path is implemented and validated at normal incidence. The Cu reflectance
+model (full **complex** Drude, RRR-parameterized) and the Planck thermal
+emitter are operational, consolidated into a single test world. The next
+pieces are the non-Cu material database (Cirlex, Si, Ge) and the validation
+geometry.
 
 ### BBR-specific additions (implemented)
 
-- `BBRSim.cc` — entry point. Routes to `BBRCrackDetectorConstruction` +
-  `BBRDiffractionActionInit` when the mac name contains `diffraction` or
-  `validation`; falls back to OpNovice2 geometry otherwise.
+- `BBRSim.cc` — entry point. Always uses `BBRTestDetectorConstruction` +
+  `BBRTestActionInit` (serial run manager; MT needs a `Run::Merge` design).
+  The old per-macro OpNovice2 routing was removed in the consolidation.
 - `include/BBSimPhysics.hh`, `src/BBSimPhysics.cc` — `G4VPhysicsConstructor`
   that wraps `G4OpBoundaryProcess` with `BBSimOpBoundaryProcess`. Pattern
   follows SuperSim's `CDMSRDecayPhysics::WrapRDMProcess()`.
 - `include/BBSimOpBoundaryProcess.hh`, `src/BBSimOpBoundaryProcess.cc` —
-  `G4WrapperProcess` subclass. Intercepts photons that enter a `vacuum_wg`
-  volume and routes them through `HandleDiffractionBoundary` (HFSS lookup).
-  Everything else falls through to the stock `G4OpBoundaryProcess`.
-- `include/BBRMaterials.hh` — static factory for `vacuum_wg` (a near-vacuum
-  material with RINDEX=1 used to flag crack volumes). Seed of the planned
-  `BBRMaterialDB`.
+  `G4WrapperProcess` subclass. Mirrors the stock entry guards (fGeomBoundary
+  status, step length > kCarTolerance/2), then intercepts: `vacuum_wg`
+  volumes → `HandleDiffractionBoundary` (HFSS lookup, with quarter-symmetry
+  fold/unfold of the incident azimuth); materials with a `REFLECTIVITY`
+  property → `HandleReflectanceBoundary` (tabulated R, specular reflection or
+  kill). Everything else falls through to the stock `G4OpBoundaryProcess`.
+  Exposes `GetLastBBRStatus()` for logging (the wrapped process's own status
+  is stale when the wrapper intercepts).
+- `include/BBRMaterials.hh` — header-only material factory: `vacuum_wg`
+  (near-vacuum flag material for crack volumes), perfect absorber/reflector,
+  and `GetCopper(RRR, T_K)` building a 24-point log-spaced full-complex-Drude
+  REFLECTIVITY table over 10 GHz–20 THz (matches the Planck CDF range).
 - `include/BBRHFSSData.hh`, `src/BBRHFSSData.cc` — loads `far_field.csv` +
   `waveguide.csv` for one HFSS dataset (indexed by `(IWavePhi, IWaveTheta)`
-  angle grid). Provides `GetTransmittance`, `SampleOutgoingDirection`,
-  `SampleExitPosition`. Runtime CDFs handle arbitrary polarization including
-  cross terms.
+  angle grid). Provides `GetTransmittance` (clamped to [0,1]),
+  `SampleOutgoingDirection` (real polarization = major axis of the complex
+  polarization ellipse), `SampleExitPosition` (waveguide-CSV positions are
+  ABSOLUTE cross-section coordinates; they are added to the exit-face
+  CENTER, not the entry-point projection). Runtime CDFs handle arbitrary
+  polarization including cross terms.
 - `include/BBRCrackLibrary.hh`, `src/BBRCrackLibrary.cc` — Meyer's singleton
   that lazy-loads `BBRHFSSData` per dataset ID (= `vacuum_wg` volume name,
   strip any `:N` suffix). Adding a new crack requires only placing a new
   `vacuum_wg` volume — no code changes.
-- `include/BBRCrackDetectorConstruction.hh`, `src/BBRCrackDetectorConstruction.cc` —
-  world + two crack volumes: `InfParallelPlate_crack1_500GHz` (b=50 µm, z=0)
-  and `InfParallelPlate_crack2_500GHz` (b=100 µm, z=3 mm), both `vacuum_wg`.
-- `include/BBRDiffractionPGA.hh`, `src/BBRDiffractionPGA.cc` — fires one
-  optical photon per event at (−20 mm, 0, z) along +x; 500 GHz; polarization
-  (0, −1/√2, −1/√2). Gun Z exposed via `/bbr/gun/setZ <value> mm` messenger.
-- `include/BBRDiffractionActionInit.hh`, `src/BBRDiffractionActionInit.cc` —
-  wires `BBRDiffractionPGA` + stepping action; accepts `gunZ_mm` at construction.
-- `include/BBRDiffractionSteppingAction.hh`, `src/BBRDiffractionSteppingAction.cc` —
-  records transmitted photon position + crack ID to `diffraction_output.csv`.
-- `verify_wrapper.mac` — fixed-seed OpNovice2 regression (renamed from
-  `verify.mac`). Bit-identical output required before/after any wrapper change.
-- `diffraction.mac` — crack1 smoke test. T_obs ≈ 0.528, theory ≈ 0.527.
-- `diffraction_crack2.mac` — crack2 smoke test, gun at z=3 mm.
-- `validation.mac` — combined crack1 + crack2 in one session;
-  `/bbr/gun/setZ 3 mm` between runs. Output in `diffraction_output.csv`
-  with `crack_id` column. T_exp: crack1 ≈ 52.7%, crack2 ≈ 50.4%.
-- `plot_diffraction.py` — 3-panel plot: per-crack transmittance vs. event
-  count, exit-position distribution. Run with `conda run -n bbrsim python`.
+- `include/BBRTestDetectorConstruction.hh/.cc` — consolidated test world:
+  50 cm vacuum world, 4 mm Cu slab (front face at x=0), two `vacuum_wg`
+  crack daughters (`InfParallelPlate_crack1Rohan_500GHz`, 52 µm gap at z=0;
+  `InfParallelPlate_crack2_500GHz`, 102 µm gap at z=3 mm). Cu via `/bbr/det/`.
+- `include/BBRTestPGA.hh/.cc` — dual-mode primary generator: Planck thermal
+  emitter (default; `ThermalSurface` box at x=−50 mm) or fixed gun
+  (`/bbr/gun/mode true`).
+- `ThermalSurface`, `GeometricSurface`, `GetBBSpecCDF`, `BBEvt` — YYC's
+  thermal-emission classes, ported. Planck photon-number CDF
+  (∝ E²/(e^{E/kT}−1), 10 GHz–20 THz); surface selection and emission
+  weighted by area × emissivity.
+- `include/BBRRunAction.hh/.cc`, `include/BBRTestSteppingAction.hh/.cc` —
+  every optical-photon boundary crossing logged to `test_output.csv`
+  (first column `run_id`; the file appends across runs within one session,
+  so multi-run macros do not lose earlier output).
+- `planck.mac`, `test.mac`, `test_10K.mac`, `test_50M.mac` — Planck-mode runs.
+- `reflectance.mac`, `test_of_cu.mac`, `test_hp_cu.mac` — fixed-gun Cu
+  smoke tests. Expected D at 500 GHz, 4 K (relaxation regime): RRR=100
+  ≈ 4.9e-5, RRR=3 ≈ 1.0e-3, RRR=6 ≈ 6.3e-4.
+- `scripts/` — `check_*` PASS/FAIL validators and `plot_*` analysis scripts;
+  always run with `conda run -n bbrsim python`.
 
 ### Stock OpNovice2 pieces (unchanged)
 
@@ -157,14 +169,19 @@ validation geometry.
 ### What is explicitly *not* in the repo yet
 
 - **No material reflectance tables for non-Cu materials** — Si, Ge, Cirlex, PCB
-  not yet in `BBRMaterials`. Cu (full Drude), perfect absorber, and perfect
-  reflector are implemented.
+  not yet in `BBRMaterials`. Cu (full complex Drude), perfect absorber, and
+  perfect reflector are implemented.
 - No patched `G4OpBoundaryProcess` — `REFLECTIVITY` still lives only on
   `G4OpticalSurface` in stock Geant4 11.4.
 - No CADMesh integration, no `.STL` import.
-- No cryogenic-material optical-property database beyond `vacuum_wg`.
 - No ROOT `TTree` output or leakage-current post-processing.
 - No BBR calibration geometry (BB source or mesh-TES detector model).
+- No fixed-seed wrapper regression macro — `verify_wrapper.mac` was retired
+  with the OpNovice2 geometry split. Re-establishing an automated
+  pass-through regression is open work (see *Verification discipline*).
+- No anomalous-skin-effect correction — the Cu model is classical Drude;
+  measured cryogenic losses (Serov) sit above the relaxation plateau for
+  high-RRR Cu. Revisit after O2 validation data.
 
 ## Implementation log
 
@@ -191,38 +208,39 @@ touchable rotation at runtime.
 dataset cache. crack2 placed at z=3 mm. `validation.mac` runs both cracks
 in one session via `/bbr/gun/setZ`. Per-crack CSV output + 3-panel plots.
 
+### [DONE] Material reflectance + Planck emitter
+`05072026-reflectance-and-planck.md` (archived) — tabulated `REFLECTIVITY`
+interception in `BBSimOpBoundaryProcess` (specular-only; Rayleigh criterion:
+surface roughness << λ at trans-mm) + YYC's `ThermalSurface` emitter. Note:
+the emitter samples the photon-NUMBER spectrum E²/(e^{E/kT}−1) — correct for
+unweighted photon Monte Carlo — not the energy spectrum u³/(e^u−1) from the
+original plan.
+
+### [DONE] Drude copper reflectance model
+`BuildDrudeMaterial` in `include/BBRMaterials.hh`, parameterized `(RRR, T_K)`;
+single `GetCopper(RRR, T_K)` getter plus named aliases. RRR is the only
+required user input. See `docs/physics/copper_reflectance_model.md`.
+
+### [DONE 2026-06-09] Bug-fix sweep
+Complex-σ Drude fix (Im σ was being dropped — absorptance was overestimated
+~30× at 500 GHz), HFSS exit positions anchored to the exit-face center,
+quarter-symmetry fold/unfold of oblique incidence, emissivity-weighted
+surface selection, run_id-keyed appending CSV output, wrapper entry guards,
+and stale-script cleanup. Documented in `docs/physics/copper_reflectance_model.md`
+(historical note) and the git history.
+
 ## Upcoming work
 
 Plans live in `docs/superpowers/plans/` (gitignored). Naming: `mmddyyyy-feature.md`.
 
-### [BLOCKED — awaiting Yen-Yung Chang's code] Material reflectance + Planck emitter
-`docs/superpowers/plans/05072026-reflectance-and-planck.md` —
-Full implementation plan covering both features. Decision: specular-only
-reflection (Rayleigh criterion: surface roughness << λ at trans-mm).
-
-**Reflectance scope:** `OFHC_Cu` material with Hagen-Rubens `BBR_REFLECTIVITY`
-table (20 log-spaced energies, 50 GHz–20 THz, σ=5.96×10⁹ S/m for RRR=100);
-`BBR_PerfectAbsorber`; `BBR_PerfectReflector`. Intercept in
-`BBSimOpBoundaryProcess::PostStepDoIt` before stock fall-through.
-New: `BBRReflectanceDetectorConstruction`, `reflectance.mac`.
-
-**Planck emitter scope:** `BBRPlanckSampler` (header-only CDF table for
-u³/(e^u−1)), `BBRThermalSurface` (POD struct), `BBRThermalPGA` (hardcoded
-4 K patch), `BBRPlanckActionInit`, `BBRPlanckDetectorConstruction`,
-`planck.mac`, `scripts/check_planck_spectrum.py`.
-
-### [UNBLOCKED] Drude copper reflectance model
-
-Replace `BuildHagRubMaterial` (Hagen-Rubens) with `BuildDrudeMaterial` in
-`include/BBRMaterials.hh`. Parameters: `(name, RRR, T_K=4.0)`. Derives
-σ_DC = RRR × σ_RT (impurity-dominated at 4 K), τ from the Drude formula,
-then evaluates full Griffiths §9.4 reflectance at each frequency. T_K is
-optional and defaults to 4 K; supply a different value for warmer shield
-layers and create a separate `G4MaterialPropertiesTable` per temperature
-stage. Replaces all three named Cu getters with a single `GetCopper(RRR, T_K)`.
-Update `GetCopperByName()` messenger to accept RRR as integer and optional
-temperature. RRR is the **only required** user input; do not require users to
-supply σ_DC directly. See `docs/physics/copper_reflectance_model.md`.
+- **Non-Cu material database** — Si, Ge, Cirlex, PCB optical tables in
+  `BBRMaterials` (loss-tangent-derived mean free paths for dielectrics).
+- **Wrapper regression harness** — re-establish a fixed-seed pass-through
+  regression (the old `verify_wrapper.mac` was retired with the OpNovice2
+  geometry split).
+- **Oblique-incidence HFSS validation** — the quarter-symmetry fold/unfold
+  has only been validated at normal incidence; cross-check one oblique
+  (IWavePhi ∉ [0°, 90°]) case against a dedicated HFSS run.
 
 ## Build
 
@@ -250,23 +268,34 @@ cd build
 
 Batch (explicit macro):
 ```bash
-./BBRSim electron.mac          # stock OpNovice2 test case
-./BBRSim verify_wrapper.mac    # wrapper pass-through regression
-./BBRSim diffraction.mac       # crack1 HFSS diffraction smoke test
-./BBRSim validation.mac        # crack1 + crack2 combined validation
-./BBRSim reflectance.mac       # OFHC Cu reflectance smoke test (planned)
-./BBRSim planck.mac            # Planck emitter test, writes planck_output.csv (planned)
+./BBRSim planck.mac            # Planck emitter smoke test (10k events, 4 K)
+./BBRSim test.mac              # Planck production run (5M events, 4 K)
+./BBRSim test_10K.mac          # Planck run at 10 K
+./BBRSim reflectance.mac       # OFHC Cu reflectance smoke test (gun mode)
+./BBRSim test_of_cu.mac        # OF_Cu (RRR=3) reflectance smoke test
+./BBRSim test_hp_cu.mac        # HP_Cu (RRR=6) reflectance smoke test
 ```
 
-The executable is `BBRSim`, **not** `OpNovice2`.
+All of these write `test_output.csv` (one row per optical-photon boundary
+crossing, first column `run_id`). The executable is `BBRSim`, **not**
+`OpNovice2`.
 
 ## Verification discipline
 
 `BBSimOpBoundaryProcess` is a load-bearing hook: every subsequent piece of
-BBR physics will be added behind it. `verify_wrapper.mac` is the regression
-harness — run with fixed seeds and compare histograms before merging anything
-that touches the wrapper or `BBSimPhysics::WrapOpBoundaryProcess`. Geometries
-without `vacuum_wg` volumes fall through identically to stock `G4OpBoundaryProcess`.
+BBR physics will be added behind it. Geometries without `vacuum_wg` volumes
+or `REFLECTIVITY` materials fall through identically to stock
+`G4OpBoundaryProcess`.
+
+The historical fixed-seed regression macro (`verify_wrapper.mac`) was retired
+with the OpNovice2 geometry split; re-establishing an automated pass-through
+regression is open work. Until then, before merging anything that touches the
+wrapper or `BBSimPhysics::WrapOpBoundaryProcess`:
+
+1. Run the smoke tests (`reflectance.mac`, `planck.mac`) and their `check_*`
+   scripts and confirm PASS.
+2. For changes to the pass-through path itself, verify with a fixed-seed run
+   on a geometry exercising stock boundary optics.
 
 When new physics is added behind the wrapper (e.g. a tabulated vacuum→Cu
 reflectance or an HFSS waveguide handoff), it must be selectable via a
@@ -293,9 +322,11 @@ messenger or surface flag so the pass-through path remains testable.
 - The `.mac` files inherited from OpNovice2 are **regression inputs**, not
   representative BBR workloads. Do not treat their output as evidence of
   BBR physics working.
-- There is no automated test suite. Correctness for the wrapper is
-  verified by diffing fixed-seed histogram output (`verify.mac` →
-  `verify.root`) against an unwrapped baseline.
+- There is no automated test suite. Correctness is verified by the
+  `scripts/check_*.py` PASS/FAIL validators run against fixed-seed macro
+  output (`test_output.csv` / stdout). The old fixed-seed wrapper-diff
+  harness (`verify.mac`/`verify_wrapper.mac`) was retired; see
+  *Verification discipline*.
 - When adding new BBR physics, prefer new classes (e.g.
   `BBRThermalSurface`, `BBRMaterialDB`) over editing the OpNovice2
   `DetectorConstruction` / `PrimaryGeneratorAction` in place — the stock
@@ -304,7 +335,7 @@ messenger or surface flag so the pass-through path remains testable.
   onto `G4MaterialPropertiesTable`) is upstream-facing work; any local
   implementation should be isolated so it can be turned into a Geant4
   PR cleanly.
-- Python analysis scripts (`plot_diffraction.py`, future `plot_planck.py`)
+- Python analysis scripts (`scripts/check_*.py`, `scripts/plot_*.py`)
   must be run as `conda run -n bbrsim python <script>`. Plain `python3`
   does not have the required packages even if they appear installed.
 
@@ -322,6 +353,9 @@ messenger or surface flag so the pass-through path remains testable.
 - Hagen-Rubens valid only for f << 1/(2πτ). OFHC Cu at 4 K (RRR=100):
   τ ≈ 2.5 ps → H-R valid below ~64 GHz. BBRsim starts at 50 GHz — always
   use the full Drude model.
+- Above f_break the absorptance saturates at the flat relaxation plateau
+  D ≈ 2/(ωp·τ) (ωp = 1.64×10¹⁶ rad/s for Cu). H-R OVERESTIMATES D there.
+  For RRR=100 at 4 K: D ≈ 4.9×10⁻⁵ across most of the band.
 - Matthiessen's rule: 1/σ(T) = 1/σ_impurity + 1/σ_phonon(T), where
   1/σ_impurity = 1/(RRR × σ_RT).
   - σ_phonon ~ 1/T is only the simple power-law limit, valid above ~50 K.
@@ -333,8 +367,11 @@ messenger or surface flag so the pass-through path remains testable.
     it is administratively tedious and they will not have the data. Accept
     RRR as the sole user input; use separate `G4MaterialPropertiesTable`
     instances if different temperature stages need different optical tables.
-- Full Drude: σ(ω) = σ_DC/(1−iωτ); insert into Griffiths §9.4 to get k̃;
-  R = |(ñ−1)/(ñ+1)|² where ñ = c·k̃/ω.
+- Full Drude: σ(ω) = σ_DC/(1−iωτ), kept COMPLEX. Insert into
+  k̃² = (ω/c)²·ε̃ with ε̃ = 1 + iσ(ω)/(ε₀ω); ñ = √ε̃; R = |(ñ−1)/(ñ+1)|².
+  Do **not** plug σ_r = Re[σ] into Griffiths's real-σ closed forms
+  (eqs. 9.126) — that drops the plasma term in Re ε̃ and overestimates
+  absorptance by ~30× at 500 GHz (this was a real bug, fixed 2026-06-09).
 - **Do NOT hardcode σ per Cu variant.** Derive everything from (RRR, T_K).
   See `docs/physics/copper_reflectance_model.md`.
 
@@ -407,13 +444,16 @@ less important after multiple reflections inside the cryostat cavity.
 
 | Command | Argument | Default | Description |
 |---------|----------|---------|-------------|
-| `/bbr/gun/mode` | `true \| false` | false | `true` = direct-hit mode (solid Cu at z=5 mm); `false` = crack-test mode |
+| `/bbr/gun/mode` | `true \| false` | false | `true` = fixed gun; `false` = Planck thermal emitter (default) |
 | `/bbr/gun/posX` | mm | -20 | Gun X position |
 | `/bbr/gun/posY` | mm | 0 | Gun Y position |
-| `/bbr/gun/posZ` | mm | 0 | Gun Z position |
+| `/bbr/gun/posZ` | mm | 0 | Gun Z position (z=0 → crack1, z=3 → crack2, z ≳ 5 → solid Cu) |
 | `/bbr/gun/dirX/Y/Z` | dimensionless | (1,0,0) | Momentum direction (will be normalized) |
 | `/bbr/gun/energy_eV` | eV | 2.07×10⁻³ | Photon energy (500 GHz = 2.07×10⁻³ eV) |
-| `/bbr/gun/setZ` | value + `mm` | 0 mm | Shortcut for Z position (crack-test mode) |
+
+Gun commands are read each event and may be issued after `/run/initialize`.
+Polarization is randomized in the plane perpendicular to the momentum
+direction each event.
 
 ---
 

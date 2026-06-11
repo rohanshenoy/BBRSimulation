@@ -19,6 +19,19 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4VParticleChange* PostStepDoIt(const G4Track& aTrack,
                                   const G4Step& aStep) override;
 
+  // What the wrapper itself did on the last PostStepDoIt invocation.
+  // kBBRNone means the step was passed through to the stock process, whose
+  // own GetStatus() is then the authoritative status.
+  enum BBRBoundaryStatus {
+    kBBRNone,
+    kBBRDiffractionTransmit,
+    kBBRDiffractionReflect,
+    kBBRReflect,
+    kBBRAbsorb
+  };
+  BBRBoundaryStatus GetLastBBRStatus() const { return fLastBBRStatus; }
+  G4String GetLastBBRStatusString() const;
+
   G4OpBoundaryProcessStatus GetStatus() const;
   // Forward SetInvokeSD to the wrapped G4OpBoundaryProcess (no getter in G4 API).
   void SetInvokeSD(G4bool flag);
@@ -33,6 +46,8 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
                                                const G4Step& aStep);
 
   G4ParticleChange fParticleChange;
+
+  BBRBoundaryStatus fLastBBRStatus = kBBRNone;
 
   // Per-instance counters (safe in MT — each thread gets its own process clone).
   G4int fNDiffraction         = 0;

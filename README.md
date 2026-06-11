@@ -35,22 +35,23 @@ are the next milestones.
   `vacuum_wg` crack volumes and routes them through the HFSS lookup.
   Validated: T_obs ≈ 52.8% at 500 GHz normal incidence (theory 52.7%).
 
-- **Cu reflectance** — Full Drude model (Griffiths §9.4) parameterized by RRR and
-  temperature. `BBRMaterials::GetCopper(RRR, T_K)` builds a 20-point log-spaced
-  REFLECTIVITY table from 50 GHz to 20 THz. Three named grades available; users
+- **Cu reflectance** — Full complex Drude model (σ(ω) = σ_DC/(1−iωτ) in
+  ε̃ = 1 + iσ/(ε₀ω); Griffiths §9.4 generalized) parameterized by RRR and
+  temperature. `BBRMaterials::GetCopper(RRR, T_K)` builds a 24-point log-spaced
+  REFLECTIVITY table from 10 GHz to 20 THz. Three named grades available; users
   may also supply any integer RRR directly. See [docs/physics/copper_reflectance_model.md](docs/physics/copper_reflectance_model.md).
+
+- **Planck thermal emitter** — `ThermalSurface` + `GetBBSpecCDF`: box-surface
+  emitter sampling the Planck photon-number spectrum (10 GHz–20 THz), with
+  per-surface emissivity weighting. Default mode of `BBRTestPGA`; temperature
+  set at runtime via `/bbr/thermal/setT`.
 
 - **Test geometry** — `BBRTestDetectorConstruction`: 50 cm world, 4 mm Cu slab,
   two `vacuum_wg` crack daughters at z = 0 and z = 3 mm. Cu material and gun
   position fully configurable via messenger before `/run/initialize`.
 
-- **Wrapper regression** — `verify_wrapper.mac` checks that `BBSimOpBoundaryProcess`
-  is bit-identical to the unwrapped `G4OpBoundaryProcess` on geometries with no
-  `vacuum_wg` volumes.
-
 ### Not yet implemented
 
-- Planck-distributed thermal emitter (`BBRThermalPGA`, `BBRPlanckSampler`)
 - CADMesh / SOLIDWORKS `.STL` import
 - Patched `G4OpBoundaryProcess` with `REFLECTIVITY` on `G4MaterialPropertiesTable`
   (upstream Geant4 PR target)
@@ -84,41 +85,45 @@ CMake copies all `.mac` files to the build directory alongside the executable.
 The executable is `BBRSim` (not `OpNovice2`). All commands below run from the
 `build/` directory.
 
-### Diffraction smoke tests
+### Planck emitter + crack diffraction
 
 ```bash
-./BBRSim diffraction.mac         # crack1, 500 GHz normal incidence
-./BBRSim diffraction_crack2.mac  # crack2, gun at z = 3 mm
-./BBRSim validation.mac          # both cracks in one session
+./BBRSim planck.mac          # 10 000 thermal photons at 4 K
+./BBRSim test.mac            # 5M-event production run at 4 K
+./BBRSim test_10K.mac        # 1M events at 10 K
 ```
 
-Expected transmittances: crack1 ≈ 52.7%, crack2 ≈ 50.4%.
-Output: `diffraction_output.csv` with columns `crack_id, x, y`.
+Photons entering the `vacuum_wg` cracks are routed through the HFSS lookup;
+expected transmittances at 500 GHz normal incidence: crack1 ≈ 52.7%,
+crack2 ≈ 50.4%. All boundary crossings are logged to `test_output.csv`
+(columns include `run_id`, positions, momenta, materials, boundary status).
 
 ```bash
-conda run -n bbrsim python ../scripts/plot_diffraction.py
+conda run -n bbrsim python scripts/check_planck_spectrum.py build/test_output.csv --temp 4
+conda run -n bbrsim python scripts/check_crack_ratio.py build/test_output.csv
 ```
 
 ### Cu reflectance smoke test
 
 ```bash
-./BBRSim test.mac            # OFHC_Cu (RRR=100), 500 GHz, 10 000 events
+./BBRSim reflectance.mac     # OFHC_Cu (RRR=100), 500 GHz, 10 000 events
 ./BBRSim test_of_cu.mac      # OF_Cu   (RRR=3),   500 GHz, 2 000 events
 ./BBRSim test_hp_cu.mac      # HP_Cu   (RRR=6),   500 GHz, 2 000 events
 ```
 
 Output: `[BBR] reflectance mat=... N=... A_obs=... R_theory=...` printed to stdout.
+At 4 K OFHC Cu sits on the relaxation plateau (D ≈ 4.9×10⁻⁵ at 500 GHz).
 Compare against Drude theory:
 
 ```bash
-./BBRSim test.mac >out.txt 2>&1
-conda run -n bbrsim python ../scripts/check_cu_absorptance.py out.txt --rrr 100
+./BBRSim reflectance.mac
+conda run -n bbrsim python scripts/check_reflectance.py
 ```
 
 Plot reflectance vs frequency across Cu grades and temperatures:
 
 ```bash
-conda run -n bbrsim python ../scripts/plot_cu_reflectance.py
+conda run -n bbrsim python scripts/plot_cu_reflectance.py
 # output: build/cu_reflectance_plots.png
 ```
 
@@ -143,12 +148,12 @@ Valid aliases: `OFHC_Cu` (RRR=100), `OF_Cu` (RRR=3), `HP_Cu` (RRR=6).
 
 ### Wrapper regression
 
-```bash
-./BBRSim verify_wrapper.mac
-```
-
-Run before and after any change to `BBSimOpBoundaryProcess` or `BBSimPhysics`.
-Output must be bit-identical to the baseline.
+`BBSimOpBoundaryProcess` falls through to the stock `G4OpBoundaryProcess` for
+any geometry without `vacuum_wg` or `REFLECTIVITY` materials. The historical
+fixed-seed regression macro (`verify_wrapper.mac`) was retired with the
+OpNovice2 geometry split; when touching the wrapper, re-verify the
+pass-through path with a fixed-seed run on stock OpNovice2 geometry before
+merging (see CLAUDE.md, *Verification discipline*).
 
 ### Interactive (UI + visualization)
 

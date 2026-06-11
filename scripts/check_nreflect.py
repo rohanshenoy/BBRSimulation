@@ -33,14 +33,19 @@ print(f"n_reflect range : [{n.min()}, {n.max()}]")
 print(f"mean n_reflect  : {n.mean():.2f}")
 print(f"modal bin       : {edges[np.argmax(counts)]:.0f}  (count={counts.max()})")
 
-# PASS criteria
-ok_multi  = n.max() > 1
+# PASS criteria.
+# Note: in the single-wall test world, max n_reflect == 1 is the geometrically
+# correct result — a photon reflects off the Cu slab (or a crack face) once
+# and then exits the world (world-exit steps are fWorldBoundary and are not
+# logged). Historical runs showed n_reflect > 1 only because tolerance-scale
+# StepTooSmall re-steps were double-counted; those are now skipped. "max > 1"
+# is therefore informational, not a failure criterion.
 ok_modal  = int(edges[np.argmax(counts)]) == 1
 window    = counts[:min(10, len(counts))]
 ok_mono   = all(window[i] >= window[i+1] for i in range(len(window)-1))
 
-passed = ok_multi and ok_modal and ok_mono
-print(f"max > 1         : {'PASS' if ok_multi else 'FAIL'}")
+passed = ok_modal and ok_mono
+print(f"max n_reflect   : {n.max()}  (info only; 1 is expected in the single-wall world)")
 print(f"mode = 1        : {'PASS' if ok_modal else 'FAIL'}")
 print(f"monotone [1-10] : {'PASS' if ok_mono else 'FAIL'}")
 print(f"RESULT          : {'PASS' if passed else 'FAIL'}")

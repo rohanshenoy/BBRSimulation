@@ -127,50 +127,64 @@ is frequency-dependent and independent of $\tau$ — it encodes the inertia of
 the electron gas, not its damping.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Complex Wave Vector (Griffiths \S9.4)}
+\section{Complex Wave Vector (Griffiths \S9.4, complex $\sigma$)}
 
-For a plane wave in a medium with real permittivity $\varepsilon_0$ and
-conductivity $\sigma_r = \mathrm{Re}[\sigma(\omega)]$, Griffiths eqs.\ 9.126
-give the complex wave vector $\tilde{k} = k + i\kappa$:
+Griffiths \S9.4 derives, for a plane wave in a conductor,
+$\tilde{k}^2 = \mu\varepsilon\omega^2 + i\mu\sigma\omega$.  With the
+\emph{complex} Drude conductivity this becomes
 \[
-  k = \frac{\omega}{c}\sqrt{\frac{1}{2}\!\left(
-        \sqrt{1 + \!\left(\frac{\sigma_r}{\varepsilon_0\omega}\right)^{\!2}}
-        + 1\right)},
+  \tilde{k}^2 = \frac{\omega^2}{c^2}\,\tilde{\varepsilon}(\omega),
   \qquad
-  \kappa = \frac{\omega}{c}\sqrt{\frac{1}{2}\!\left(
-        \sqrt{1 + \!\left(\frac{\sigma_r}{\varepsilon_0\omega}\right)^{\!2}}
-        - 1\right)}.
+  \tilde{\varepsilon}(\omega) = 1 + \frac{i\sigma(\omega)}{\varepsilon_0\omega}
+  = 1 - \frac{\omega_p^2\tau^2}{1+\omega^2\tau^2}
+      + \frac{i\,\omega_p^2\tau/\omega}{1+\omega^2\tau^2}.
 \]
+The negative real term — supplied by $\mathrm{Im}[\sigma]$ — is the
+free-electron \emph{plasma} response.  It dominates
+$\tilde{\varepsilon}$ throughout the BBRsim band and keeps the metal
+highly reflective.  Griffiths's closed forms for $k$ and $\kappa$
+(his eqs.\ 9.126) assume a \emph{real} $\sigma$ and must not be reused
+with $\sigma_r = \mathrm{Re}[\sigma(\omega)]$ substituted in: doing so
+drops the plasma term entirely.
 
-The complex refractive index $\tilde{n} = n + ik_\mathrm{opt} = c\,\tilde{k}/\omega$,
-so $n = ck/\omega$ and $k_\mathrm{opt} = c\kappa/\omega$.
+The complex refractive index is $\tilde{n} = n + ik_\mathrm{opt} =
+\sqrt{\tilde{\varepsilon}(\omega)}$.
 
 \subsection*{Regime approximations}
 
-Throughout the BBRsim range (50\,GHz--20\,THz) for OFHC Cu at 4\,K,
-the ratio $\sigma_r/(\varepsilon_0\omega) \gg 1$ (it reaches ${\sim}10^5$ at 1\,THz).
-In this \textbf{good-conductor limit}:
+Throughout the BBRsim range, $|\sigma(\omega)|/(\varepsilon_0\omega) \gg 1$
+(\textbf{good-conductor limit}).  Writing
+$\sigma(\omega) = |\sigma|e^{i\phi}$ with $\phi = \arctan(\omega\tau)$ and
+$|\sigma| = \sigma_\mathrm{DC}/\sqrt{1+\omega^2\tau^2}$:
 \[
-  k \approx \kappa \approx \frac{\omega}{c}\sqrt{\frac{\sigma_r}{2\varepsilon_0\omega}}
-  = \sqrt{\frac{\mu_0\sigma_r\omega}{2}}.
+  \tilde{n} \approx \sqrt{\frac{|\sigma|}{\varepsilon_0\omega}}\;
+  e^{\,i\left(\frac{\pi}{4} + \frac{\phi}{2}\right)} .
 \]
-The skin depth $\delta = 1/\kappa$.
 
 \smallskip
-\noindent\textit{Low-$f$ ($\omega\tau\ll 1$, H-R regime):} $\sigma_r\approx\sigma_\mathrm{DC}$, so
+\noindent\textit{Low-$f$ ($\omega\tau\ll 1$, H-R regime):} $\phi\to 0$, so
 \[
-  k \approx \kappa \approx \sqrt{\tfrac{\mu_0\sigma_\mathrm{DC}\omega}{2}},
-  \qquad n \approx k_\mathrm{opt} \approx \sqrt{\frac{\sigma_\mathrm{DC}}{2\varepsilon_0\omega}} \gg 1.
+  n \approx k_\mathrm{opt} \approx
+  \sqrt{\frac{\sigma_\mathrm{DC}}{2\varepsilon_0\omega}} \gg 1,
 \]
+the familiar skin-effect result with skin depth
+$\delta = \sqrt{2/(\mu_0\sigma_\mathrm{DC}\omega)}$.
 
-\noindent\textit{High-$f$ ($\omega\tau\gg 1$, inductive regime):} $\sigma_r\approx\sigma_\mathrm{DC}/(\omega\tau)^2$, so
+\smallskip
+\noindent\textit{High-$f$ ($\omega\tau\gg 1$, relaxation regime):}
+$\phi\to\pi/2$ and $|\sigma| \to \varepsilon_0\omega_p^2/\omega$, so
 \[
-  k \approx \kappa \approx \frac{1}{\omega\tau}\sqrt{\frac{\mu_0\sigma_\mathrm{DC}\omega}{2}},
-  \qquad n \approx k_\mathrm{opt} \approx \frac{n_\mathrm{HR}}{\omega\tau},
+  \tilde{n} \approx i\,\frac{\omega_p}{\omega}
+  \qquad\Longrightarrow\qquad
+  k_\mathrm{opt} \approx \frac{\omega_p}{\omega},
+  \qquad
+  n \approx \frac{\omega_p}{2\,\omega^2\tau} \ll k_\mathrm{opt}.
 \]
-where $n_\mathrm{HR} = \sqrt{\sigma_\mathrm{DC}/(2\varepsilon_0\omega)}$ is the
-H-R refractive index.  The skin depth grows as $\delta \propto \omega^{-1/2}\cdot\omega\tau$,
-i.e.\ the metal becomes more transparent above $f_\mathrm{break}$.
+$\tilde{n}$ is almost purely imaginary: the wave is screened by the inertia
+of the electron gas rather than dissipated.  The field penetration depth
+saturates at $c/\omega_p \approx 18$\,nm (the plasma penetration depth),
+independent of frequency — the metal does \emph{not} become more
+transparent above $f_\mathrm{break}$.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Reflectance and Absorptance}
@@ -181,41 +195,51 @@ Normal-incidence Fresnel reflectance from vacuum into the conductor:
            = \frac{(n-1)^2 + k_\mathrm{opt}^2}{(n+1)^2 + k_\mathrm{opt}^2},}
   \qquad D = 1 - R.
 \]
-For $n \approx k_\mathrm{opt} \gg 1$ (good-conductor limit):
-$D \approx 2/n = 2\sqrt{2\varepsilon_0\omega/\sigma_r}.$
+For $|\tilde{n}| \gg 1$ (good-conductor limit):
+$D \approx 4n/|\tilde{n}|^2$.
 
 \subsection*{Universal Drude formula}
 
-Inserting $\sigma_r = \sigma_\mathrm{DC}/(1+(\omega\tau)^2)$ into
-$D \approx 2\sqrt{2\varepsilon_0\omega/\sigma_r}$:
+With $\tilde{n} = \sqrt{|\sigma|/(\varepsilon_0\omega)}\,
+e^{i(\pi/4+\phi/2)}$, $\phi = \arctan(\omega\tau)$:
 \[
   \boxed{D(\omega)
-  \approx 2\sqrt{\frac{2\varepsilon_0\omega}{\sigma_\mathrm{DC}}}
-        \cdot \sqrt{1+(\omega\tau)^2}
-  = D_\mathrm{HR}(\sigma_\mathrm{DC})\cdot\sqrt{1+(\omega\tau)^2}.}
+  \approx D_\mathrm{HR}(\sigma_\mathrm{DC})\cdot
+  \sqrt{2}\,\cos\!\left(\frac{\pi}{4}+\frac{\arctan\omega\tau}{2}\right)
+  \left(1+\omega^2\tau^2\right)^{1/4},}
+  \qquad
+  D_\mathrm{HR} = 2\sqrt{\frac{2\varepsilon_0\omega}{\sigma_\mathrm{DC}}}.
 \]
 This single expression is valid throughout the BBRsim range.  It connects
-the H-R limit continuously to the inductive regime through the single
+the H-R limit continuously to the relaxation regime through the single
 dimensionless parameter $\omega\tau$.
 
-\subsection*{Taylor and Laurent expansions of $D$}
+\subsection*{Limits of $D$}
 
 \noindent\textit{Low-$f$ ($\omega\tau\ll 1$):}
 \[
-  D \approx D_\mathrm{HR}\left[1 + \tfrac{1}{2}(\omega\tau)^2
-            - \tfrac{1}{8}(\omega\tau)^4 + \cdots\right],
-  \qquad D \propto \omega^{1/2}.
+  D \to D_\mathrm{HR}, \qquad D \propto \omega^{1/2}.
 \]
 
-\noindent\textit{High-$f$ ($\omega\tau\gg 1$):}
+\noindent\textit{High-$f$ ($\omega\tau\gg 1$, $\omega\ll\omega_p$):}
+the ratio falls as $1/\sqrt{2\omega\tau}$ and $D$ saturates at the
+frequency-independent \emph{relaxation plateau}
 \[
-  D \approx D_\mathrm{HR}\cdot\omega\tau
-    \left[1 + \frac{1}{2(\omega\tau)^2} + \cdots\right],
-  \qquad D \propto \omega^{3/2}.
+  \boxed{D \approx \frac{2}{\omega_p\tau}}
+  \qquad\text{(OFHC Cu, RRR=100, 4\,K: } D \approx 4.9\times10^{-5}\text{).}
 \]
-Above $f_\mathrm{break}$ the absorptance rises \textit{faster} than the H-R
-prediction ($\omega^{3/2}$ vs.\ $\omega^{1/2}$) because the reduced
-$\sigma_r$ at higher frequency allows deeper penetration.
+Above $f_\mathrm{break}$ the absorptance rises \emph{more slowly} than the
+H-R prediction (slope $\tfrac{1}{2}\to 0$): the plasma response screens the
+field at the fixed depth $c/\omega_p$, while the per-cycle dissipation
+$\mathrm{Re}[\sigma]\propto(\omega\tau)^{-2}$ falls exactly fast enough to
+make $D$ flat.
+
+\paragraph{Historical note (2026-06).}  Earlier revisions of this brief
+substituted only $\sigma_r = \mathrm{Re}[\sigma(\omega)]$ into the real-$\sigma$
+Griffiths formulas, which drops the plasma term and yields the erroneous
+results $D/D_\mathrm{HR} = \sqrt{1+(\omega\tau)^2}$ and $D\propto\omega^{3/2}$
+above $f_\mathrm{break}$ — overestimating absorption by ${\sim}30\times$ at
+500\,GHz (RRR=100, 4\,K).  The full complex treatment above supersedes it.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Hagen-Rubens Limit and Breakdown Frequency}
@@ -260,9 +284,9 @@ Regime & Condition & $D \approx$ & log-log slope \\
 Hagen-Rubens (DC)   & $\omega\tau \ll 1$ &
   $2\sqrt{2\varepsilon_0\omega/\sigma_\mathrm{DC}}$ & $\tfrac{1}{2}$ \\[4pt]
 Drude (full) & $\omega\tau \sim 1$ &
-  $D_\mathrm{HR}\sqrt{1+(\omega\tau)^2}$ & $\tfrac{1}{2}\to\tfrac{3}{2}$ \\[4pt]
-Inductive & $\omega\tau \gg 1$, $\omega\ll\omega_p$ &
-  $2\omega\tau\sqrt{2\varepsilon_0\omega/\sigma_\mathrm{DC}}$ & $\tfrac{3}{2}$ \\[4pt]
+  $D_\mathrm{HR}\,\sqrt{2}\cos\!\bigl(\tfrac{\pi}{4}+\tfrac{\arctan\omega\tau}{2}\bigr)(1+\omega^2\tau^2)^{1/4}$ & $\tfrac{1}{2}\to 0$ \\[4pt]
+Relaxation & $\omega\tau \gg 1$, $\omega\ll\omega_p$ &
+  $2/(\omega_p\tau)$ \;(flat) & $0$ \\[4pt]
 Plasma threshold & $\omega\to\omega_p$ &
   $R\to 0$ (transparent) & --- \\
 \bottomrule
@@ -271,7 +295,13 @@ Plasma threshold & $\omega\to\omega_p$ &
 
 For copper, $f_p\approx 2.6$\,PHz (ultraviolet), so the plasma threshold is
 far above the BBRsim range. The relevant transition in BBRsim is
-H-R $\to$ inductive, driven by $f_\mathrm{break}$.
+H-R $\to$ relaxation, driven by $f_\mathrm{break}$.
+
+\paragraph{Caveat — anomalous skin effect.}  At 4\,K and high RRR the electron
+mean free path exceeds the classical penetration depth, and measured
+cryogenic losses (Serov et al.\ 2016) sit above the classical relaxation
+plateau.  The classical Drude model is the documented BBRsim baseline; an
+ASE correction is a candidate refinement once O2 validation data exists.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Copper Material Constants}
@@ -321,11 +351,13 @@ $\omega = 2\pi f$ & Photon angular frequency \\
   \textit{Left:} Universal Drude absorptance ratio $D/D_\mathrm{HR}$
   vs.\ dimensionless frequency $\omega\tau$.
   At $\omega\tau\ll 1$ (Hagen-Rubens regime), $D/D_\mathrm{HR}\to 1$.
-  Above $\omega\tau=1$ ($f=f_\mathrm{break}$), $D/D_\mathrm{HR}$
-  grows as $\omega\tau$, changing the log-log slope from $\tfrac{1}{2}$
-  to $\tfrac{3}{2}$.
-  The exact closed form $\sqrt{1+(\omega\tau)^2}$ (solid line) and
-  the two-term Taylor/Laurent approximations (dashed) are shown.
+  Above $\omega\tau=1$ ($f=f_\mathrm{break}$), the ratio falls as
+  $1/\sqrt{2\omega\tau}$: $D$ saturates at the relaxation plateau
+  $2/(\omega_p\tau)$ and the log-log slope of $D$ changes from
+  $\tfrac{1}{2}$ to $0$.
+  The exact closed form
+  $\sqrt{2}\cos(\tfrac{\pi}{4}+\tfrac{\arctan\omega\tau}{2})(1+\omega^2\tau^2)^{1/4}$
+  (solid line) and the two asymptotes (dashed) are shown.
   \textit{Right:} Real and imaginary parts of $\sigma(\omega)/\sigma_\mathrm{DC}$
   vs.\ $\omega\tau$.  Re$[\sigma]$ is a Lorentzian that rolls off as
   $(\omega\tau)^{-2}$; Im$[\sigma]$ peaks at $\omega\tau=1$ with value
@@ -340,13 +372,12 @@ $\omega = 2\pi f$ & Photon angular frequency \\
 \includegraphics[width=0.82\textwidth]{fig_temp_dependence.pdf}
 \caption{%
   Absorptance $D=1-R$ vs.\ frequency for OFHC Cu (RRR\,=\,100) at
-  $T = 4, 20, 77, 300\,\mathrm{K}$ (Drude model).
+  $T = 4, 20, 77, 300\,\mathrm{K}$ (full complex Drude model).
   Dotted vertical lines mark $f_\mathrm{break}=1/(2\pi\tau)$ for each
-  temperature; the slope visibly steepens from $\tfrac{1}{2}$ (H-R) to
-  $\tfrac{3}{2}$ (inductive) above each line.
+  temperature; above each line the curve flattens onto the relaxation
+  plateau $D = 2/(\omega_p\tau)$ (grey dash-dot line for 4\,K).
   The dashed black line is the H-R approximation for $T=4\,\mathrm{K}$,
-  illustrating where it diverges from the full model.
-  The grey dash-dot line shows the $\omega^{3/2}$ reference slope.
+  which overestimates $D$ above $f_\mathrm{break}$.
   The gray band is the BBRsim simulation range (50\,GHz--20\,THz).
 }
 \label{fig:temp_dep}

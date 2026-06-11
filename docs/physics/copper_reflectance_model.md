@@ -40,39 +40,68 @@ essentially the entire range. The full Drude model must be used.
 
 ## The Drude–Griffiths Model
 
-From Griffiths, *Introduction to Electrodynamics* §9.4, for a plane wave in a
-conductor with conductivity σ(ω):
+Griffiths, *Introduction to Electrodynamics* §9.4, derives the dispersion
+relation for a plane wave in a conductor. With a frequency-dependent
+(complex) conductivity it reads
 
 **Complex wave vector:**
 
 ```
-k = ω√(ε₀μ₀/2) · √[ √(1 + (σ_r/ε₀ω)²) + 1 ]
-κ = ω√(ε₀μ₀/2) · √[ √(1 + (σ_r/ε₀ω)²) − 1 ]
+k̃² = (ω/c)² · ε̃(ω),     ε̃(ω) = 1 + iσ(ω)/(ε₀ω)
 ```
 
-where σ_r = Re[σ(ω)] is the real part of the AC conductivity.
-
-**Complex refractive index:**
-
-```
-ñ = n + iκ = c(k + iκ)/ω
-```
-
-**Normal-incidence reflectance:**
-
-```
-R = |(ñ − 1)/(ñ + 1)|²  =  [(n−1)² + κ²] / [(n+1)² + κ²]
-```
-
-**Full Drude AC conductivity** (replaces static σ in Griffiths's equations):
+**Full Drude AC conductivity** (kept complex — this is essential):
 
 ```
 σ(ω) = σ_DC / (1 − iωτ)
 ```
 
-At low frequency (ωτ << 1): σ(ω) → σ_DC and the Hagen-Rubens limit is
-recovered. At high frequency (ωτ >> 1): σ(ω) → σ_DC/(−iωτ) → purely imaginary,
-reducing reflectance below the H-R prediction.
+**Complex refractive index and normal-incidence reflectance:**
+
+```
+ñ = √ε̃(ω) = n + iκ
+R = |(ñ − 1)/(ñ + 1)|²  =  [(n−1)² + κ²] / [(n+1)² + κ²]
+```
+
+Griffiths's closed-form expressions for k and κ (his eqs. 9.126) assume a
+*real* σ. They must **not** be reused with σ_r = Re[σ(ω)] substituted in:
+the imaginary part of σ(ω) contributes a large negative term to the real
+part of ε̃,
+
+```
+Re ε̃ = 1 − ωp²τ² / (1 + ω²τ²),      ωp² = nₑe²/(ε₀mₑ)
+```
+
+— the free-electron *plasma* response. For copper ωp ≈ 1.64×10¹⁶ rad/s
+(~2.6 PHz), so Re ε̃ is hugely negative throughout the BBRsim band and the
+metal stays highly reflective.
+
+**Limiting behaviour:**
+
+- ωτ << 1 (low frequency): σ(ω) → σ_DC and the Hagen-Rubens result
+  D ≈ 2√(2ε₀ω/σ_DC) is recovered.
+- ωτ >> 1, ω << ωp (relaxation regime): the absorptance becomes *flat* in
+  frequency,
+
+  ```
+  D ≈ 2/(ωp·τ)
+  ```
+
+  For OFHC Cu (RRR=100, 4 K, τ ≈ 2.5 ps): D ≈ 4.9×10⁻⁵ across most of the
+  band. Hagen-Rubens (D ∝ √ω) **overestimates** absorption above f_break;
+  the exact universal ratio is
+
+  ```
+  D/D_HR = √2 · cos(π/4 + arctan(ωτ)/2) · (1 + ω²τ²)^¼   →   1/√(2ωτ)
+  ```
+
+> **Historical note (2026-06):** earlier revisions of this document and of
+> `BuildDrudeMaterial` substituted only σ_r = Re[σ(ω)] into the real-σ
+> Griffiths formulas, dropping the plasma term. That overestimated D by ~30×
+> at 500 GHz (RRR=100, 4 K) and by orders of magnitude at 20 THz, and led to
+> the false conclusion that reflectance falls *below* the H-R prediction at
+> high frequency. The code, the analysis scripts, and this document now all
+> use the full complex σ(ω).
 
 ---
 
@@ -162,7 +191,7 @@ into any translation unit that includes it).
 
 ```cpp
 // Internal — not part of the public API.
-// Builds a G4Material with a 20-point log-spaced REFLECTIVITY table.
+// Builds a G4Material with a 24-point log-spaced REFLECTIVITY table.
 G4Material* BuildDrudeMaterial(const G4String& name,
                                G4double Z, G4double A_g_mol, G4double density_g_cm3,
                                G4int RRR, G4double T_K);
@@ -171,9 +200,10 @@ G4Material* BuildDrudeMaterial(const G4String& name,
 Physics path inside `BuildDrudeMaterial`:
 1. Compute σ_DC: uses RRR × σ_RT if T_K < 50 K; Matthiessen's rule otherwise.
 2. Compute τ = σ_DC × mₑ / (nₑ e²).
-3. For each of 20 log-spaced energies (50 GHz → 20 THz):
-   - Evaluate Re[σ(ω)] = σ_DC / (1 + ω²τ²)
-   - Compute k, κ from Griffiths §9.4
+3. For each of 24 log-spaced energies (10 GHz → 20 THz, matching the
+   Planck-emitter CDF range so no photon falls off the table edge):
+   - Evaluate the complex σ(ω) = σ_DC/(1 − iωτ)
+   - ε̃ = 1 + iσ/(ε₀ω);  ñ = √ε̃
    - Compute R = |(ñ−1)/(ñ+1)|²
 4. Store as `REFLECTIVITY` on the material's `G4MaterialPropertiesTable`.
 
@@ -235,12 +265,18 @@ The simulation prints the resolved material name at geometry construction time:
 | Regime | Condition | Model | Notes |
 |---|---|---|---|
 | Hagen-Rubens | f << 1/(2πτ) | D ≈ 2√(2ε₀ω/σ) | Low-frequency limit only; plotted as reference |
-| Drude transition | f ~ 1/(2πτ) | Full Griffiths §9.4 | BBRsim operating range (50 GHz–20 THz) |
+| Relaxation | 1/(2πτ) << f << ωp/2π | D ≈ 2/(ωp·τ), flat | Most of the BBRsim band for high-RRR Cu at 4 K |
 | Near-infrared | f > ~10 THz | Interband transitions | d-band electrons dominate; Drude overestimates R |
 
-BBRsim focuses on the Drude transition regime. Above ~10 THz, interband effects
-begin to contribute; the Drude model overestimates R slightly, consistent with
-comparisons against Palik room-temperature data.
+BBRsim spans the Hagen-Rubens → relaxation transition. Above ~10 THz,
+interband effects begin to contribute; the Drude model overestimates R
+slightly, consistent with comparisons against Palik room-temperature data.
+
+**Caveat — anomalous skin effect (ASE):** at 4 K and high RRR the electron
+mean free path exceeds the classical skin depth, and measured cryogenic
+losses (e.g. Serov 2016) sit above the classical-Drude relaxation plateau.
+The classical model implemented here is the documented baseline; an ASE
+correction is a candidate refinement once validation data from O2 exists.
 
 ---
 
