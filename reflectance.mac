@@ -4,7 +4,8 @@
 # (RRR=100, 4 K) at 500 GHz (E = 2.07e-3 eV).
 #
 # Gun aimed at z=10 mm to avoid crack1 (z=0) and crack2 (z=3 mm).
-# Expected absorptance D ≈ 1.75e-3 at 500 GHz  →  R_obs ≈ 0.9982.
+# Full complex Drude (relaxation regime): expected absorptance
+# D ≈ 4.9e-5 at 500 GHz → ~0-2 absorptions in 10 000 events (λ ≈ 0.5).
 #
 # Analysis:
 #   conda run -n bbrsim python scripts/check_reflectance.py

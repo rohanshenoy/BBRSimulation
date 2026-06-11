@@ -2,6 +2,7 @@
 
 #include "BBRCrackLibrary.hh"
 #include "G4AffineTransform.hh"
+#include "G4GeometryTolerance.hh"
 #include "G4NavigationHistory.hh"
 #include "G4PhysicalConstants.hh"
 #include "G4Step.hh"
@@ -19,16 +20,31 @@ BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
 // PostStepDoIt — intercept TEM_waveguide volumes; fall through otherwise.
 // The pass-through path preserves bit-identical output for all other geometry
 // (verify.mac regression must still pass).
+//
+// The wrapped G4OpBoundaryProcess is Forced, so this runs on EVERY step of
+// every optical photon. Mirror the stock process's own entry guards before
+// intercepting: only act on genuine geometry-boundary steps longer than the
+// surface tolerance. Tolerance-scale re-steps at the same surface must NOT
+// roll the absorption dice a second time — the stock process classifies them
+// as StepTooSmall and does nothing.
 G4VParticleChange* BBSimOpBoundaryProcess::PostStepDoIt(const G4Track& aTrack,
                                                         const G4Step& aStep)
 {
-  const G4Material* mat2 = aStep.GetPostStepPoint()->GetMaterial();
-  if (mat2 && mat2->GetName() == "vacuum_wg")
-    return HandleDiffractionBoundary(aTrack, aStep);
-  if (mat2) {
-    G4MaterialPropertiesTable* mpt = mat2->GetMaterialPropertiesTable();
-    if (mpt && mpt->GetProperty("REFLECTIVITY"))
-      return HandleReflectanceBoundary(aTrack, aStep);
+  fLastBBRStatus = kBBRNone;
+
+  const G4double kCarTolerance =
+      G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
+
+  if (aStep.GetPostStepPoint()->GetStepStatus() == fGeomBoundary &&
+      aStep.GetStepLength() > kCarTolerance / 2.) {
+    const G4Material* mat2 = aStep.GetPostStepPoint()->GetMaterial();
+    if (mat2 && mat2->GetName() == "vacuum_wg")
+      return HandleDiffractionBoundary(aTrack, aStep);
+    if (mat2) {
+      G4MaterialPropertiesTable* mpt = mat2->GetMaterialPropertiesTable();
+      if (mpt && mpt->GetProperty("REFLECTIVITY"))
+        return HandleReflectanceBoundary(aTrack, aStep);
+    }
   }
   return pRegProcess->PostStepDoIt(aTrack, aStep);
 }
@@ -69,21 +85,38 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // IWavePhi: azimuth in HFSS x̂_i=phi_hat, ŷ_i=-theta_hat plane.
   G4double iwavePhi_raw   = std::atan2(-khat.dot(theta_hat), khat.dot(phi_hat))
                             * (180. / CLHEP::pi);
-  G4double iwavePhi_deg   = std::abs(iwavePhi_raw);
+
+  // The HFSS sweep covers IWavePhi ∈ [0°, 90°] only; the parallel-plate
+  // geometry is mirror-symmetric about both transverse axes. Fold the azimuth
+  // into that wedge by mirroring the transverse axes, and carry the mirror
+  // signs so everything sampled from the folded dataset (outgoing direction,
+  // polarization, exit position) is mapped back to the true frame. Without
+  // the un-fold, oblique photons get mirror-image outgoing distributions.
+  //   sy: phi → |phi|        (mirrors ŷ_i, i.e. flips theta_hat)
+  //   sx: |phi| → 180−|phi|  (mirrors x̂_i, i.e. flips phi_hat)
+  const G4double sy = (iwavePhi_raw < 0.) ? -1. : 1.;
+  G4double iwavePhi_deg = std::abs(iwavePhi_raw);
+  const G4double sx = (iwavePhi_deg > 90.) ? -1. : 1.;
   if (iwavePhi_deg > 90.) iwavePhi_deg = 180. - iwavePhi_deg;
 
+  // Folded-frame transverse axes expressed in world coordinates. Building all
+  // basis vectors from these applies the mirror to inputs (polarization
+  // decomposition) and un-applies it to sampled outputs in one stroke.
+  const G4ThreeVector theta_f = sy * theta_hat;
+  const G4ThreeVector phi_f   = sx * phi_hat;
+
   // --- decompose incoming polarization onto HFSS incoming spherical basis ---
-  // Standard spherical basis at (IWaveTheta, IWavePhi) in HFSS frame
-  // (ẑ_i=normal_hat, x̂_i=phi_hat, ŷ_i=-theta_hat):
+  // Standard spherical basis at (IWaveTheta, IWavePhi) in the folded HFSS
+  // frame (ẑ_i=normal_hat, x̂_i=phi_f, ŷ_i=-theta_f):
   //   ê_θ = -sin(T)*ẑ_i + cos(T)*cos(P)*x̂_i - cos(T)*sin(P)*ŷ_i
   //   ê_φ =            -sin(P)*x̂_i           - cos(P)*ŷ_i
   G4double th = iwaveTheta_deg * (CLHEP::pi / 180.);
-  G4double ph = iwavePhi_raw   * (CLHEP::pi / 180.);
+  G4double ph = iwavePhi_deg   * (CLHEP::pi / 180.);
   G4ThreeVector eTheta_in = +std::sin(th) * normal_hat
-                            - std::cos(th) * std::sin(ph) * theta_hat
-                            + std::cos(th) * std::cos(ph) * phi_hat;
-  G4ThreeVector ePhi_in   = -std::cos(ph) * theta_hat
-                            - std::sin(ph) * phi_hat;
+                            - std::cos(th) * std::sin(ph) * theta_f
+                            + std::cos(th) * std::cos(ph) * phi_f;
+  G4ThreeVector ePhi_in   = -std::cos(ph) * theta_f
+                            - std::sin(ph) * phi_f;
 
   G4double E_theta = phat.dot(eTheta_in);
   G4double E_phi   = phat.dot(ePhi_in);
@@ -102,49 +135,45 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     G4cout << "[BBR] diffraction events=" << fNDiffraction
            << " T_obs=" << G4double(fNDiffractionTransmit)/fNDiffraction << G4endl;
 
-  G4ThreeVector dir_final;
-  G4ThreeVector pos_csv;
-  G4bool hasPos = false;
-
   if (transmitted) {
+    fLastBBRStatus = kBBRDiffractionTransmit;
+
     // Transmit: sample outgoing direction + polarization (Wang eqs. 56-57).
+    // The folded axes (theta_f, phi_f) un-mirror the sampled output.
     G4ThreeVector pol_out;
     G4ThreeVector dir_out = hfss.SampleOutgoingDirection(
         E_theta, E_phi, iwavePhi_deg, iwaveTheta_deg,
-        phi_hat, theta_hat, normal_hat, pol_out);
+        phi_f, theta_f, normal_hat, pol_out);
 
     // Sample exit-face position (Wang eq. 55).
-    // Exit face center: traverse the crack slab from the entry point.
-    const G4ThreeVector& entryGl = aStep.GetPostStepPoint()->GetPosition();
-    G4ThreeVector localEntry     = xf.TransformPoint(entryGl);
-    G4ThreeVector localNormal    = xf.TransformAxis(normal_hat);
-    // Nudge slightly inside so DistanceToOut is well-defined at the boundary.
-    G4ThreeVector localStart     = localEntry + 1e-7*CLHEP::mm * localNormal;
-    G4double thickness           = touch->GetSolid()->DistanceToOut(localStart, localNormal);
-    G4ThreeVector exitCenter     = xf.InverseTransformPoint(localStart + thickness * localNormal);
+    // Exit face center: project the volume's local origin onto the exit face
+    // along the local outward normal. The HFSS waveguide CSV stores exit
+    // positions as ABSOLUTE cross-section coordinates centred on the
+    // waveguide axis, so they must be added to the face centre. (Adding them
+    // to the entry-point projection — the previous behaviour — relocated
+    // off-axis photons outside the crack, into solid Cu.)
+    G4ThreeVector localNormal = xf.TransformAxis(normal_hat);
+    G4double      halfLen     = touch->GetSolid()->DistanceToOut(
+                                    G4ThreeVector(0., 0., 0.), localNormal);
+    G4ThreeVector exitCenter  = xf.InverseTransformPoint(halfLen * localNormal);
 
-    // HFSS waveguide CSV: Y=long dim → +theta_hat, Z=gap/b → phi_hat.
-    // (ŷ_i = −ŷ_world sign flip is for angle conventions only, not exit positions.)
+    // HFSS waveguide CSV: Y=long dim → theta axis, Z=gap/b → phi axis.
     G4ThreeVector pos_out = hfss.SampleExitPosition(
         E_theta, E_phi, iwavePhi_deg, iwaveTheta_deg,
-        exitCenter, theta_hat, phi_hat);
-
-    dir_final = dir_out;
-    pos_csv   = pos_out;
-    hasPos    = true;
+        exitCenter, theta_f, phi_f);
 
     fParticleChange.ProposeMomentumDirection(dir_out);
     fParticleChange.ProposePolarization(pol_out);
     fParticleChange.ProposePosition(pos_out);
     fParticleChange.ProposeTrackStatus(fAlive);
   } else {
+    fLastBBRStatus = kBBRDiffractionReflect;
+
     // Reflect: specular flip of momentum and polarization about the crack normal.
     G4ThreeVector dir_ref = (khat - 2.*khat.dot(normal_hat)*normal_hat).unit();
     G4ThreeVector pol_ref = phat  - 2.*phat.dot(normal_hat)*normal_hat;
     if (pol_ref.mag() > 1e-30) pol_ref = pol_ref.unit();
     else                        pol_ref = phi_hat;
-
-    dir_final = dir_ref;
 
     fParticleChange.ProposeMomentumDirection(dir_ref);
     fParticleChange.ProposePolarization(pol_ref);
@@ -184,10 +213,12 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
   // YYC dispatch: rand > R → DoAbsorption(); rand <= R → DoReflection() specular.
   G4double rand = G4UniformRand();
   if (rand > R) {
+    fLastBBRStatus = kBBRAbsorb;
     ++fNReflectanceAbsorb;
     fParticleChange.ProposeLocalEnergyDeposit(E);
     fParticleChange.ProposeTrackStatus(fStopAndKill);
   } else {
+    fLastBBRStatus = kBBRReflect;
     // k_ref = k − 2(k·n)n;  p_ref = p − 2(p·n)n
     const G4ThreeVector& k = aTrack.GetMomentumDirection(); // YYC: OldMomentum
     const G4ThreeVector& p = aTrack.GetPolarization();      // YYC: OldPolarization
@@ -210,6 +241,17 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
 }
 
 // ---------------------------------------------------------------------------
+
+G4String BBSimOpBoundaryProcess::GetLastBBRStatusString() const
+{
+  switch (fLastBBRStatus) {
+    case kBBRDiffractionTransmit: return "BBRDiffractionTransmit";
+    case kBBRDiffractionReflect:  return "BBRDiffractionReflect";
+    case kBBRReflect:             return "BBRReflect";
+    case kBBRAbsorb:              return "BBRAbsorb";
+    case kBBRNone: default:       return "";
+  }
+}
 
 G4OpBoundaryProcessStatus BBSimOpBoundaryProcess::GetStatus() const
 {

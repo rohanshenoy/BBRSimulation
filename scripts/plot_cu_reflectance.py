@@ -65,21 +65,19 @@ def sigma_drude(T_K, RRR):
     return sigma_imp
 
 def drude_R(freq_Hz, sigma_DC):
-    """Normal-incidence reflectance from the full Drude model.
+    """Normal-incidence reflectance from the full complex Drude model.
     sigma_DC: DC conductivity [S/m]; tau derived from Drude formula.
+
+    σ(ω) = σ_DC/(1−iωτ) is kept complex: ε̃ = 1 + iσ/(ε₀ω), ñ = √ε̃,
+    R = |(ñ−1)/(ñ+1)|². Im σ supplies the plasma term in Re ε̃, which keeps
+    R near 1 in the relaxation regime (D ≈ 2/(ωp·τ), flat in frequency).
     """
     tau   = sigma_DC * m_e / (n_e * e_C**2)
     omega = 2.0 * np.pi * freq_Hz
     sigma_ac = sigma_DC / (1.0 - 1j * omega * tau)
-    sigma_r  = np.real(sigma_ac)
-    ratio = sigma_r / (eps0 * omega)
-    root  = np.sqrt(1.0 + ratio**2)
-    c     = 2.998e8  # m/s
-    k     = (omega / c) * np.sqrt(0.5 * (root + 1.0))
-    kappa = (omega / c) * np.sqrt(0.5 * (root - 1.0))
-    n_re  = c * k   / omega
-    n_im  = c * kappa / omega
-    R = ((n_re - 1.0)**2 + n_im**2) / ((n_re + 1.0)**2 + n_im**2)
+    eps_t = 1.0 + 1j * sigma_ac / (eps0 * omega)
+    n_t   = np.sqrt(eps_t)
+    R     = np.abs((n_t - 1.0) / (n_t + 1.0)) ** 2
     return np.clip(R, 0.0, 1.0)
 
 # Drude materials — RRR is the primary parameter; σ_DC = RRR × σ_RT at 4K.
@@ -132,10 +130,11 @@ for ax, qty, ylabel, ylim, yscale in [
     ax.plot(freq_GHz, y_hr, color="steelblue", ls=":", lw=1.5, alpha=0.5,
             label="OFHC_Cu Hagen-Rubens (low-f limit, ref only)")
 
-    # G4 REFLECTIVITY table: the 20 log-spaced points stored by BuildDrudeMaterial
-    # (same Drude formula evaluated at discrete energies — what Geant4 actually interpolates)
-    N_tab      = 20
-    E_tab_eV   = np.exp(np.linspace(np.log(2.07e-4), np.log(8.27e-2), N_tab))  # eV
+    # G4 REFLECTIVITY table: the 24 log-spaced points stored by BuildDrudeMaterial
+    # (same Drude formula evaluated at discrete energies — what Geant4 actually
+    # interpolates). 10 GHz–20 THz, matching the Planck-emitter CDF range.
+    N_tab      = 24
+    E_tab_eV   = np.exp(np.linspace(np.log(4.14e-5), np.log(8.27e-2), N_tab))  # eV
     h_eVs_loc  = 4.13566769692e-15
     nu_tab     = E_tab_eV / h_eVs_loc
     fGHz_tab   = nu_tab / 1e9
@@ -143,16 +142,7 @@ for ax, qty, ylabel, ylim, yscale in [
     y_tab = R_tab if qty == "R" else 1 - R_tab
     ax.plot(fGHz_tab, y_tab, "P", color="steelblue", ms=6, alpha=0.9, zorder=6,
             markeredgecolor="navy", markeredgewidth=0.6,
-            label="G4 Drude table (20 pts, Cu_RRR100_T4K in BBRMaterials)")
-
-    # Simulation observation from reflectance.mac (10 000 events, 500 GHz normal incidence)
-    sim_fGHz = 500.0
-    sim_R    = 9984.0 / 10000.0   # reflected / total
-    sim_D    = 1.0 - sim_R
-    y_sim = sim_R if qty == "R" else sim_D
-    ax.scatter([sim_fGHz], [y_sim], s=120, marker="*", color="crimson",
-               edgecolors="darkred", linewidths=0.8, zorder=7,
-               label=f"BBRsim obs (500 GHz, N=10k, {'R' if qty=='R' else 'D'}={y_sim:.4f})")
+            label="G4 Drude table (24 pts, Cu_RRR100_T4K in BBRMaterials)")
 
     # Geant4 IR reflectivity table
     y_g4 = g4ir["R"] if qty == "R" else g4ir["D"]

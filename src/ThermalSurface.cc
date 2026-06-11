@@ -15,15 +15,16 @@ void ThermalSurface::AddBoxSurface(G4ThreeVector center,
                                     G4double emissivity)
 {
   GeometricSurface s;
-  s.type   = 3;
-  s.center = center;
-  s.Wx     = Wx;
-  s.Wy     = Wy;
-  s.Wz     = Wz;
-  s.in_out = in_out;
-  s.rot1   = rot1;
-  s.rot2   = rot2;
-  s.rot3   = rot3;
+  s.type       = 3;
+  s.center     = center;
+  s.Wx         = Wx;
+  s.Wy         = Wy;
+  s.Wz         = Wz;
+  s.in_out     = in_out;
+  s.rot1       = rot1;
+  s.rot2       = rot2;
+  s.rot3       = rot3;
+  s.emissivity = emissivity;
   s.CalculateArea();
 
   surfaces.push_back(s);
@@ -59,19 +60,22 @@ BBEvt ThermalSurface::GenEvt()
   else
     thisEvt.energy = BBSpecCDF.x[idx] - c / b;
 
-  // ---- surface selection: area-weighted ----
+  // ---- surface selection: weighted by effective area (area × emissivity) ----
+  // Photon emission per surface scales as ε·A·T⁴ (shared T here), so a gray
+  // surface must be selected — and emit — in proportion to ε·A, not A.
   if (surfaces.empty()) {
     G4Exception("ThermalSurface::GenEvt", "BBR001", FatalException,
                 "No surfaces added. Call AddBoxSurface before GenEvt.");
   }
-  G4double totalArea  = 0.;
-  int      N_surfaces = (int)surfaces.size();
-  for (int i = 0; i < N_surfaces; ++i) totalArea += surfaces[i].area;
+  G4double totalEffArea = 0.;
+  int      N_surfaces   = (int)surfaces.size();
+  for (int i = 0; i < N_surfaces; ++i)
+    totalEffArea += surfaces[i].area * surfaces[i].emissivity;
 
-  G4double prob = G4UniformRand() * totalArea;
-  int idx_s = 0;
+  G4double prob  = G4UniformRand() * totalEffArea;
+  int idx_s = N_surfaces - 1;   // fallback: float underflow lands on the last surface
   for (int i = 0; i < N_surfaces; ++i) {
-    prob -= surfaces[i].area;
+    prob -= surfaces[i].area * surfaces[i].emissivity;
     if (prob <= 0.) { idx_s = i; break; }
   }
 

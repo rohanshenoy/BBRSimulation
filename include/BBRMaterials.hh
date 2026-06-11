@@ -6,6 +6,8 @@
 #include "G4SystemOfUnits.hh"
 #include <algorithm>
 #include <cmath>
+#include <complex>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -20,12 +22,18 @@ namespace BBRMaterials {
 //   RRR           : Residual Resistance Ratio (material quality parameter)
 //   T_K           : temperature [K]
 //
-// Physics (Griffiths §9.4 + Matthiessen's rule):
+// Physics (Griffiths §9.4 generalized to complex σ + Matthiessen's rule):
 //   σ_DC = RRR × σ_RT               (T < 50 K, phonons frozen out)
 //   τ    = σ_DC × mₑ / (nₑ e²)
-//   σ_r(ω) = σ_DC / (1 + ω²τ²)     (Re[Drude AC conductivity])
+//   σ(ω) = σ_DC / (1 − iωτ)        (full complex Drude AC conductivity)
+//   ε̃(ω) = 1 + iσ(ω)/(ε₀ω)         (k̃² = (ω/c)² ε̃;  ñ = √ε̃)
 //   R(ω) = |(ñ−1)/(ñ+1)|²          (Fresnel, normal incidence)
-//   ñ from k̃ = k+iκ via Griffiths eqs. 9.126
+//
+// Im σ must NOT be dropped: for ωτ ≳ 1 it supplies the −ωp²τ²/(1+ω²τ²)
+// plasma term in Re ε̃, which keeps R near 1 (relaxation regime,
+// D ≈ 2/(ωp τ)). Using only Re σ in the real-σ Griffiths closed form
+// overestimates absorptance by ~30× at 500 GHz (RRR=100, 4 K) and by
+// orders of magnitude at 20 THz.
 // ---------------------------------------------------------------------------
 inline G4Material* BuildDrudeMaterial(const G4String& name,
                                        G4double Z,
@@ -62,9 +70,11 @@ inline G4Material* BuildDrudeMaterial(const G4String& name,
   // Drude scattering time: τ = σ_DC mₑ / (nₑ e²)
   const G4double tau = sigma_DC * m_e_kg / (n_e * e_C * e_C);
 
-  // Build 20 log-spaced reflectivity points from 50 GHz to 20 THz.
-  const int      N     = 20;
-  const G4double Emin  = 2.07e-4*eV;   // 50 GHz
+  // Build 24 log-spaced reflectivity points from 10 GHz to 20 THz.
+  // Lower bound matches the Planck-emitter CDF (10 GHz) so sub-50-GHz
+  // photons are no longer clamped to the table edge.
+  const int      N     = 24;
+  const G4double Emin  = 4.14e-5*eV;   // 10 GHz
   const G4double Emax  = 8.27e-2*eV;   // 20 THz
 
   std::vector<G4double> energies(N), refls(N);
@@ -74,21 +84,17 @@ inline G4Material* BuildDrudeMaterial(const G4String& name,
     const G4double nu    = (energies[i]/eV) / h_eVs;    // Hz
     const G4double omega = 2. * CLHEP::pi * nu;          // rad/s
 
-    // Re[σ(ω)] from Drude AC conductivity: σ_DC/(1−iωτ)
-    const G4double ot      = omega * tau;
-    const G4double sigma_r = sigma_DC / (1. + ot*ot);
+    // Full complex Drude conductivity: σ(ω) = σ_DC/(1−iωτ)
+    const std::complex<G4double> sigma =
+        sigma_DC / std::complex<G4double>(1., -omega*tau);
 
-    // Griffiths §9.4 eqs. 9.126: k̃ = k + iκ in good-conductor limit
-    const G4double ratio  = sigma_r / (eps0_SI * omega);
-    const G4double root   = std::sqrt(1. + ratio*ratio);
-    const G4double k_wav  = (omega/c_SI) * std::sqrt(0.5*(root + 1.));
-    const G4double kappa  = (omega/c_SI) * std::sqrt(0.5*(root - 1.));
-    const G4double n_re   = c_SI * k_wav / omega;
-    const G4double n_im   = c_SI * kappa  / omega;
+    // ε̃ = 1 + iσ/(ε₀ω);  ñ = √ε̃
+    const std::complex<G4double> eps_t =
+        1. + std::complex<G4double>(0., 1.) * sigma / (eps0_SI * omega);
+    const std::complex<G4double> n_t = std::sqrt(eps_t);
 
     // Normal-incidence Fresnel: R = |(ñ−1)/(ñ+1)|²
-    const G4double R = ((n_re-1.)*(n_re-1.) + n_im*n_im) /
-                       ((n_re+1.)*(n_re+1.) + n_im*n_im);
+    const G4double R = std::norm((n_t - 1.) / (n_t + 1.));
     refls[i] = std::max(0., std::min(1., R));
   }
 
@@ -155,14 +161,17 @@ inline G4Material* GetPerfectReflector()
 }
 
 // Copper with full Drude reflectance model, parameterized by (RRR, T_K).
-// Material name is deterministic ("Cu_RRR{RRR}_T{int(T_K)}K") so repeated
-// calls with the same arguments return the cached G4Material.
+// Material name is deterministic ("Cu_RRR{RRR}_T{T_K}K", %g formatting so
+// e.g. 4 K → "T4K", 4.6 K → "T4.6K") so repeated calls with the same
+// arguments return the cached G4Material and distinct temperatures never
+// alias to the same cache entry.
 // T_K defaults to 4.0 K (cryogenic baseline for BBRsim).
 // Below 50 K: σ_DC = RRR × σ_RT (phonons frozen).  Above 50 K: Matthiessen.
 inline G4Material* GetCopper(G4int RRR, G4double T_K = 4.0)
 {
-  G4String name = "Cu_RRR" + std::to_string(RRR)
-                + "_T"     + std::to_string(static_cast<int>(T_K)) + "K";
+  char tbuf[32];
+  std::snprintf(tbuf, sizeof(tbuf), "%g", T_K);
+  G4String name = "Cu_RRR" + std::to_string(RRR) + "_T" + tbuf + "K";
   return BuildDrudeMaterial(name, 29., 63.546, 8.96, RRR, T_K);
 }
 

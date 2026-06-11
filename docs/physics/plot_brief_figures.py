@@ -36,27 +36,34 @@ c_light  = 2.998e8            # m/s
 sigma_RT = 5.96e7             # S/m  (universal, 273 K)
 
 def sigma_dc(T_K, RRR):
-    """DC conductivity via Matthiessen's rule."""
+    """DC conductivity via Matthiessen's rule.
+
+    Below 50 K phonons are frozen out and sigma_DC = RRR * sigma_RT — the
+    simple 1/T phonon term is invalid there (umklapp/Bloch-Gruneisen) and
+    must not be applied. Matches BuildDrudeMaterial in BBRMaterials.hh.
+    """
     sig_imp = RRR * sigma_RT
-    sig_ph  = sigma_RT * 273.0 / max(T_K, 1.0)
-    return 1.0 / (1.0/sig_imp + 1.0/sig_ph)
+    if T_K >= 50.0:
+        sig_ph = sigma_RT * 273.0 / T_K
+        return 1.0 / (1.0/sig_imp + 1.0/sig_ph)
+    return sig_imp
 
 def drude_tau(sig_dc_val):
     return sig_dc_val * m_e / (n_e * e_C**2)
 
 def drude_D(freq_Hz, sig_dc_val):
-    """Absorptance D = 1-R from Drude model (uses Re[sigma(omega)] in Griffiths formula)."""
+    """Absorptance D = 1-R from the full complex Drude model.
+
+    σ(ω) = σ_DC/(1−iωτ) kept complex: ε̃ = 1 + iσ/(ε₀ω), ñ = √ε̃,
+    R = |(ñ−1)/(ñ+1)|². In the relaxation regime (ωτ >> 1, ω << ωp) this
+    gives the flat absorptance D ≈ 2/(ωp·τ).
+    """
     tau   = drude_tau(sig_dc_val)
     omega = 2.0 * np.pi * freq_Hz
     sigma_ac = sig_dc_val / (1.0 - 1j * omega * tau)
-    sigma_r  = np.real(sigma_ac)
-    ratio = sigma_r / (eps0 * omega)
-    root  = np.sqrt(1.0 + ratio**2)
-    k_    = (omega / c_light) * np.sqrt(0.5 * (root + 1.0))
-    kap   = (omega / c_light) * np.sqrt(0.5 * (root - 1.0))
-    n_re  = c_light * k_  / omega
-    n_im  = c_light * kap / omega
-    R = ((n_re - 1.0)**2 + n_im**2) / ((n_re + 1.0)**2 + n_im**2)
+    eps_t = 1.0 + 1j * sigma_ac / (eps0 * omega)
+    n_t   = np.sqrt(eps_t)
+    R     = np.abs((n_t - 1.0) / (n_t + 1.0)) ** 2
     return 1.0 - np.clip(R, 0.0, 1.0)
 
 def hagen_rubens_D(freq_Hz, sig_dc_val):
@@ -74,43 +81,42 @@ fig.subplots_adjust(wspace=0.35)
 # ── Panel 1: D/D_HR vs ωτ ────────────────────────────────────────────────────
 x = np.logspace(-2, 2, 1000)   # ωτ
 
-# Exact result (valid for sigma_r/eps0*omega >> 1, i.e. our whole BBRsim range)
-D_ratio = np.sqrt(1.0 + x**2)
-# Low-f Taylor: 1 + (1/2)(ωτ)^2  (first correction)
-D_taylor_lo = 1.0 + 0.5 * x**2
-# High-f Laurent: ωτ × (1 + 1/(2(ωτ)^2))
-D_taylor_hi = x * (1.0 + 0.5 / x**2)
+# Exact result for the good-conductor limit (σ_DC/ε₀ω >> 1, our whole range)
+# with the FULL complex σ(ω):
+#   D/D_HR = √2 · cos(π/4 + arctan(ωτ)/2) · (1 + ω²τ²)^{1/4}
+# → 1 at ωτ << 1 (Hagen-Rubens recovered)
+# → 1/√(2ωτ) at ωτ >> 1 (relaxation regime, D → 2/(ωp·τ) flat in ω)
+# H-R therefore OVERESTIMATES absorptance above f_break.
+D_ratio = np.sqrt(2.0) * np.cos(np.pi/4.0 + np.arctan(x)/2.0) * (1.0 + x**2)**0.25
+# Asymptotes
+D_asym_lo = np.ones_like(x)
+D_asym_hi = 1.0 / np.sqrt(2.0 * x)
 
-ax1.loglog(x, D_ratio,     'k-',  lw=2.2, zorder=4, label=r'Exact: $\sqrt{1+(\omega\tau)^2}$')
-ax1.loglog(x[x < 1.5], D_taylor_lo[x < 1.5], 'b--', lw=1.5, zorder=3,
-           label=r'Low-$f$: $1 + \frac{1}{2}(\omega\tau)^2$')
-ax1.loglog(x[x > 0.7], D_taylor_hi[x > 0.7], 'r--', lw=1.5, zorder=3,
-           label=r'High-$f$: $\omega\tau\,[1 + \frac{1}{2(\omega\tau)^2}]$')
-
-# Asymptote guides
-x_lo = np.array([0.01, 1.0])
-x_hi = np.array([1.0, 100.0])
-ax1.loglog(x_lo, np.ones_like(x_lo), color='blue', ls=':', lw=1.0, alpha=0.5)
-ax1.loglog(x_hi, x_hi,               color='red',  ls=':', lw=1.0, alpha=0.5)
+ax1.loglog(x, D_ratio, 'k-', lw=2.2, zorder=4,
+           label=r'Exact: $\sqrt{2}\cos\!\left(\frac{\pi}{4}+\frac{\arctan\omega\tau}{2}\right)(1+\omega^2\tau^2)^{1/4}$')
+ax1.loglog(x[x < 1.5], D_asym_lo[x < 1.5], 'b--', lw=1.5, zorder=3,
+           label=r'Low-$f$: $D = D_{\rm HR}$')
+ax1.loglog(x[x > 0.7], D_asym_hi[x > 0.7], 'r--', lw=1.5, zorder=3,
+           label=r'High-$f$: $1/\sqrt{2\omega\tau}$  ($D \to 2/\omega_p\tau$)')
 
 ax1.axvline(1.0, color='gray', lw=1.0, ls='--', alpha=0.7)
 ax1.annotate(r'$\omega\tau = 1$' + '\n' + r'$(f = f_{\rm break})$',
-             xy=(1.0, 3.5), xytext=(2.5, 6.0), fontsize=8,
+             xy=(1.0, 0.5), xytext=(2.5, 0.7), fontsize=8,
              arrowprops=dict(arrowstyle='->', color='gray', lw=0.8),
              color='gray', ha='left')
 
 # Slope annotations
-ax1.annotate(r'slope $1/2$', xy=(0.05, 1.05), fontsize=8,
+ax1.annotate(r'slope $0$', xy=(0.05, 1.05), fontsize=8,
              color='blue', ha='left')
-ax1.annotate(r'slope $1$', xy=(10, 12), fontsize=8,
+ax1.annotate(r'slope $-1/2$', xy=(10, 0.3), fontsize=8,
              color='red', ha='left')
 
 ax1.set_xlim(0.01, 100)
-ax1.set_ylim(0.8, 150)
+ax1.set_ylim(0.05, 2.0)
 ax1.set_xlabel(r'$\omega\tau$')
 ax1.set_ylabel(r'$D\,/\,D_{\rm HR}(\sigma_{\rm DC})$')
 ax1.set_title('Universal Drude absorptance ratio')
-ax1.legend(loc='upper left', fontsize=8, framealpha=0.9)
+ax1.legend(loc='lower left', fontsize=8, framealpha=0.9)
 ax1.grid(True, which='both', ls=':', alpha=0.3)
 
 # ── Panel 2: Re[σ] and Im[σ] vs ωτ ──────────────────────────────────────────
@@ -178,15 +184,13 @@ D_HR4 = hagen_rubens_D(freq_Hz, sig4)
 ax.loglog(freq_GHz, D_HR4, 'k--', lw=1.2, alpha=0.55,
           label=r'H-R limit ($T=4\,\mathrm{K}$): $D \propto \omega^{1/2}$')
 
-# Slope guides
-f_ref = np.array([30, 3e4])
-D_ref = drude_D(f_ref * 1e9, sig4)
-# Show ω^(3/2) slope guide in the high-f region
-f_hf  = np.array([200.0, 20000.0])
-scale = drude_D(np.array([200e9]), sig4)[0] / (200.0**1.5)
-D_hf  = scale * f_hf**1.5
-ax.loglog(f_hf, D_hf, color='gray', lw=1.0, ls='-.',
-          label=r'Reference slope $\propto \omega^{3/2}$')
+# Relaxation-regime plateau for 4 K: D → 2/(ωp·τ), flat in frequency
+tau4   = drude_tau(sig4)
+omega_p = np.sqrt(n_e * e_C**2 / (eps0 * m_e))
+D_plateau = 2.0 / (omega_p * tau4)
+plateau_str = f"{D_plateau:.1e}".replace("e-0", r"\times 10^{-") + "}"
+ax.axhline(D_plateau, color='gray', lw=1.0, ls='-.',
+           label=rf'Relaxation plateau ($T=4$ K): $D = 2/\omega_p\tau = {plateau_str}$')
 
 ax.axvspan(50, 20000, alpha=0.07, color='gray', label='BBRsim range (50 GHz– 20 THz)')
 
@@ -196,7 +200,7 @@ ax.set_xlim(0.1, 1e5)
 ax.set_ylim(2e-6, 0.12)
 ax.set_xlabel('Frequency [GHz]')
 ax.set_ylabel(r'Absorptance $D = 1 - R$')
-ax.set_title(r'OFHC Cu (RRR\,=\,100): Drude model, temperature dependence')
+ax.set_title('OFHC Cu (RRR = 100): Drude model, temperature dependence')
 ax.set_xticks([1, 10, 100, 1000, 10000, 100000])
 ax.set_xticklabels(['1 GHz', '10', '100', '1 THz', '10', '100 THz'])
 ax.legend(fontsize=7.5, loc='upper left', framealpha=0.9)

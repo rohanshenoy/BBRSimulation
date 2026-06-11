@@ -66,98 +66,100 @@ The executable is `BBRSim`, always run from the `build/` directory.
 
 ## Test cases
 
-### 1. Wrapper regression
+All test cases run in the consolidated test world
+(`BBRTestDetectorConstruction`): a 50 cm vacuum world, a 4 mm Cu slab with
+its front face at x = 0, and two `vacuum_wg` crack daughters (crack1: 52 µm
+gap at z = 0; crack2: 102 µm gap at z = 3 mm). Every optical-photon boundary
+crossing is logged to `test_output.csv` (see *Output files*).
 
-Verifies that the `BBSimOpBoundaryProcess` wrapper is transparent — identical
-output to the stock Geant4 `G4OpBoundaryProcess` on an ordinary geometry.
+### 1. Planck thermal emitter
 
-```bash
-./BBRSim verify_wrapper.mac
-```
-
-Run this before and after any change to `BBSimOpBoundaryProcess` or `BBSimPhysics`
-and confirm the output is bit-identical. This is the core regression guard.
-
----
-
-### 2. HFSS diffraction
-
-Fires a 500 GHz optical photon at a narrow parallel-plate crack and measures
-the fraction that transmits. The HFSS S-parameter tables in `data/` encode the
-diffraction physics.
+The default mode (`/bbr/gun/mode false`): a 1×20×20 mm box surface at
+x = −50 mm emits photons with energies drawn from the Planck photon-number
+spectrum (10 GHz–20 THz) toward the Cu slab and cracks.
 
 ```bash
-./BBRSim diffraction.mac          # crack1: b = 52 µm at z = 0
-./BBRSim diffraction_crack2.mac   # crack2: b = 102 µm at z = 3 mm
-./BBRSim validation.mac           # both cracks in one session
+./BBRSim planck.mac        # 10 000 events at 4 K
+./BBRSim test.mac          # 5 000 000 events at 4 K
+./BBRSim test_10K.mac      # 1 000 000 events at 10 K
 ```
 
-Expected transmittances at 500 GHz normal incidence:
+Validate the emitted spectrum:
+
+```bash
+conda run -n bbrsim python scripts/check_planck_spectrum.py build/test_output.csv --temp 4
+```
+
+### 2. HFSS crack diffraction
+
+Photons entering a `vacuum_wg` crack volume are routed through the HFSS
+S-parameter lookup. The `[BBR] diffraction` stdout line reports the running
+observed transmittance. Expected at 500 GHz normal incidence:
 
 | Crack | Gap | Expected T |
 |---|---|---|
 | crack1 | 52 µm | ≈ 52.7% |
 | crack2 | 102 µm | ≈ 50.4% |
 
-Output is written to `diffraction_output.csv`:
+To aim the fixed gun at a crack:
 
-```
-crack_id,x,y
-InfParallelPlate_crack1Rohan_500GHz,3.14,-1.02
-...
+```mac
+/run/initialize
+/bbr/gun/mode true
+/bbr/gun/posZ 0.0        # crack1 (use 3.0 for crack2)
+/run/beamOn 10000
 ```
 
-Plot the exit-position distribution and per-crack transmittance:
+Crack analyses from `test_output.csv`:
 
 ```bash
-conda run -n bbrsim python ../scripts/plot_diffraction.py
+conda run -n bbrsim python scripts/check_crack_ratio.py build/test_output.csv
+conda run -n bbrsim python scripts/plot_crack_angular.py build/test_output.csv --iwt 180 --iwp 0
 ```
-
----
 
 ### 3. Copper reflectance
 
-Fires photons at a solid Cu wall and measures the fraction absorbed.
-The `[BBR] reflectance` output line is printed every 1000 events.
+Fires 500 GHz photons at the solid Cu wall (away from the cracks) and
+measures the fraction absorbed. The `[BBR] reflectance` output line is
+printed every 1000 events.
 
 ```bash
-./BBRSim test.mac          # OFHC_Cu (RRR=100), 500 GHz, 10 000 events
-./BBRSim test_of_cu.mac    # OF_Cu   (RRR=3),   500 GHz, 2 000 events
-./BBRSim test_hp_cu.mac    # HP_Cu   (RRR=6),   500 GHz, 2 000 events
+./BBRSim reflectance.mac   # OFHC_Cu (RRR=100), 10 000 events at z=10 mm
+./BBRSim test_of_cu.mac    # OF_Cu   (RRR=3),   2 000 events at z=5 mm
+./BBRSim test_hp_cu.mac    # HP_Cu   (RRR=6),   2 000 events at z=5 mm
 ```
 
 The output line format is:
 
 ```
-[BBR] reflectance mat=Cu_RRR100_T4K N=10000 A_obs=0.001600 R_theory=0.998377
+[BBR] reflectance mat=Cu_RRR100_T4K N=10000 A_obs=... R_theory=0.999951
 ```
 
 - `A_obs` = fraction of photons absorbed (1 − R_obs)
-- `R_theory` = Drude model reflectance at the gun frequency
+- `R_theory` = full complex Drude reflectance at the gun frequency
 
-Compare `A_obs` against the Planck-weighted Drude theory:
+With the full complex Drude model, OFHC Cu at 4 K sits on the relaxation
+plateau: D ≈ 4.9×10⁻⁵ at 500 GHz, i.e. only ~0–2 absorptions per 10 000
+events. Lower grades absorb more (OF_Cu RRR=3: D ≈ 1.0×10⁻³; HP_Cu RRR=6:
+D ≈ 6.3×10⁻⁴). Statistical check (Poisson test on the absorbed count):
+
+```bash
+./BBRSim reflectance.mac
+conda run -n bbrsim python scripts/check_reflectance.py
+```
+
+For Planck-mode runs, compare the aggregate absorptance against the
+Planck-weighted Drude integral:
 
 ```bash
 ./BBRSim test.mac >out.txt 2>&1
-conda run -n bbrsim python ../scripts/check_cu_absorptance.py out.txt --rrr 100
+conda run -n bbrsim python scripts/check_cu_absorptance.py out.txt --rrr 100
 ```
 
-Expected output:
-
-```
-[BBR] log  mat=Cu_RRR100_T4K  N=10000  A_obs=1.600000e-03
-RRR                        = 100
-sigma_DC                   = 5.9600e+09 S/m
-tau                        = 2.497 ps
-A_theory (Planck+Drude)    = 1.XXXXXXe-03
-ratio A_obs/A_theory       = X.XXX  (expected [0.3, 3.0])
-RESULT: PASS
-```
-
-Plot reflectance curves for all three grades across the full 50 GHz–20 THz range:
+Plot reflectance curves for all three grades:
 
 ```bash
-conda run -n bbrsim python ../scripts/plot_cu_reflectance.py
+conda run -n bbrsim python scripts/plot_cu_reflectance.py
 # Saves: build/cu_reflectance_plots.png
 ```
 
@@ -203,8 +205,10 @@ The simulation confirms the resolved material at startup:
 σ_RT = 5.96×10⁷ S/m is universal for all copper grades (you never set this).
 At 4 K the impurity term dominates and σ_DC = RRR × σ_RT is an excellent
 approximation. At higher temperatures, Matthiessen's rule adds a phonon
-contribution. The full Drude model (Griffiths §9.4) then gives R(ω) across
-the 50 GHz–20 THz range. See [docs/physics/copper_reflectance_model.md](physics/copper_reflectance_model.md)
+contribution. The full complex Drude model (σ(ω) = σ_DC/(1−iωτ) inserted into
+ε̃ = 1 + iσ/(ε₀ω)) then gives R(ω), tabulated over 10 GHz–20 THz to match the
+Planck emitter range. See
+[docs/physics/copper_reflectance_model.md](docs/physics/copper_reflectance_model.md)
 for the derivation.
 
 ---
@@ -222,8 +226,7 @@ after `/run/initialize`.
 
 /bbr/gun/posX -20.0        # gun X position [mm]
 /bbr/gun/posY   0.0
-/bbr/gun/posZ   0.0        # or use the shortcut below for crack-test
-/bbr/gun/setZ   3.0 mm     # shortcut: set gun Z (crack2 is at z=3 mm)
+/bbr/gun/posZ   0.0        # z=0 → crack1, z=3 → crack2, z>~5 → solid Cu
 
 /bbr/gun/dirX 1.0          # momentum direction (normalized internally)
 /bbr/gun/dirY 0.0
@@ -240,8 +243,8 @@ after `/run/initialize`.
 
 | File | Written by | Contents |
 |---|---|---|
-| `diffraction_output.csv` | `BBRDiffractionSteppingAction` | Crack ID + exit position (x, y) per transmitted photon |
-| `bbrsim_stdout.txt` | redirect from stdout | `[BBR] reflectance` lines for `check_cu_absorptance.py` |
+| `test_output.csv` | `BBRTestSteppingAction` | One row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volumes, materials, boundary status, per-track crossing count. Opened once per session; multi-run macros append (rows distinguished by `run_id`). |
+| `bbrsim stdout` | redirect from stdout | `[BBR] reflectance` and `[BBR] diffraction` running tallies |
 | `build/cu_reflectance_plots.png` | `plot_cu_reflectance.py` | 3-panel reflectance / absorptance / temperature-dependence plot |
 
 ---
@@ -249,16 +252,21 @@ after `/run/initialize`.
 ## Analysis scripts
 
 All scripts live in `scripts/` and must be run from the repo root with
-`conda run -n bbrsim python scripts/<name>.py`.
+`conda run -n bbrsim python scripts/<name>.py`. CSV-based scripts default to
+`build/test_output.csv` and accept a path argument.
 
 | Script | Purpose | Key flags |
 |---|---|---|
-| `plot_diffraction.py` | 3-panel diffraction plots (transmittance vs event count, exit position) | `--out <path>` |
-| `plot_cu_reflectance.py` | Reflectance/absorptance curves vs frequency, temperature panel | `--out <path>` |
-| `check_cu_absorptance.py` | Compare simulated A_obs to Planck+Drude theory; PASS/FAIL | `--rrr <N>` |
+| `check_reflectance.py` | Poisson test of absorbed count vs full-Drude theory (reflectance.mac) | `--RRR`, `--T_K`, `--freq` |
+| `check_cu_absorptance.py` | Compare stdout A_obs to Planck-weighted Drude theory; PASS/FAIL | `--rrr <N>` |
 | `check_cu_serov.py` | Verify σ_eff values reproduce Serov (2016) reference points | — |
-| `check_reflectance.py` | Standalone Drude reflectance at a single frequency | — |
-| `plot_test_output.py` | Quick plot of test.mac CSV output | — |
+| `check_planck_spectrum.py` | Validate emitted spectrum against Planck photon-number peak | `--temp <K>` |
+| `check_nreflect.py` | Per-track reflection-count distribution sanity checks | — |
+| `check_angle_distribution.py` | KS test of Cu incidence angles | — |
+| `check_crack_ratio.py` | crack2/crack1 rate ratio vs aperture ratio | — |
+| `plot_cu_reflectance.py` | Reflectance/absorptance curves vs frequency, temperature panel | `--out <path>` |
+| `plot_crack_angular.py` | Outgoing crack angular distributions vs HFSS far-field theory | `--iwt`, `--iwp` |
+| `plot_test_output.py` | Overview plots of test_output.csv | `--temp <K>` |
 
 ---
 
@@ -272,9 +280,10 @@ for any other grade.
 RRR must be a positive integer. RRR < 1 has no physical meaning.
 
 **No `[BBR] reflectance` lines in output**
-The reflectance logger only fires when a photon hits the Cu slab face-on in
-`test.mac` gun mode. Check that `/bbr/gun/mode true` is set and that the gun
-position and direction point at the Cu face (x = 0 plane).
+The reflectance tally prints every 1000 Cu hits. Check that the gun position
+and direction point at the Cu face (x = 0 plane) away from the cracks
+(`/bbr/gun/mode true`, `/bbr/gun/posZ 10.0`), or that enough Planck-mode
+events have run.
 
 **`RESULT: FAIL` from `check_cu_absorptance.py`**
 A_obs/A_theory outside [0.3, 3.0]. Common causes: too few events (< 1000 give
