@@ -24,16 +24,19 @@ debugged after the fact.
 
 ## Status (June 2026)
 
-Core physics is operational. The HFSS diffraction path is validated; the Cu
-reflectance model is implemented and tested. A Planck emitter and CAD import
-are the next milestones.
+Core physics is operational and validated. The HFSS diffraction path, the Cu
+reflectance model, and the Planck thermal emitter are all implemented and
+tested. CAD-accurate geometry import and the non-Cu material database are the
+next milestones.
 
 ### Working
 
 - **HFSS diffraction** — `BBRHFSSData` loads far-field + waveguide CSVs; `BBRCrackLibrary`
   lazy-loads datasets by volume name; `BBSimOpBoundaryProcess` intercepts photons entering
   `vacuum_wg` crack volumes and routes them through the HFSS lookup.
-  Validated: T_obs ≈ 52.8% at 500 GHz normal incidence (theory 52.7%).
+  Validated at 500 GHz normal incidence: observed transmittance 51.9% (50 µm
+  gap) / 50.5% (100 µm gap), consistent with the 50% unpolarized ideal — only
+  the TEM component transmits through a sub-cutoff gap.
 
 - **Cu reflectance** — Full complex Drude model (σ(ω) = σ_DC/(1−iωτ) in
   ε̃ = 1 + iσ/(ε₀ω); Griffiths §9.4 generalized) parameterized by RRR and
@@ -94,8 +97,8 @@ The executable is `BBRSim` (not `OpNovice2`). All commands below run from the
 ```
 
 Photons entering the `vacuum_wg` cracks are routed through the HFSS lookup;
-expected transmittances at 500 GHz normal incidence: crack1 ≈ 52.7%,
-crack2 ≈ 50.4%. All boundary crossings are logged to `test_output.csv`
+expected transmittance at 500 GHz normal incidence is ≈ 50% per crack (the
+unpolarized TEM-only ideal; observed 51.9% / 50.5%). All boundary crossings are logged to `test_output.csv`
 (columns include `run_id`, positions, momenta, materials, boundary status).
 
 ```bash
