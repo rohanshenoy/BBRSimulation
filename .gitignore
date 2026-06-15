@@ -1,7 +1,10 @@
 build/
 .DS_Store
 *.root
+*.out
 transcribe_meeting.py
-docs/superpowers/
-scripts/
+GNUmakefile
+History
+CLAUDE.md
+docs/
 .worktrees/
