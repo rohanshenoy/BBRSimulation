@@ -39,7 +39,7 @@ are the next milestones.
   ε̃ = 1 + iσ/(ε₀ω); Griffiths §9.4 generalized) parameterized by RRR and
   temperature. `BBRMaterials::GetCopper(RRR, T_K)` builds a 24-point log-spaced
   REFLECTIVITY table from 10 GHz to 20 THz. Three named grades available; users
-  may also supply any integer RRR directly. See [docs/physics/copper_reflectance_model.md](docs/physics/copper_reflectance_model.md).
+  may also supply any integer RRR directly.
 
 - **Planck thermal emitter** — `ThermalSurface` + `GetBBSpecCDF`: box-surface
   emitter sampling the Planck photon-number spectrum (10 GHz–20 THz), with
