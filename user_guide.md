@@ -70,7 +70,7 @@ All test cases run in the consolidated test world
 (`BBRTestDetectorConstruction`): a 50 cm vacuum world, a 4 mm Cu slab with
 its front face at x = 0, and two `vacuum_wg` crack daughters (crack1: 52 µm
 gap at z = 0; crack2: 102 µm gap at z = 3 mm). Every optical-photon boundary
-crossing is logged to `test_output.csv` (see *Output files*).
+crossing is logged to `output/bbr_boundary_crossings.csv` (see *Output files*).
 
 ### 1. Planck thermal emitter
 
@@ -87,7 +87,7 @@ spectrum (10 GHz–20 THz) toward the Cu slab and cracks.
 Validate the emitted spectrum:
 
 ```bash
-conda run -n bbrsim python scripts/check_planck_spectrum.py build/test_output.csv --temp 4
+conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr_boundary_crossings.csv --temp 4
 ```
 
 ### 2. HFSS crack diffraction
@@ -110,11 +110,11 @@ To aim the fixed gun at a crack:
 /run/beamOn 10000
 ```
 
-Crack analyses from `test_output.csv`:
+Crack analyses from `output/bbr_boundary_crossings.csv`:
 
 ```bash
-conda run -n bbrsim python scripts/check_crack_ratio.py build/test_output.csv
-conda run -n bbrsim python scripts/plot_crack_angular.py build/test_output.csv --iwt 180 --iwp 0
+conda run -n bbrsim python scripts/check_crack_ratio.py build/output/bbr_boundary_crossings.csv
+conda run -n bbrsim python scripts/plot_crack_angular.py build/output/bbr_boundary_crossings.csv --iwt 180 --iwp 0
 ```
 
 ### 3. Copper reflectance
@@ -243,7 +243,7 @@ after `/run/initialize`.
 
 | File | Written by | Contents |
 |---|---|---|
-| `test_output.csv` | `BBRTestSteppingAction` | One row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volumes, materials, boundary status, per-track crossing count. Opened once per session; multi-run macros append (rows distinguished by `run_id`). |
+| `output/bbr_boundary_crossings.csv` | `BBRTestSteppingAction` | One row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volumes, materials, boundary status, per-track crossing count. Opened once per session; multi-run macros append (rows distinguished by `run_id`). |
 | `bbrsim stdout` | redirect from stdout | `[BBR] reflectance` and `[BBR] diffraction` running tallies |
 | `build/cu_reflectance_plots.png` | `plot_cu_reflectance.py` | 3-panel reflectance / absorptance / temperature-dependence plot |
 
@@ -253,7 +253,7 @@ after `/run/initialize`.
 
 All scripts live in `scripts/` and must be run from the repo root with
 `conda run -n bbrsim python scripts/<name>.py`. CSV-based scripts default to
-`build/test_output.csv` and accept a path argument.
+`build/output/bbr_boundary_crossings.csv` and accept a path argument.
 
 | Script | Purpose | Key flags |
 |---|---|---|
@@ -266,7 +266,7 @@ All scripts live in `scripts/` and must be run from the repo root with
 | `check_crack_ratio.py` | crack2/crack1 rate ratio vs aperture ratio | — |
 | `plot_cu_reflectance.py` | Reflectance/absorptance curves vs frequency, temperature panel | `--out <path>` |
 | `plot_crack_angular.py` | Outgoing crack angular distributions vs HFSS far-field theory | `--iwt`, `--iwp` |
-| `plot_test_output.py` | Overview plots of test_output.csv | `--temp <K>` |
+| `plot_test_output.py` | Overview plots of output/bbr_boundary_crossings.csv | `--temp <K>` |
 
 ---
 
