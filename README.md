@@ -98,12 +98,12 @@ The executable is `BBRSim` (not `OpNovice2`). All commands below run from the
 
 Photons entering the `vacuum_wg` cracks are routed through the HFSS lookup;
 expected transmittance at 500 GHz normal incidence is ≈ 50% per crack (the
-unpolarized TEM-only ideal; observed 51.9% / 50.5%). All boundary crossings are logged to `test_output.csv`
+unpolarized TEM-only ideal; observed 51.9% / 50.5%). All boundary crossings are logged to `output/bbr_boundary_crossings.csv`
 (columns include `run_id`, positions, momenta, materials, boundary status).
 
 ```bash
-conda run -n bbrsim python scripts/check_planck_spectrum.py build/test_output.csv --temp 4
-conda run -n bbrsim python scripts/check_crack_ratio.py build/test_output.csv
+conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr_boundary_crossings.csv --temp 4
+conda run -n bbrsim python scripts/check_crack_ratio.py build/output/bbr_boundary_crossings.csv
 ```
 
 ### Cu reflectance smoke test
@@ -154,9 +154,13 @@ Valid aliases: `OFHC_Cu` (RRR=100), `OF_Cu` (RRR=3), `HP_Cu` (RRR=6).
 `BBSimOpBoundaryProcess` falls through to the stock `G4OpBoundaryProcess` for
 any geometry without `vacuum_wg` or `REFLECTIVITY` materials. The historical
 fixed-seed regression macro (`verify_wrapper.mac`) was retired with the
-OpNovice2 geometry split; when touching the wrapper, re-verify the
-pass-through path with a fixed-seed run on stock OpNovice2 geometry before
-merging (see CLAUDE.md, *Verification discipline*).
+OpNovice2 geometry split, and the stock OpNovice2 sources now live (unbuilt)
+under `reference/opnovice2/`. Re-establishing an automated pass-through
+regression — using a purpose-built minimal geometry that exercises stock
+boundary optics, not the unbuilt OpNovice2 example — is open work. Until then,
+when touching the wrapper, run the smoke tests (`reflectance.mac`,
+`planck.mac`) and their `check_*` scripts before merging (see CLAUDE.md,
+*Verification discipline*).
 
 ### Interactive (UI + visualization)
 
