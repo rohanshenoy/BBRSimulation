@@ -1,6 +1,6 @@
 """
 check_nreflect.py
-Plot and validate the per-track reflection-count distribution from test_output.csv.
+Plot and validate the per-track reflection-count distribution from bbr_boundary_crossings.csv.
 
 PASS criteria:
   - max n_reflect > 1
@@ -8,7 +8,7 @@ PASS criteria:
   - counts are non-increasing for n in 1..10
 
 Usage:
-    conda run -n bbrsim python scripts/check_nreflect.py [path/to/test_output.csv]
+    conda run -n bbrsim python scripts/check_nreflect.py [path/to/bbr_boundary_crossings.csv]
 """
 
 import sys
@@ -18,7 +18,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-CSV = sys.argv[1] if len(sys.argv) > 1 else "build/test_output.csv"
+CSV = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr_boundary_crossings.csv"
 
 df = pd.read_csv(CSV, on_bad_lines="skip")
 df["n_reflect"] = pd.to_numeric(df["n_reflect"], errors="coerce")

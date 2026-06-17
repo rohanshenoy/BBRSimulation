@@ -9,7 +9,7 @@ Coordinate convention (from memory/project_coord_convention.md):
   Main transmission lobe: T=90°, P=0° → pure +x direction.
 
 Usage:
-    conda run -n bbrsim python scripts/plot_crack_angular.py [test_output.csv] [--iwt T] [--iwp P]
+    conda run -n bbrsim python scripts/plot_crack_angular.py [bbr_boundary_crossings.csv] [--iwt T] [--iwp P]
 
   --iwt / --iwp: fix the HFSS incoming wave angle (IWaveTheta / IWavePhi in degrees).
                  Use for gun-mode runs so theory matches the specific incidence angle.
@@ -26,7 +26,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser()
-parser.add_argument("csv", nargs="?", default="build/test_output.csv")
+parser.add_argument("csv", nargs="?", default="build/output/bbr_boundary_crossings.csv")
 parser.add_argument("--iwt", type=float, default=None,
                     help="Filter HFSS theory to this IWaveTheta [deg]. Default: average all.")
 parser.add_argument("--iwp", type=float, default=None,

@@ -5,7 +5,7 @@ For θ < 45° (where finite-wall clipping is negligible), run a KS test.
 PASS if KS p-value > 0.01.
 
 Usage:
-    conda run -n bbrsim python scripts/check_angle_distribution.py [test_output.csv]
+    conda run -n bbrsim python scripts/check_angle_distribution.py [bbr_boundary_crossings.csv]
 """
 
 import sys
@@ -16,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-CSV = sys.argv[1] if len(sys.argv) > 1 else "build/test_output.csv"
+CSV = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr_boundary_crossings.csv"
 
 df = pd.read_csv(CSV, on_bad_lines="skip")
 for col in ["theta_in_deg", "n_reflect"]:

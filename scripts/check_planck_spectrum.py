@@ -1,10 +1,10 @@
 """
-Validate that test_output.csv contains energies drawn from the Planck photon-number
+Validate that bbr_boundary_crossings.csv contains energies drawn from the Planck photon-number
 spectrum at the given temperature.  The number spectrum B ∝ ν²/(e^{hν/kT}−1) peaks
 at u = E/kT ≈ 1.5936.
 
 Usage:
-    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/test_output.csv] [--temp T]
+    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/bbr_boundary_crossings.csv] [--temp T]
 """
 
 import argparse
@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser()
-parser.add_argument("csv", nargs="?", default="build/test_output.csv")
+parser.add_argument("csv", nargs="?", default="build/output/bbr_boundary_crossings.csv")
 parser.add_argument("--temp", type=float, default=4.0, help="Emitter temperature in K")
 args = parser.parse_args()
 

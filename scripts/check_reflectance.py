@@ -1,6 +1,6 @@
 """
 check_reflectance.py
-Analyse build/test_output.csv produced by reflectance.mac and compare
+Analyse build/output/bbr_boundary_crossings.csv produced by reflectance.mac and compare
 observed reflectance R_obs against the Drude model prediction R_theory.
 
 Usage:
@@ -52,7 +52,7 @@ def drude_R(energy_eV, RRR, T_K):
 parser = argparse.ArgumentParser()
 parser.add_argument("--csv", default=os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "build", "test_output.csv"))
+    "build", "output", "bbr_boundary_crossings.csv"))
 parser.add_argument("--RRR",  type=int,   default=100)
 parser.add_argument("--T_K",  type=float, default=4.0)
 parser.add_argument("--freq", type=float, default=500.0,
