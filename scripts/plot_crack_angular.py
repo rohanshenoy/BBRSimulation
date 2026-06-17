@@ -34,7 +34,7 @@ parser.add_argument("--iwp", type=float, default=None,
 args = parser.parse_args()
 
 CSV = args.csv
-HFSS_BASE = "HFSSSimData"
+HFSS_BASE = "data/waveguides"
 
 CRACKS = {
     "crack1": "InfParallelPlate_crack1Rohan_500GHz",

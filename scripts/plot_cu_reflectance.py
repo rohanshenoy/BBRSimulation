@@ -89,7 +89,7 @@ materials_drude = {
 }
 
 # ── load tabulated data ───────────────────────────────────────────────────────
-data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "materials")
 
 g4ir   = pd.read_csv(os.path.join(data_dir, "cu_g4ir_reflectivity.csv"))
 palik  = pd.read_csv(os.path.join(data_dir, "cu_palik_optical_constants.csv"))
