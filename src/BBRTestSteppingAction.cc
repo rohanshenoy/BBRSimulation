@@ -2,6 +2,7 @@
 #include "BBRRunAction.hh"
 #include "BBSimOpBoundaryProcess.hh"
 
+#include "G4AnalysisManager.hh"
 #include "G4GeometryTolerance.hh"
 #include "G4OpticalPhoton.hh"
 #include "G4ProcessManager.hh"
@@ -12,7 +13,6 @@
 #include "G4SystemOfUnits.hh"
 #include "G4Track.hh"
 #include <cmath>
-#include <iomanip>
 
 namespace {
 G4String StatusStr(G4OpBoundaryProcessStatus s) {
@@ -107,19 +107,32 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   }
 
   const G4double theta_in = std::acos(std::abs(pPre.x())) * 180. / CLHEP::pi;
-  const G4double phi_in   = std::atan2(pPre.y(), pPre.z()) * 180. / CLHEP::pi;
+  const G4double phi_in = std::atan2(pPre.y(), pPre.z()) * 180. / CLHEP::pi;
 
-  std::ofstream& out = fRunAction->GetOutputStream();
-  out << runId << "," << eventId << ","
-      << std::fixed << std::setprecision(6)
-      << pos.x()/mm << "," << pos.y()/mm << "," << pos.z()/mm << ","
-      << pre->GetKineticEnergy()/eV << ","
-      << std::setprecision(10)
-      << pPre.x()  << "," << pPre.y()  << "," << pPre.z()  << ","
-      << pPost.x() << "," << pPost.y() << "," << pPost.z() << ","
-      << std::setprecision(6)
-      << theta_in << "," << phi_in << ","
-      << volPre << "," << matPre << ","
-      << volPost << "," << matPost << ","
-      << status << "," << fNReflect << "\n";
+  auto* am = G4AnalysisManager::Instance();
+  const auto& c = fRunAction->fCross;
+  const G4int id = fRunAction->fCrossingsId;
+  am->FillNtupleIColumn(id, c.run_id, runId);
+  am->FillNtupleIColumn(id, c.event_id, eventId);
+  am->FillNtupleDColumn(id, c.x, pos.x() / mm);
+  am->FillNtupleDColumn(id, c.y, pos.y() / mm);
+  am->FillNtupleDColumn(id, c.z, pos.z() / mm);
+  am->FillNtupleDColumn(id, c.energy, pre->GetKineticEnergy() / eV);
+  am->FillNtupleDColumn(id, c.px_pre, pPre.x());
+  am->FillNtupleDColumn(id, c.py_pre, pPre.y());
+  am->FillNtupleDColumn(id, c.pz_pre, pPre.z());
+  am->FillNtupleDColumn(id, c.px_post, pPost.x());
+  am->FillNtupleDColumn(id, c.py_post, pPost.y());
+  am->FillNtupleDColumn(id, c.pz_post, pPost.z());
+  am->FillNtupleDColumn(id, c.theta_in, theta_in);
+  am->FillNtupleDColumn(id, c.phi_in, phi_in);
+  am->FillNtupleIColumn(id, c.vol_pre, fRunAction->EncodeVolume(volPre));
+  am->FillNtupleIColumn(id, c.mat_pre, fRunAction->EncodeMaterial(matPre));
+  am->FillNtupleIColumn(id, c.vol_post, fRunAction->EncodeVolume(volPost));
+  am->FillNtupleIColumn(id, c.mat_post, fRunAction->EncodeMaterial(matPost));
+  am->FillNtupleIColumn(id, c.status, fRunAction->EncodeStatus(status));
+  am->FillNtupleIColumn(id, c.event_type,
+                        BBRRunAction::EventTypeForStatus(status));
+  am->FillNtupleIColumn(id, c.n_reflect, fNReflect);
+  am->AddNtupleRow(id);
 }

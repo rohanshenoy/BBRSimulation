@@ -1,43 +1,189 @@
 #include "BBRRunAction.hh"
-#include "G4Run.hh"
 
+#include "G4AnalysisManager.hh"
+#include "G4LogicalVolumeStore.hh"
+#include "G4Material.hh"
+#include "G4OpBoundaryProcess.hh"
+#include "G4Run.hh"
+#include "G4SystemOfUnits.hh"
+
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <vector>
 
 namespace {
-// All boundary-crossing output goes into an output/ subdirectory of the
-// current working directory (the build dir when run from there), keeping the
-// run directory tidy. output/ is gitignored.
-const char* kOutputDir  = "output";
-const char* kOutputFile = "output/bbr_boundary_crossings.csv";
+const char* kOutputDir = "output";
+const char* kOutputFile = "output/bbr.root";
+const char* kLegendFile = "output/bbr_legend.json";
+
+// Distinct sentinels so an absent physical volume/material ("none", an expected
+// case at the world boundary) is never confused with a name that was missing
+// from the geometry stores at construction (kUnknownCode — a bug; it has no
+// legend entry, so it surfaces as NaN in the Python loader rather than silently
+// decoding to "none").
+constexpr G4int kNoneCode = -1;
+constexpr G4int kUnknownCode = -2;
+
+// Stock + BBR-wrapper boundary statuses, in a fixed order so their codes are
+// stable across builds. Keep in sync with BBRTestSteppingAction::StatusStr and
+// BBSimOpBoundaryProcess status strings.
+const std::vector<G4String> kStatuses = {
+    "FresnelRefraction", "FresnelReflection", "TIR", "LambertianReflection",
+    "LobeReflection", "SpikeReflection", "BackScattering", "Absorption",
+    "Detection", "NotAtBoundary", "SameMaterial", "StepTooSmall", "NoRINDEX",
+    "Other", "BBRDiffractionTransmit", "BBRDiffractionReflect", "BBRReflect",
+    "BBRAbsorb", "unknown"};
 }  // namespace
 
-BBRRunAction::BBRRunAction() : G4UserRunAction() {}
-
-BBRRunAction::~BBRRunAction()
-{
-  if (fOut.is_open()) fOut.close();
+BBRRunAction::BBRRunAction() : G4UserRunAction() {
+  BuildCategoryCodes();
+  DefineNtuples();
 }
 
-void BBRRunAction::BeginOfRunAction(const G4Run* run)
-{
-  G4cout << "=== BBR Run " << run->GetRunID() << " begin ===" << G4endl;
-  // Open once per session and keep appending: a multi-run macro (e.g. two
-  // /run/beamOn with a temperature or gun change in between) must not
-  // truncate the previous run's rows. Rows carry run_id to stay separable.
-  if (!fOut.is_open()) {
-    std::error_code ec;
-    std::filesystem::create_directories(kOutputDir, ec);
-    fOut.open(kOutputFile);
-    fOut << "run_id,event_id,x_mm,y_mm,z_mm,energy_eV,"
-            "px_pre,py_pre,pz_pre,px_post,py_post,pz_post,"
-            "theta_in_deg,phi_in_deg,"
-            "vol_pre,mat_pre,vol_post,mat_post,status,n_reflect\n";
-  }
+BBRRunAction::~BBRRunAction() = default;
+
+void BBRRunAction::BuildCategoryCodes() {
+  for (std::size_t i = 0; i < kStatuses.size(); ++i)
+    fStatusCodes[kStatuses[i]] = static_cast<G4int>(i);
+
+  // Deterministic volume/material codes: enumerate the (already-built) geometry
+  // stores, sorted by name. Geometry is constructed before the action
+  // initialization runs, so the stores are populated here.
+  std::vector<G4String> vols;
+  for (const auto* lv : *G4LogicalVolumeStore::GetInstance())
+    vols.push_back(lv->GetName());
+  std::sort(vols.begin(), vols.end());
+  vols.erase(std::unique(vols.begin(), vols.end()), vols.end());
+  for (std::size_t i = 0; i < vols.size(); ++i)
+    fVolumeCodes[vols[i]] = static_cast<G4int>(i);
+  fVolumeCodes["none"] = kNoneCode;
+
+  std::vector<G4String> mats;
+  for (const auto* m : *G4Material::GetMaterialTable())
+    mats.push_back(m->GetName());
+  std::sort(mats.begin(), mats.end());
+  mats.erase(std::unique(mats.begin(), mats.end()), mats.end());
+  for (std::size_t i = 0; i < mats.size(); ++i)
+    fMaterialCodes[mats[i]] = static_cast<G4int>(i);
+  fMaterialCodes["none"] = kNoneCode;
 }
 
-void BBRRunAction::EndOfRunAction(const G4Run* run)
-{
-  fOut.flush();
-  G4cout << "=== BBR Run " << run->GetRunID()
-         << " end: " << kOutputFile << " written ===" << G4endl;
+void BBRRunAction::DefineNtuples() {
+  auto* am = G4AnalysisManager::Instance();
+  am->SetDefaultFileType("root");
+  am->SetNtupleMerging(true);   // MT: merge worker ntuples into the master file
+  am->SetVerboseLevel(1);
+
+  // --- crossings ---
+  fCrossingsId = am->CreateNtuple("crossings", "Optical-photon boundary crossings");
+  fCross.run_id = am->CreateNtupleIColumn("run_id");
+  fCross.event_id = am->CreateNtupleIColumn("event_id");
+  fCross.x = am->CreateNtupleDColumn("x_mm");
+  fCross.y = am->CreateNtupleDColumn("y_mm");
+  fCross.z = am->CreateNtupleDColumn("z_mm");
+  fCross.energy = am->CreateNtupleDColumn("energy_eV");
+  fCross.px_pre = am->CreateNtupleDColumn("px_pre");
+  fCross.py_pre = am->CreateNtupleDColumn("py_pre");
+  fCross.pz_pre = am->CreateNtupleDColumn("pz_pre");
+  fCross.px_post = am->CreateNtupleDColumn("px_post");
+  fCross.py_post = am->CreateNtupleDColumn("py_post");
+  fCross.pz_post = am->CreateNtupleDColumn("pz_post");
+  fCross.theta_in = am->CreateNtupleDColumn("theta_in_deg");
+  fCross.phi_in = am->CreateNtupleDColumn("phi_in_deg");
+  fCross.vol_pre = am->CreateNtupleIColumn("vol_pre_code");
+  fCross.mat_pre = am->CreateNtupleIColumn("mat_pre_code");
+  fCross.vol_post = am->CreateNtupleIColumn("vol_post_code");
+  fCross.mat_post = am->CreateNtupleIColumn("mat_post_code");
+  fCross.status = am->CreateNtupleIColumn("status_code");
+  fCross.event_type = am->CreateNtupleIColumn("event_type_code");
+  fCross.n_reflect = am->CreateNtupleIColumn("n_reflect");
+  am->FinishNtuple(fCrossingsId);
+
+  // --- abspoints ---
+  fAbsPointsId = am->CreateNtuple("abspoints", "Photon termination points");
+  fAbs.run_id = am->CreateNtupleIColumn("run_id");
+  fAbs.event_id = am->CreateNtupleIColumn("event_id");
+  fAbs.x = am->CreateNtupleDColumn("x_mm");
+  fAbs.y = am->CreateNtupleDColumn("y_mm");
+  fAbs.z = am->CreateNtupleDColumn("z_mm");
+  fAbs.energy = am->CreateNtupleDColumn("energy_eV");
+  fAbs.px = am->CreateNtupleDColumn("px");
+  fAbs.py = am->CreateNtupleDColumn("py");
+  fAbs.pz = am->CreateNtupleDColumn("pz");
+  fAbs.n_reflect = am->CreateNtupleIColumn("n_reflect");
+  fAbs.term_vol = am->CreateNtupleIColumn("term_vol_code");
+  fAbs.term_status = am->CreateNtupleIColumn("term_status_code");
+  am->FinishNtuple(fAbsPointsId);
+}
+
+void BBRRunAction::BeginOfRunAction(const G4Run* run) {
+  std::error_code ec;
+  std::filesystem::create_directories(kOutputDir, ec);
+
+  auto* am = G4AnalysisManager::Instance();
+  am->OpenFile(kOutputFile);
+
+  if (IsMaster()) WriteLegendJson();
+  G4cout << "=== BBR Run " << run->GetRunID() << " begin (ROOT) ===" << G4endl;
+}
+
+// Master-only. Writes {category: {code: name}}. Geant4 volume/material/status
+// names are bare identifiers (no quotes/backslashes), so no JSON escaping is
+// needed. A sidecar avoids the unreliable master-thread ntuple fill under
+// SetNtupleMerging.
+void BBRRunAction::WriteLegendJson() const {
+  std::ofstream js(kLegendFile);
+  auto dumpMap = [&](const std::map<G4String, G4int>& m) {
+    js << "{";
+    bool first = true;
+    for (const auto& kv : m) {
+      js << (first ? "" : ", ") << "\"" << kv.second << "\": \"" << kv.first
+         << "\"";
+      first = false;
+    }
+    js << "}";
+  };
+  js << "{\n  \"status\": ";
+  dumpMap(fStatusCodes);
+  js << ",\n  \"event_type\": {\"0\": \"transmission\", \"1\": \"reflection\", "
+        "\"2\": \"absorption\", \"3\": \"other\"},\n  \"volume\": ";
+  dumpMap(fVolumeCodes);
+  js << ",\n  \"material\": ";
+  dumpMap(fMaterialCodes);
+  js << "\n}\n";
+}
+
+void BBRRunAction::EndOfRunAction(const G4Run* run) {
+  auto* am = G4AnalysisManager::Instance();
+  am->Write();
+  am->CloseFile();
+  if (IsMaster())
+    G4cout << "=== BBR Run " << run->GetRunID() << " end: " << kOutputFile
+           << " written ===" << G4endl;
+}
+
+G4int BBRRunAction::EncodeStatus(const G4String& name) const {
+  auto it = fStatusCodes.find(name);
+  return it == fStatusCodes.end() ? fStatusCodes.at("unknown") : it->second;
+}
+
+G4int BBRRunAction::EncodeVolume(const G4String& name) const {
+  auto it = fVolumeCodes.find(name);
+  return it == fVolumeCodes.end() ? kUnknownCode : it->second;
+}
+
+G4int BBRRunAction::EncodeMaterial(const G4String& name) const {
+  auto it = fMaterialCodes.find(name);
+  return it == fMaterialCodes.end() ? kUnknownCode : it->second;
+}
+
+G4int BBRRunAction::EventTypeForStatus(const G4String& s) {
+  if (s == "FresnelRefraction" || s == "BBRDiffractionTransmit") return 0;
+  if (s == "FresnelReflection" || s == "TIR" || s == "SpikeReflection" ||
+      s == "LobeReflection" || s == "LambertianReflection" ||
+      s == "BackScattering" || s == "BBRDiffractionReflect" || s == "BBRReflect")
+    return 1;
+  if (s == "Absorption" || s == "Detection" || s == "BBRAbsorb") return 2;
+  return 3;  // NotAtBoundary, SameMaterial, StepTooSmall, NoRINDEX, Other, unknown
 }
