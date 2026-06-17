@@ -3,13 +3,13 @@
 
 #include "G4OpBoundaryProcess.hh"
 #include "G4UserSteppingAction.hh"
-#include <fstream>
 
 class BBRRunAction;
 class BBSimOpBoundaryProcess;
 
-// Records every optical photon boundary crossing to test_output.csv.
-// The output stream is owned by BBRRunAction; this class holds a non-owning pointer.
+// Fills the G4Analysis "crossings" ntuple per optical-photon boundary crossing
+// and the "abspoints" ntuple on photon termination. The ntuples and the
+// categorical encoders are owned by BBRRunAction (non-owning pointer here).
 class BBRTestSteppingAction : public G4UserSteppingAction {
 public:
   explicit BBRTestSteppingAction(BBRRunAction* runAction);
