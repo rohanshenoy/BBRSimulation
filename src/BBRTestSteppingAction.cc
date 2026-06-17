@@ -33,6 +33,20 @@ G4String StatusStr(G4OpBoundaryProcessStatus s) {
     default:                      return "Other";
   }
 }
+
+// Resolve the boundary outcome for the current step. If the BBR wrapper handled
+// the boundary itself, the wrapped stock process never ran (its GetStatus()
+// would be stale), so prefer the wrapper's own record; fall back to the stock
+// status, then to "unknown".
+G4String ResolveStatus(BBSimOpBoundaryProcess* wrapper,
+                       G4OpBoundaryProcess* boundary) {
+  if (wrapper) {
+    G4String s = wrapper->GetLastBBRStatusString();
+    if (!s.empty()) return s;
+  }
+  if (boundary) return StatusStr(boundary->GetStatus());
+  return "unknown";
+}
 } // namespace
 
 BBRTestSteppingAction::BBRTestSteppingAction(BBRRunAction* runAction)
@@ -44,6 +58,50 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
 {
   G4Track* track = step->GetTrack();
   if (track->GetDefinition() != G4OpticalPhoton::OpticalPhoton()) return;
+
+  const G4int runId   = G4RunManager::GetRunManager()->GetCurrentRun()->GetRunID();
+  const G4int eventId = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
+
+  // Per-track reflection counter — reset when run, event, or track changes.
+  // Done for every optical-photon step (not only boundary steps) so a photon
+  // that terminates without ever crossing a boundary (e.g. future bulk
+  // absorption in a dielectric) still reports a per-track-correct count in the
+  // termination block below. The increment stays gated to real crossings.
+  if (runId != fCurrentRunID || eventId != fCurrentEventID ||
+      track->GetTrackID() != fCurrentTrackID) {
+    fCurrentRunID   = runId;
+    fCurrentEventID = eventId;
+    fCurrentTrackID = track->GetTrackID();
+    fNReflect = 0;
+  }
+
+  // Record a termination point (one row per killed optical photon). n_reflect
+  // here is the number of boundary crossings BEFORE the terminating contact.
+  if (track->GetTrackStatus() == fStopAndKill) {
+    const G4StepPoint* end = step->GetPostStepPoint();
+    const G4ThreeVector ep = end->GetPosition();
+    const G4ThreeVector ed = end->GetMomentumDirection();
+    const G4String tvol =
+        end->GetPhysicalVolume() ? end->GetPhysicalVolume()->GetName() : "none";
+    const G4String tstat = ResolveStatus(fWrapper, fBoundary);
+    auto* am = G4AnalysisManager::Instance();
+    const auto& a = fRunAction->fAbs;
+    const G4int aid = fRunAction->fAbsPointsId;
+    am->FillNtupleIColumn(aid, a.run_id, runId);
+    am->FillNtupleIColumn(aid, a.event_id, eventId);
+    am->FillNtupleDColumn(aid, a.x, ep.x() / mm);
+    am->FillNtupleDColumn(aid, a.y, ep.y() / mm);
+    am->FillNtupleDColumn(aid, a.z, ep.z() / mm);
+    am->FillNtupleDColumn(aid, a.energy, end->GetKineticEnergy() / eV);
+    am->FillNtupleDColumn(aid, a.px, ed.x());
+    am->FillNtupleDColumn(aid, a.py, ed.y());
+    am->FillNtupleDColumn(aid, a.pz, ed.z());
+    am->FillNtupleIColumn(aid, a.n_reflect, fNReflect);
+    am->FillNtupleIColumn(aid, a.term_vol, fRunAction->EncodeVolume(tvol));
+    am->FillNtupleIColumn(aid, a.term_status, fRunAction->EncodeStatus(tstat));
+    am->AddNtupleRow(aid);
+  }
+
   if (step->GetPostStepPoint()->GetStepStatus() != fGeomBoundary)  return;
 
   // Skip tolerance-scale re-steps at the same surface (StepTooSmall in the
@@ -66,22 +124,11 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
     }
   }
 
-  G4int runId   = G4RunManager::GetRunManager()->GetCurrentRun()->GetRunID();
-  G4int eventId = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
-
   const G4StepPoint* pre  = step->GetPreStepPoint();
   const G4StepPoint* post = step->GetPostStepPoint();
   G4ThreeVector      pPre = pre->GetMomentumDirection();
 
-  // Per-track reflection counter — reset when run, event, or track changes
-  if (runId != fCurrentRunID || eventId != fCurrentEventID ||
-      track->GetTrackID() != fCurrentTrackID) {
-    fCurrentRunID   = runId;
-    fCurrentEventID = eventId;
-    fCurrentTrackID = track->GetTrackID();
-    fNReflect = 0;
-  }
-  ++fNReflect;
+  ++fNReflect;  // count this boundary crossing (counter reset per-track above)
 
   const G4ThreeVector pos   = post->GetPosition();
   const G4ThreeVector pPost = post->GetMomentumDirection();
@@ -95,16 +142,7 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   const G4String matPost = post->GetMaterial()
                              ? post->GetMaterial()->GetName()        : "none";
 
-  // Status: if the wrapper handled this boundary itself the wrapped stock
-  // process never ran, so its GetStatus() would be stale — prefer the
-  // wrapper's own record of what it did.
-  G4String status = "unknown";
-  if (fWrapper) {
-    status = fWrapper->GetLastBBRStatusString();
-    if (status.empty() && fBoundary) status = StatusStr(fBoundary->GetStatus());
-  } else if (fBoundary) {
-    status = StatusStr(fBoundary->GetStatus());
-  }
+  const G4String status = ResolveStatus(fWrapper, fBoundary);
 
   const G4double theta_in = std::acos(std::abs(pPre.x())) * 180. / CLHEP::pi;
   const G4double phi_in = std::atan2(pPre.y(), pPre.z()) * 180. / CLHEP::pi;
