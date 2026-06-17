@@ -1,10 +1,15 @@
 build/
+output/
 .DS_Store
 *.root
 *.out
-transcribe_meeting.py
 GNUmakefile
 History
 CLAUDE.md
 docs/
 .worktrees/
+
+# Generated analysis plots and local reference material
+*_check.png
+*_distribution.png
+Material Data/
