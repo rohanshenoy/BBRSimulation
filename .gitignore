@@ -8,7 +8,6 @@ History
 docs/
 .worktrees/
 
-# Generated analysis plots and local reference material
+# Generated analysis plots
 *_check.png
 *_distribution.png
-Material Data/

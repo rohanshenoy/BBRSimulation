@@ -15,12 +15,12 @@ class BBRCrackLibrary
  public:
   static BBRCrackLibrary& Instance();
 
-  void         SetDataDir(const G4String& dir);    // default: "../HFSSSimData"
+  void         SetDataDir(const G4String& dir);    // default: "../data/waveguides"
   BBRHFSSData& Lookup(const G4String& datasetId);  // lazy-loads on first call
 
  private:
   BBRCrackLibrary() = default;
-  G4String fDataDir = "../HFSSSimData";
+  G4String fDataDir = "../data/waveguides";
   std::map<G4String, std::unique_ptr<BBRHFSSData>> fCache;
 };
 

@@ -23,7 +23,7 @@
 class BBRHFSSData
 {
  public:
-  // baseDir: path to HFSSSimData directory (e.g. "../HFSSSimData")
+  // baseDir: path to the waveguide HFSS data directory (e.g. "../data/waveguides")
   // datasetId: subdirectory prefix, e.g. "InfParallelPlate_crack1Rohan_500GHz"
   //   Loads baseDir/datasetId_Ephi=0/ and baseDir/datasetId_Ephi=1/
   BBRHFSSData(const G4String& baseDir, const G4String& datasetId);
