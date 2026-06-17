@@ -4,7 +4,7 @@
 #include "G4UserRunAction.hh"
 #include <fstream>
 
-// Owns test_output.csv for the duration of a run.
+// Owns output/bbr_boundary_crossings.csv for the duration of a run.
 // BBRTestSteppingAction writes rows via GetOutputStream().
 // Note: single-threaded (serial RunManager) only. MT would require
 // either per-thread filenames or a G4Run::Merge accumulation design.

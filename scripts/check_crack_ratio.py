@@ -7,14 +7,14 @@ equal the opening-area ratio.
 PASS if observed ratio is within 3σ_Poisson of expected ratio.
 
 Usage:
-    conda run -n bbrsim python scripts/check_crack_ratio.py [test_output.csv]
+    conda run -n bbrsim python scripts/check_crack_ratio.py [bbr_boundary_crossings.csv]
 """
 
 import sys
 import numpy as np
 import pandas as pd
 
-CSV = sys.argv[1] if len(sys.argv) > 1 else "build/test_output.csv"
+CSV = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr_boundary_crossings.csv"
 
 # Aperture areas [mm²]
 A1 = 2 * 5.1 * 2 * 0.026   # crack1

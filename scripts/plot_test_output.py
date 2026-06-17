@@ -1,9 +1,9 @@
 """
 plot_test_output.py
-Visualise test_output.csv: incoming Planck spectrum + outgoing photon distributions.
+Visualise bbr_boundary_crossings.csv: incoming Planck spectrum + outgoing photon distributions.
 
 Usage:
-    conda run -n bbrsim python scripts/plot_test_output.py [path/to/test_output.csv] [--temp T]
+    conda run -n bbrsim python scripts/plot_test_output.py [path/to/bbr_boundary_crossings.csv] [--temp T]
 """
 
 import argparse
@@ -16,7 +16,7 @@ from matplotlib.gridspec import GridSpec
 
 # ── args ────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-parser.add_argument("csv", nargs="?", default="build/test_output.csv")
+parser.add_argument("csv", nargs="?", default="build/output/bbr_boundary_crossings.csv")
 parser.add_argument("--temp", type=float, default=4.0, help="Emitter temperature [K]")
 args = parser.parse_args()
 
@@ -58,7 +58,7 @@ cracks = df[df["mat_pre"] == "vacuum_wg"]
 
 # ════════════════════════════════════════════════════════════════════════════
 fig = plt.figure(figsize=(14, 10))
-fig.suptitle(f"BBRsim test_output.csv  (T = {T} K,  N_events = {df['evt_key'].nunique():,})",
+fig.suptitle(f"BBRsim bbr_boundary_crossings.csv  (T = {T} K,  N_events = {df['evt_key'].nunique():,})",
              fontsize=13, y=0.98)
 gs = GridSpec(2, 3, figure=fig, hspace=0.40, wspace=0.35)
 
