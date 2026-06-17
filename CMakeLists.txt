@@ -35,32 +35,12 @@ add_executable(BBRSim BBRSim.cc ${sources} ${headers})
 target_link_libraries(BBRSim ${Geant4_LIBRARIES} )
 
 #----------------------------------------------------------------------------
-# Copy all scripts to the build directory, i.e. the directory in which we
-# build OpNovice2. This is so that we can run the executable directly because it
-# relies on these scripts being in the current working directory.
+# Copy macros to the build directory (the directory in which we build BBRSim)
+# so the executable can be run directly from there: it reads these macros from
+# the current working directory.
 #
-set(OpNovice2_SCRIPTS
-    OpNovice2.out
-    OpNovice2.mac
-    boundary.mac
-    complexRindex.mac
-    electron.mac
-    fresnel.mac
-    coated.mac
-    scint_by_particle.mac
-    vis.mac
-    wls.mac
-  )
-
-foreach(_script ${OpNovice2_SCRIPTS})
-  configure_file(
-    ${PROJECT_SOURCE_DIR}/${_script}
-    ${PROJECT_BINARY_DIR}/${_script}
-    COPYONLY
-    )
-endforeach()
-
 set(BBRSim_SCRIPTS
+    vis.mac
     test.mac
     test_10K.mac
     test_50M.mac
