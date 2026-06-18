@@ -18,8 +18,8 @@ int main(int argc, char** argv)
   G4UIExecutive* ui = nullptr;
   if (argc == 1) ui = new G4UIExecutive(argc, argv);
 
-  // Force sequential: MT output requires a Run::Merge() design (not yet implemented).
-  auto* runManager = G4RunManagerFactory::CreateRunManager(G4RunManagerType::Serial);
+  // Multithreaded: G4Analysis merges per-thread ntuples into output/bbr.root.
+  auto* runManager = G4RunManagerFactory::CreateRunManager();
 
   runManager->SetUserInitialization(new BBRTestDetectorConstruction());
 
