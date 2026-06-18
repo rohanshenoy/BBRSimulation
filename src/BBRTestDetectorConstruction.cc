@@ -21,7 +21,8 @@ BBRTestDetectorConstruction::BBRTestDetectorConstruction()
       "Sets RRR and resets temperature to 4 K.")
     .SetParameterName("alias", true)
     .SetDefaultValue("OFHC_Cu")
-    .SetStates(G4State_PreInit);
+    .SetStates(G4State_PreInit)
+    .SetToBeBroadcasted(false);  // geometry: built on master, not broadcast to workers
 
   fMessenger->DeclareMethod(
       "setCuRRR",
@@ -31,7 +32,8 @@ BBRTestDetectorConstruction::BBRTestDetectorConstruction()
       "Combine with setCuStageT to set the temperature stage. "
       "Must be issued before /run/initialize.")
     .SetParameterName("RRR", false)
-    .SetStates(G4State_PreInit);
+    .SetStates(G4State_PreInit)
+    .SetToBeBroadcasted(false);  // geometry: built on master, not broadcast to workers
 
   fMessenger->DeclareMethodWithUnit(
       "setCuStageT", "kelvin",
@@ -42,7 +44,8 @@ BBRTestDetectorConstruction::BBRTestDetectorConstruction()
       "Must be issued before /run/initialize.")
     .SetParameterName("T", false)
     .SetRange("T > 0")
-    .SetStates(G4State_PreInit);
+    .SetStates(G4State_PreInit)
+    .SetToBeBroadcasted(false);  // geometry: built on master, not broadcast to workers
 }
 
 void BBRTestDetectorConstruction::SetCuMaterial(const G4String& alias)
