@@ -124,7 +124,16 @@ void BBRRunAction::BeginOfRunAction(const G4Run* run) {
   auto* am = G4AnalysisManager::Instance();
   am->OpenFile(kOutputFile);
 
-  if (IsMaster()) WriteLegendJson();
+  // Under MT, BuildForMaster() runs the master's ctor before the master builds
+  // the detector, so the geometry stores were empty and the master's
+  // volume/material maps held only "none". By BeginOfRunAction the master's
+  // geometry is constructed, so rebuild the maps here before emitting the
+  // legend. The enumeration is deterministic (sorted by name), so the master's
+  // codes match the codes the workers fill from their own (identical) stores.
+  if (IsMaster()) {
+    BuildCategoryCodes();
+    WriteLegendJson();
+  }
   G4cout << "=== BBR Run " << run->GetRunID() << " begin (ROOT) ===" << G4endl;
 }
 
