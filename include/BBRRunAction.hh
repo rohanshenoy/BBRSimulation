@@ -22,7 +22,9 @@ class BBRRunAction : public G4UserRunAction {
   void BeginOfRunAction(const G4Run* run) override;
   void EndOfRunAction(const G4Run* run) override;
 
-  // Categorical encoders (string -> stable integer code, -1 if unknown).
+  // Categorical encoders (string -> stable integer code). Volume/material
+  // return -1 for "none" and -2 (kUnknownCode) for a name absent from the
+  // legend; status falls back to the "unknown" code.
   G4int EncodeStatus(const G4String& name) const;
   G4int EncodeVolume(const G4String& name) const;
   G4int EncodeMaterial(const G4String& name) const;

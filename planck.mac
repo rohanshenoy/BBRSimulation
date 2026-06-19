@@ -5,9 +5,9 @@
 # Angular direction sampled uniformly over the outward hemisphere (YYC convention).
 #
 # Expected output:
-#   test_output.csv — one row per boundary crossing
+#   output/bbr.root — `crossings` ntuple (one row per boundary crossing)
 # Validate spectrum peak:
-#   conda run -n bbrsim python scripts/check_planck_spectrum.py build/test_output.csv --temp 4
+#   conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr.root --temp 4
 #
 # Note: /bbr/thermal/setT must come AFTER /run/initialize because the
 # messenger is registered inside BBRTestPGA(), which is constructed during
