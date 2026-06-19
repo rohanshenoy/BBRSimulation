@@ -98,13 +98,21 @@ The executable is `BBRSim` (not `OpNovice2`). All commands below run from the
 
 Photons entering the `vacuum_wg` cracks are routed through the HFSS lookup;
 expected transmittance at 500 GHz normal incidence is ≈ 50% per crack (the
-unpolarized TEM-only ideal; observed 51.9% / 50.5%). All boundary crossings are logged to `output/bbr_boundary_crossings.csv`
-(columns include `run_id`, positions, momenta, materials, boundary status).
+unpolarized TEM-only ideal; observed 51.9% / 50.5%). Output is a ROOT file
+`output/bbr.root` — two ntuples, `crossings` (one row per optical-photon
+boundary crossing) and `abspoints` (one row per photon termination) — plus a
+`output/bbr_legend.json` sidecar that maps the integer code columns
+(status / event_type / volume / material) back to names. Runs are multithreaded;
+G4Analysis merges the per-thread ntuples. Read it in Python via the shared
+loader `analysis/bbrsim/io.py`, which decodes the codes to the legacy column
+names:
 
 ```bash
-conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr_boundary_crossings.csv --temp 4
-conda run -n bbrsim python scripts/check_crack_ratio.py build/output/bbr_boundary_crossings.csv
+conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr.root --temp 4
 ```
+
+(`check_planck_spectrum.py` and `check_reflectance.py` read the ROOT file; the
+remaining `check_*`/`plot_*` scripts are being ported off the old CSV format.)
 
 ### Cu reflectance smoke test
 
