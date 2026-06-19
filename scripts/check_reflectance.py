@@ -1,6 +1,6 @@
 """
 check_reflectance.py
-Analyse build/output/bbr_boundary_crossings.csv produced by reflectance.mac and compare
+Analyse build/output/bbr.root produced by reflectance.mac and compare
 observed reflectance R_obs against the Drude model prediction R_theory.
 
 Usage:
@@ -12,6 +12,10 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
+from bbrsim.io import load_crossings
 
 # ── physical constants (SI) ───────────────────────────────────────────────────
 eps0     = 8.8541878128e-12   # F/m
@@ -52,7 +56,7 @@ def drude_R(energy_eV, RRR, T_K):
 parser = argparse.ArgumentParser()
 parser.add_argument("--csv", default=os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "build", "output", "bbr_boundary_crossings.csv"))
+    "build", "output", "bbr.root"))
 parser.add_argument("--RRR",  type=int,   default=100)
 parser.add_argument("--T_K",  type=float, default=4.0)
 parser.add_argument("--freq", type=float, default=500.0,
@@ -63,7 +67,7 @@ if not os.path.exists(args.csv):
     print(f"ERROR: {args.csv} not found.  Run reflectance.mac first.", file=sys.stderr)
     sys.exit(1)
 
-df = pd.read_csv(args.csv)
+df = load_crossings(args.csv)
 
 # CSVs written since the multi-run fix carry a run_id column; key events on
 # (run_id, event_id) so two runs in one session don't merge. Older CSVs
