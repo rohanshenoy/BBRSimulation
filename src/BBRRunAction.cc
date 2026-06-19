@@ -1,8 +1,8 @@
 #include "BBRRunAction.hh"
 
 #include "G4AnalysisManager.hh"
-#include "G4LogicalVolumeStore.hh"
 #include "G4Material.hh"
+#include "G4PhysicalVolumeStore.hh"
 #include "G4OpBoundaryProcess.hh"
 #include "G4Run.hh"
 #include "G4SystemOfUnits.hh"
@@ -47,12 +47,13 @@ void BBRRunAction::BuildCategoryCodes() {
   for (std::size_t i = 0; i < kStatuses.size(); ++i)
     fStatusCodes[kStatuses[i]] = static_cast<G4int>(i);
 
-  // Deterministic volume/material codes: enumerate the (already-built) geometry
-  // stores, sorted by name. Geometry is constructed before the action
-  // initialization runs, so the stores are populated here.
+  // Deterministic volume/material codes, sorted by name. Enumerate the
+  // PHYSICAL volume store: the stepping/termination code records physical-volume
+  // names (GetPhysicalVolume()->GetName()), so the legend must use the same
+  // names or every vol_* / term_vol code decodes to kUnknownCode.
   std::vector<G4String> vols;
-  for (const auto* lv : *G4LogicalVolumeStore::GetInstance())
-    vols.push_back(lv->GetName());
+  for (const auto* pv : *G4PhysicalVolumeStore::GetInstance())
+    vols.push_back(pv->GetName());
   std::sort(vols.begin(), vols.end());
   vols.erase(std::unique(vols.begin(), vols.end()), vols.end());
   for (std::size_t i = 0; i < vols.size(); ++i)
