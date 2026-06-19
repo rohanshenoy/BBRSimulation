@@ -1,13 +1,14 @@
 """
-Validate that bbr_boundary_crossings.csv contains energies drawn from the Planck photon-number
-spectrum at the given temperature.  The number spectrum B ∝ ν²/(e^{hν/kT}−1) peaks
-at u = E/kT ≈ 1.5936.
+Validate that the BBRsim ROOT output (output/bbr.root) contains energies drawn from
+the Planck photon-number spectrum at the given temperature.  The number spectrum
+B ∝ ν²/(e^{hν/kT}−1) peaks at u = E/kT ≈ 1.5936.
 
 Usage:
-    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/bbr_boundary_crossings.csv] [--temp T]
+    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/bbr.root] [--temp T]
 """
 
 import argparse
+import os
 import sys
 import numpy as np
 import pandas as pd
@@ -15,8 +16,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
+from bbrsim.io import load_crossings
+
 parser = argparse.ArgumentParser()
-parser.add_argument("csv", nargs="?", default="build/output/bbr_boundary_crossings.csv")
+parser.add_argument("csv", nargs="?", default="build/output/bbr.root")
 parser.add_argument("--temp", type=float, default=4.0, help="Emitter temperature in K")
 args = parser.parse_args()
 
@@ -27,7 +32,7 @@ T   = args.temp
 k_eV = 8.6173e-5  # eV/K
 kT   = k_eV * T   # eV
 
-df = pd.read_csv(CSV, on_bad_lines='skip')
+df = load_crossings(CSV)   # args.csv now points at build/output/bbr.root
 df['energy_eV'] = pd.to_numeric(df['energy_eV'], errors='coerce')
 df['n_reflect'] = pd.to_numeric(df['n_reflect'], errors='coerce')
 df = df.dropna(subset=['energy_eV', 'n_reflect'])
