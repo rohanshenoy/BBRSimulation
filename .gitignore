@@ -12,3 +12,7 @@ docs/
 # Generated analysis plots
 *_check.png
 *_distribution.png
+
+# Python bytecode (analysis package)
+__pycache__/
+*.pyc
