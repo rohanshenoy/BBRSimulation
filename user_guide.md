@@ -70,7 +70,8 @@ All test cases run in the consolidated test world
 (`BBRTestDetectorConstruction`): a 50 cm vacuum world, a 4 mm Cu slab with
 its front face at x = 0, and two `vacuum_wg` crack daughters (crack1: 52 µm
 gap at z = 0; crack2: 102 µm gap at z = 3 mm). Every optical-photon boundary
-crossing is logged to `output/bbr_boundary_crossings.csv` (see *Output files*).
+crossing is logged to the `crossings` ntuple in `output/bbr.root` (see
+*Output files*).
 
 ### 1. Planck thermal emitter
 
@@ -87,7 +88,7 @@ spectrum (10 GHz–20 THz) toward the Cu slab and cracks.
 Validate the emitted spectrum:
 
 ```bash
-conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr_boundary_crossings.csv --temp 4
+conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr.root --temp 4
 ```
 
 ### 2. HFSS crack diffraction
@@ -110,12 +111,17 @@ To aim the fixed gun at a crack:
 /run/beamOn 10000
 ```
 
-Crack analyses from `output/bbr_boundary_crossings.csv`:
+Crack analyses read the `crossings` ntuple from `output/bbr.root`:
 
 ```bash
-conda run -n bbrsim python scripts/check_crack_ratio.py build/output/bbr_boundary_crossings.csv
-conda run -n bbrsim python scripts/plot_crack_angular.py build/output/bbr_boundary_crossings.csv --iwt 180 --iwp 0
+conda run -n bbrsim python scripts/check_crack_ratio.py build/output/bbr.root
+conda run -n bbrsim python scripts/plot_crack_angular.py build/output/bbr.root --iwt 180 --iwp 0
 ```
+
+> **Note (Phase A):** `check_crack_ratio.py` and `plot_crack_angular.py` still
+> read the legacy CSV via pandas and are being ported to the ROOT loader
+> (`analysis/bbrsim/io.py`). Only `check_planck_spectrum.py` and
+> `check_reflectance.py` read `output/bbr.root` today.
 
 ### 3. Copper reflectance
 
@@ -243,17 +249,28 @@ after `/run/initialize`.
 
 | File | Written by | Contents |
 |---|---|---|
-| `output/bbr_boundary_crossings.csv` | `BBRTestSteppingAction` | One row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volumes, materials, boundary status, per-track crossing count. Opened once per session; multi-run macros append (rows distinguished by `run_id`). |
+| `output/bbr.root` | `BBRRunAction` / `BBRTestSteppingAction` (via `G4AnalysisManager`) | Two ntuples. **`crossings`** — one row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volume/material/status/event-type codes, per-track crossing count. **`abspoints`** — one row per photon termination (`fStopAndKill`): position, energy, final momentum, n_reflect, terminating volume + status codes. Categorical fields are integer codes; runs are multithreaded and the per-thread ntuples are merged into this one file. |
+| `output/bbr_legend.json` | `BBRRunAction` (master thread) | `{category: {code: name}}` dictionary decoding the integer code columns (status / event_type / volume / material). Consumed by `analysis/bbrsim/io.py`. |
 | `bbrsim stdout` | redirect from stdout | `[BBR] reflectance` and `[BBR] diffraction` running tallies |
 | `build/cu_reflectance_plots.png` | `plot_cu_reflectance.py` | 3-panel reflectance / absorptance / temperature-dependence plot |
+
+Read the ROOT output in Python via the shared loader:
+
+```python
+import sys; sys.path.insert(0, "analysis")
+from bbrsim.io import load
+crossings, abspoints = load("build/output/bbr.root")   # decoded DataFrames
+```
 
 ---
 
 ## Analysis scripts
 
 All scripts live in `scripts/` and must be run from the repo root with
-`conda run -n bbrsim python scripts/<name>.py`. CSV-based scripts default to
-`build/output/bbr_boundary_crossings.csv` and accept a path argument.
+`conda run -n bbrsim python scripts/<name>.py`. `check_planck_spectrum.py` and
+`check_reflectance.py` read `build/output/bbr.root` via the `analysis/bbrsim`
+loader; the remaining `check_*`/`plot_*` scripts still default to the legacy
+CSV and are being ported to the ROOT loader. All accept a path argument.
 
 | Script | Purpose | Key flags |
 |---|---|---|
@@ -266,7 +283,7 @@ All scripts live in `scripts/` and must be run from the repo root with
 | `check_crack_ratio.py` | crack2/crack1 rate ratio vs aperture ratio | — |
 | `plot_cu_reflectance.py` | Reflectance/absorptance curves vs frequency, temperature panel | `--out <path>` |
 | `plot_crack_angular.py` | Outgoing crack angular distributions vs HFSS far-field theory | `--iwt`, `--iwp` |
-| `plot_test_output.py` | Overview plots of output/bbr_boundary_crossings.csv | `--temp <K>` |
+| `plot_test_output.py` | Overview plots of the boundary-crossing output (legacy CSV; ROOT port pending) | `--temp <K>` |
 
 ---
 
