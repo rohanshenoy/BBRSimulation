@@ -48,7 +48,8 @@ set(BBRSim_SCRIPTS
     test_hp_cu.mac
     reflectance.mac
     planck.mac
-  )
+    verify_config_mt.mac
+    )
 
 foreach(_script ${BBRSim_SCRIPTS})
   configure_file(

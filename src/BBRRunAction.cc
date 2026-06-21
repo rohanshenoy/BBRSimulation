@@ -1,5 +1,6 @@
 #include "BBRRunAction.hh"
 
+#include "BBRConfigManager.hh"
 #include "G4AnalysisManager.hh"
 #include "G4Material.hh"
 #include "G4PhysicalVolumeStore.hh"
@@ -134,6 +135,7 @@ void BBRRunAction::BeginOfRunAction(const G4Run* run) {
   if (IsMaster()) {
     BuildCategoryCodes();
     WriteLegendJson();
+    BBRConfigManager::Print(G4cout);   // run provenance
   }
   G4cout << "=== BBR Run " << run->GetRunID() << " begin (ROOT) ===" << G4endl;
 }
