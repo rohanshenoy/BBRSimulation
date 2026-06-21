@@ -9,10 +9,10 @@
 # Validate spectrum peak:
 #   conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr.root --temp 4
 #
-# Note: /bbr/thermal/setT must come AFTER /run/initialize because the
-# messenger is registered inside BBRTestPGA(), which is constructed during
-# Build() inside Initialize(). The default temperature is 4 K so this
-# command is optional for a 4 K run but shown for clarity.
+# Note: /bbr/thermal/setT is registered by BBRConfigManager at startup, so it
+# is valid in PreInit and Idle. The default temperature is 4 K, so this command
+# is optional for a 4 K run but shown for clarity. It is broadcast to worker
+# threads, so each worker's config clone picks it up.
 
 /run/verbose 0
 /event/verbose 0
