@@ -34,51 +34,34 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--out", default="build/cu_reflectance_plots.png")
 args = parser.parse_args()
 
-# ── physical constants ────────────────────────────────────────────────────────
-eps0 = 8.8541878128e-12   # F/m
-m_e  = 9.109e-31          # kg
-n_e  = 8.49e28            # free electrons/m³ (copper)
-e_C  = 1.602e-19          # C
+import sys
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
+from bbrsim import physics
 
-# ── Hagen-Rubens model (low-frequency limit only) ────────────────────────────
+# Local adapters so the existing plotting calls below are unchanged.
+m_e      = physics.M_E
+n_e      = physics.N_E
+e_C      = physics.E_CHARGE
+sigma_RT = physics.SIGMA_RT
+
+
 def hagen_rubens_R(freq_Hz, sigma_SI):
-    omega = 2.0 * np.pi * freq_Hz
-    D = 2.0 * np.sqrt(2.0 * eps0 * omega / sigma_SI)
-    return 1.0 - np.clip(D, 0, 1)
+    return 1.0 - np.clip(physics.hagen_rubens_absorptance(freq_Hz, sigma_SI), 0, 1)
 
-# ── Full Drude model (Griffiths §9.4) ────────────────────────────────────────
-sigma_RT = 5.96e7   # S/m — universal for all Cu grades at 273 K
-# RRR is the primary user parameter. σ_DC = RRR × σ_RT at 4K (impurity dominated).
-# σ_phonon ~ 1/T (simple power law) is only valid above ~50K.
-# Below ~50K umklapp scattering makes the phonon term more complex (Bloch-Grüneisen)
-# but it is negligible vs the impurity term at 4K anyway.
 
 def sigma_drude(T_K, RRR):
-    """DC conductivity via Matthiessen's rule.
-    Linear phonon approximation valid for T >= 50 K.
-    Below 50 K phonons are frozen; sigma_DC = RRR * sigma_RT.
-    """
-    sigma_imp = RRR * sigma_RT
-    if T_K >= 50.0:
-        sigma_ph = sigma_RT * 273.0 / T_K
-        return 1.0 / (1.0/sigma_imp + 1.0/sigma_ph)
-    return sigma_imp
+    return physics.sigma_dc(RRR, T_K)
+
 
 def drude_R(freq_Hz, sigma_DC):
-    """Normal-incidence reflectance from the full complex Drude model.
-    sigma_DC: DC conductivity [S/m]; tau derived from Drude formula.
+    """Reflectance at freq from a precomputed sigma_DC.
 
-    σ(ω) = σ_DC/(1−iωτ) is kept complex: ε̃ = 1 + iσ/(ε₀ω), ñ = √ε̃,
-    R = |(ñ−1)/(ñ+1)|². Im σ supplies the plasma term in Re ε̃, which keeps
-    R near 1 in the relaxation regime (D ≈ 2/(ωp·τ), flat in frequency).
+    Recovers RRR = sigma_DC / SIGMA_RT and evaluates the full complex Drude
+    model at 4 K (the temperature dependence enters only through sigma_DC,
+    which the caller already chose). Keeps the existing call sites unchanged.
     """
-    tau   = sigma_DC * m_e / (n_e * e_C**2)
-    omega = 2.0 * np.pi * freq_Hz
-    sigma_ac = sigma_DC / (1.0 - 1j * omega * tau)
-    eps_t = 1.0 + 1j * sigma_ac / (eps0 * omega)
-    n_t   = np.sqrt(eps_t)
-    R     = np.abs((n_t - 1.0) / (n_t + 1.0)) ** 2
-    return np.clip(R, 0.0, 1.0)
+    return physics.drude_reflectance(freq_Hz, sigma_DC / physics.SIGMA_RT, 4.0)
 
 # Drude materials — RRR is the primary parameter; σ_DC = RRR × σ_RT at 4K.
 # Named aliases match GetCopperByName() in BBRMaterials.hh.

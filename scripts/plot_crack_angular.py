@@ -25,15 +25,20 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+import sys
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
+from bbrsim.io import load_crossings
+
 parser = argparse.ArgumentParser()
-parser.add_argument("csv", nargs="?", default="build/output/bbr_boundary_crossings.csv")
+parser.add_argument("path", nargs="?", default="build/output/bbr.root")
 parser.add_argument("--iwt", type=float, default=None,
                     help="Filter HFSS theory to this IWaveTheta [deg]. Default: average all.")
 parser.add_argument("--iwp", type=float, default=None,
                     help="Filter HFSS theory to this IWavePhi [deg]. Default: average all.")
 args = parser.parse_args()
 
-CSV = args.csv
+CSV = args.path
 HFSS_BASE = "data/waveguides"
 
 CRACKS = {
@@ -42,10 +47,7 @@ CRACKS = {
 }
 
 # ── load simulated data ───────────────────────────────────────────────────────
-df = pd.read_csv(CSV, on_bad_lines="skip", low_memory=False)
-for col in ["px_post", "py_post", "pz_post", "n_reflect"]:
-    df[col] = pd.to_numeric(df[col], errors="coerce")
-df = df.dropna(subset=["px_post", "py_post", "pz_post"])
+df = load_crossings(CSV)
 
 # Crack entry rows: photon arriving from world into vacuum_wg
 # px_post > 0 → transmitted through crack (still heading in +x)
@@ -73,7 +75,7 @@ def load_hfss_farfield(dataset_id):
     rows = []
     for ephi in (0, 1):
         path = os.path.join(HFSS_BASE, f"{dataset_id}_Ephi={ephi}", "far_field.csv")
-        d = pd.read_csv(path)
+        d = pd.read_csv(path)  # HFSS far_field reference data (not BBRsim output)
         d = d.rename(columns={"IWavePhi": "IWavePhi", "IWaveTheta": "IWaveTheta",
                                "Phi": "Phi", "Theta": "Theta"})
         d["power"] = (d["rEphi_real"]**2 + d["rEphi_imag"]**2 +
