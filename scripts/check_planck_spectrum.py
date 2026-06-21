@@ -11,7 +11,6 @@ import argparse
 import os
 import sys
 import numpy as np
-import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -19,6 +18,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim.io import load_crossings
+from bbrsim import physics
 
 parser = argparse.ArgumentParser()
 parser.add_argument("csv", nargs="?", default="build/output/bbr.root")
@@ -28,14 +28,9 @@ args = parser.parse_args()
 CSV = args.csv
 T   = args.temp
 
-# Physical constants
-k_eV = 8.6173e-5  # eV/K
-kT   = k_eV * T   # eV
+kT = physics.K_EV * T   # eV
 
-df = load_crossings(CSV)   # args.csv now points at build/output/bbr.root
-df['energy_eV'] = pd.to_numeric(df['energy_eV'], errors='coerce')
-df['n_reflect'] = pd.to_numeric(df['n_reflect'], errors='coerce')
-df = df.dropna(subset=['energy_eV', 'n_reflect'])
+df = load_crossings(CSV)
 # n_reflect==1 is the first boundary crossing per track — captures emitted energy
 data = df[df['n_reflect'] == 1]['energy_eV'].values
 data = data[data > 0]
@@ -47,7 +42,7 @@ counts, edges = np.histogram(u, bins=n_bins, range=(0, 20))
 centers = 0.5 * (edges[:-1] + edges[1:])
 
 u_peak_obs = centers[np.argmax(counts)]
-u_peak_theory = 1.5936
+u_peak_theory = physics.PLANCK_PEAK_U
 
 ratio = u_peak_obs / u_peak_theory
 lo, hi = 0.65, 1.35

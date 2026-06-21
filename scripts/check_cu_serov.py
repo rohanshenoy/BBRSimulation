@@ -10,14 +10,20 @@ Reference points (Serov Figs 6 and 8, read at T=4 K):
 
 Run: conda run -n bbrsim python scripts/check_cu_serov.py
 """
-import numpy as np
+import os
 import sys
 
-eps0 = 8.8541878128e-12   # F/m
+import numpy as np
+
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
+from bbrsim import physics
+
+eps0 = physics.EPS0   # F/m (kept for the back-calc of sigma_HP below)
+
 
 def hagen_rubens_D(freq_Hz, sigma_SI):
-    omega = 2.0 * np.pi * freq_Hz
-    return 2.0 * np.sqrt(2.0 * eps0 * omega / sigma_SI)
+    return physics.hagen_rubens_absorptance(freq_Hz, sigma_SI)
 
 # ------------------------------------------------------------------
 # 1.  OF copper: σ_eff = 1/ρ₀  (Serov fit: ρ₀=0.56e-8 Ω·m)
