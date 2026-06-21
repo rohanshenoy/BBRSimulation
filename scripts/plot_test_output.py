@@ -1,41 +1,35 @@
 """
 plot_test_output.py
-Visualise bbr_boundary_crossings.csv: incoming Planck spectrum + outgoing photon distributions.
+Visualise bbr.root: incoming Planck spectrum + outgoing photon distributions.
 
 Usage:
-    conda run -n bbrsim python scripts/plot_test_output.py [path/to/bbr_boundary_crossings.csv] [--temp T]
+    conda run -n bbrsim python scripts/plot_test_output.py [path/to/bbr.root] [--temp T]
 """
 
 import argparse
+import os
+import sys
 import numpy as np
-import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
+from bbrsim.io import load_crossings
+from bbrsim import physics, select
+
 # ── args ────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-parser.add_argument("csv", nargs="?", default="build/output/bbr_boundary_crossings.csv")
+parser.add_argument("path", nargs="?", default="build/output/bbr.root")
 parser.add_argument("--temp", type=float, default=4.0, help="Emitter temperature [K]")
 args = parser.parse_args()
 
-df = pd.read_csv(args.csv, on_bad_lines="skip", low_memory=False)
-for col in ["energy_eV", "n_reflect", "x_mm", "y_mm", "z_mm",
-            "px_post", "py_post", "pz_post", "theta_in_deg", "phi_in_deg"]:
-    df[col] = pd.to_numeric(df[col], errors="coerce")
-df = df.dropna(subset=["energy_eV", "n_reflect"])
-
-# Key events on (run_id, event_id) when the CSV carries run_id (multi-run
-# sessions); fall back to event_id alone for older CSVs.
-if "run_id" in df.columns:
-    df["evt_key"] = list(zip(df["run_id"], df["event_id"]))
-else:
-    df["evt_key"] = df["event_id"]
+df = select.add_evt_key(load_crossings(args.path))
 
 T  = args.temp
-kB = 8.617333e-5   # eV/K
-kT = kB * T
+kT = physics.K_EV * T
 
 print(f"Total rows      : {len(df)}")
 print(f"Unique events   : {df['evt_key'].nunique()}")
@@ -54,11 +48,11 @@ cu1 = df[cu_mask & (df["n_reflect"] == 1)]
 cu_hits = df[cu_mask]
 
 # ── photons entering crack volumes ───────────────────────────────────────────
-cracks = df[df["mat_pre"] == "vacuum_wg"]
+cracks = select.crack_crossings(df)
 
 # ════════════════════════════════════════════════════════════════════════════
 fig = plt.figure(figsize=(14, 10))
-fig.suptitle(f"BBRsim bbr_boundary_crossings.csv  (T = {T} K,  N_events = {df['evt_key'].nunique():,})",
+fig.suptitle(f"BBRsim bbr.root  (T = {T} K,  N_events = {df['evt_key'].nunique():,})",
              fontsize=13, y=0.98)
 gs = GridSpec(2, 3, figure=fig, hspace=0.40, wspace=0.35)
 
@@ -73,12 +67,13 @@ bin_w   = edges[1] - edges[0]
 norm = counts.sum() * bin_w
 ax1.bar(centers, counts / norm, width=bin_w, alpha=0.65,
         color="steelblue", label="Simulated")
-# Planck photon-number spectrum: u²/(e^u-1), normalised
+# Planck photon-number spectrum (from bbrsim.physics), normalised in u
 u_th  = np.linspace(0.01, 6, 400)
-P_th  = u_th**2 / np.expm1(u_th)
+P_th  = physics.planck_photon_number_pdf(u_th * kT, T)
 norm_th = np.trapezoid(P_th, u_th)
 ax1.plot(u_th, P_th / norm_th, "r-", lw=2, label=r"$u^2/(e^u-1)$ theory")
-ax1.axvline(1.5936, color="gray", ls="--", lw=1, label="Peak u=1.594")
+ax1.axvline(physics.PLANCK_PEAK_U, color="gray", ls="--", lw=1,
+            label=f"Peak u={physics.PLANCK_PEAK_U:.3f}")
 ax1.set_xlabel(r"$u = E / k_B T$")
 ax1.set_ylabel("Probability density")
 ax1.set_title("Incoming photon spectrum")
@@ -124,8 +119,8 @@ else:
 # ── Panel 5: Crack entry positions ───────────────────────────────────────────
 ax5 = fig.add_subplot(gs[1, 2])
 if len(cracks) > 0:
-    c1e = cracks[cracks["vol_pre"].str.contains("crack1", na=False)]
-    c2e = cracks[cracks["vol_pre"].str.contains("crack2", na=False)]
+    c1e = cracks[cracks["vol_post"].str.contains("crack1", na=False)]
+    c2e = cracks[cracks["vol_post"].str.contains("crack2", na=False)]
     if len(c1e): ax5.scatter(c1e["y_mm"], c1e["energy_eV"]*1e3, s=4,
                               alpha=0.5, label=f"crack1 (N={len(c1e)})", color="royalblue")
     if len(c2e): ax5.scatter(c2e["y_mm"], c2e["energy_eV"]*1e3, s=4,
@@ -139,7 +134,6 @@ else:
              transform=ax5.transAxes)
     ax5.set_title("Crack entry photons")
 
-import os
-out = os.path.join(os.path.dirname(args.csv), "test_output_overview.png")
+out = os.path.join(os.path.dirname(args.path), "test_output_overview.png")
 fig.savefig(out, dpi=150, bbox_inches="tight")
 print(f"Saved: {out}")
