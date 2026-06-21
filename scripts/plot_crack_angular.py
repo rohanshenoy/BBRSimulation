@@ -9,7 +9,7 @@ Coordinate convention (from memory/project_coord_convention.md):
   Main transmission lobe: T=90°, P=0° → pure +x direction.
 
 Usage:
-    conda run -n bbrsim python scripts/plot_crack_angular.py [bbr_boundary_crossings.csv] [--iwt T] [--iwp P]
+    conda run -n bbrsim python scripts/plot_crack_angular.py [path/to/bbr.root] [--iwt T] [--iwp P]
 
   --iwt / --iwp: fix the HFSS incoming wave angle (IWaveTheta / IWavePhi in degrees).
                  Use for gun-mode runs so theory matches the specific incidence angle.
