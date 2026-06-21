@@ -4,6 +4,7 @@
 #include "BBRTestDetectorConstruction.hh"
 #include "BBRTestActionInit.hh"
 #include "BBSimPhysics.hh"
+#include "BBRConfigManager.hh"
 
 #include "FTFP_BERT.hh"
 #include "G4EmStandardPhysics_option4.hh"
@@ -20,6 +21,10 @@ int main(int argc, char** argv)
 
   // Multithreaded: G4Analysis merges per-thread ntuples into output/bbr.root.
   auto* runManager = G4RunManagerFactory::CreateRunManager();
+
+  // Construct the master config manager + its messenger before any /bbr/
+  // command is parsed, so commands work in PreInit and broadcast to workers.
+  BBRConfigManager::Instance();
 
   runManager->SetUserInitialization(new BBRTestDetectorConstruction());
 
