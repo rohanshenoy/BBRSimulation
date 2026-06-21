@@ -51,6 +51,30 @@ BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager* mgr)
   fGunECmd = new G4UIcmdWithADouble("/bbr/gun/energy_eV", this);
   fGunECmd->SetGuidance("Photon energy [eV] (500 GHz = 2.07e-3 eV).");
   fGunECmd->AvailableForStates(G4State_PreInit, G4State_Idle);
+
+  fCuMatCmd = new G4UIcmdWithAString("/bbr/det/setCuMaterial", this);
+  fCuMatCmd->SetGuidance("Named Cu alias: OFHC_Cu (RRR=100) | OF_Cu (RRR=3) | "
+                         "HP_Cu (RRR=6). Sets RRR and resets stage T to 4 K.");
+  fCuMatCmd->SetParameterName("alias", true);
+  fCuMatCmd->SetDefaultValue("OFHC_Cu");
+  fCuMatCmd->SetToBeBroadcasted(false);
+  fCuMatCmd->AvailableForStates(G4State_PreInit);
+
+  fCuRRRCmd = new G4UIcmdWithAnInteger("/bbr/det/setCuRRR", this);
+  fCuRRRCmd->SetGuidance("Cu Residual Resistance Ratio (integer >= 1). "
+                         "sigma_DC = RRR * 5.96e7 S/m. Before /run/initialize.");
+  fCuRRRCmd->SetParameterName("RRR", false);
+  fCuRRRCmd->SetToBeBroadcasted(false);
+  fCuRRRCmd->AvailableForStates(G4State_PreInit);
+
+  fCuStageTCmd = new G4UIcmdWithADoubleAndUnit("/bbr/det/setCuStageT", this);
+  fCuStageTCmd->SetGuidance("Temperature stage [K] for the Cu reflectance table "
+                            "(default 4 K). Before /run/initialize.");
+  fCuStageTCmd->SetParameterName("T", false);
+  fCuStageTCmd->SetDefaultUnit("kelvin");
+  fCuStageTCmd->SetUnitCandidates("kelvin");
+  fCuStageTCmd->SetToBeBroadcasted(false);
+  fCuStageTCmd->AvailableForStates(G4State_PreInit);
 }
 
 BBRConfigMessenger::~BBRConfigMessenger() {
@@ -74,4 +98,7 @@ void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
   else if (cmd == fGunDirYCmd) { BBRConfigManager::SetGunDirY(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunDirZCmd) { BBRConfigManager::SetGunDirZ(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunECmd)    { BBRConfigManager::SetGunEnergy_eV(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
+  else if (cmd == fCuMatCmd)   { BBRConfigManager::SetCuMaterial(value); }
+  else if (cmd == fCuRRRCmd)   { BBRConfigManager::SetCuRRR(G4UIcmdWithAnInteger::GetNewIntValue(value)); }
+  else if (cmd == fCuStageTCmd){ BBRConfigManager::SetCuStageT_K(G4UIcmdWithADoubleAndUnit::GetNewDoubleValue(value)); }
 }
