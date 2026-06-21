@@ -27,8 +27,8 @@ expected_ratio = A2 / A1
 
 df = load_crossings(PATH)
 wg = select.crack_crossings(df)
-c1 = wg[wg["vol_pre"].str.contains("crack1", na=False)]
-c2 = wg[wg["vol_pre"].str.contains("crack2", na=False)]
+c1 = wg[wg["vol_post"].str.contains("crack1", na=False)]
+c2 = wg[wg["vol_post"].str.contains("crack2", na=False)]
 
 N1, N2 = len(c1), len(c2)
 print(f"crack1 events : {N1}")

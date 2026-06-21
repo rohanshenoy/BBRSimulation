@@ -33,8 +33,14 @@ def first_hit_cu(df):
 
 
 def crack_crossings(df):
-    """Rows where the pre-step material is the crack flag material 'vacuum_wg'."""
-    return df[df["mat_pre"] == "vacuum_wg"]
+    """Rows where a photon ENTERS a crack (post-step material 'vacuum_wg').
+
+    Boundary crossings are logged World-side (mat_pre is always the World
+    material), so a crack entry appears as mat_post == 'vacuum_wg' with the
+    crack volume in vol_post. (The old CSV scripts keyed on mat_pre, which
+    matches nothing in the ROOT output.)
+    """
+    return df[df["mat_post"] == "vacuum_wg"]
 
 
 def cu_absorption_stats(df):
