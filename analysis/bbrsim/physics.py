@@ -5,7 +5,7 @@ scripts/ validators and plots. Mirrors the C++ BBRMaterials (Drude) and
 ThermalSurface (Planck) math. Pure functions, NumPy-vectorized, no I/O.
 """
 import numpy as np
-from scipy import integrate
+from scipy.integrate import quad
 
 # ── physical constants (SI unless noted) ─────────────────────────────────────
 SIGMA_RT = 5.96e7             # S/m, universal Cu conductivity at 273 K
@@ -56,7 +56,7 @@ def drude_reflectance(freq_Hz, RRR, T_K=4.0):
     """
     freq_Hz = np.asarray(freq_Hz, dtype=float)
     sdc   = sigma_dc(RRR, T_K)
-    tau   = sdc * M_E / (N_E * E_CHARGE**2)
+    tau   = drude_tau(RRR, T_K)
     omega = 2.0 * np.pi * freq_Hz
     sigma = sdc / (1.0 - 1j * omega * tau)
     eps   = 1.0 + 1j * sigma / (EPS0 * omega)
@@ -87,8 +87,9 @@ def planck_photon_number_pdf(E_eV, T_K):
     """
     E_eV = np.asarray(E_eV, dtype=float)
     x = E_eV / (K_EV * T_K)
-    safe = np.clip(x, 1e-300, 500.0)
-    return np.where(x < 500.0, E_eV**2 / np.expm1(safe), 0.0)
+    valid = (E_eV > 0) & (x < 500.0)
+    safe = np.clip(x, 1e-300, 500.0)   # avoid expm1(0)=0 division on masked entries
+    return np.where(valid, E_eV**2 / np.expm1(safe), 0.0)
 
 
 def planck_weighted_absorptance(RRR, T_K=4.0, f_lo_Hz=10e9, f_hi_Hz=20e12):
@@ -104,6 +105,6 @@ def planck_weighted_absorptance(RRR, T_K=4.0, f_lo_Hz=10e9, f_hi_Hz=20e12):
     def den(f):
         return float(planck_photon_number_pdf(H_EVS * f, T_K))
 
-    n, _ = integrate.quad(num, f_lo_Hz, f_hi_Hz, limit=200)
-    d, _ = integrate.quad(den, f_lo_Hz, f_hi_Hz, limit=200)
+    n, _ = quad(num, f_lo_Hz, f_hi_Hz, limit=200)
+    d, _ = quad(den, f_lo_Hz, f_hi_Hz, limit=200)
     return n / d
