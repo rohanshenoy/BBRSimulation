@@ -3,6 +3,7 @@
 
 #include "G4Material.hh"
 #include "G4MaterialPropertiesTable.hh"
+#include "G4NistManager.hh"
 #include "G4SystemOfUnits.hh"
 #include <algorithm>
 #include <cmath>
@@ -110,6 +111,63 @@ inline G4Material* BuildDrudeMaterial(const G4String& name,
 }
 
 // ---------------------------------------------------------------------------
+// Internal helper — not part of the public API.
+// Builds a NIST-based dielectric with a flat RINDEX and a loss-tangent-derived
+// ABSLENGTH table (bulk absorption handled by stock G4OpAbsorption; the
+// vacuum→dielectric Fresnel boundary by stock G4OpBoundaryProcess once RINDEX
+// is set — no wrapper interception needed).
+//   name      : BBR material name (cached/returned if it already exists)
+//   nistBase  : NIST base material to clone (e.g. "G4_KAPTON", "G4_Si")
+//   n_index   : real refractive index, flat over the band
+//   tan_delta : loss tangent (frequency-independent here — the cryogenic
+//               single-fit regime)
+//
+// Physics: a dielectric with loss tangent tan δ attenuates intensity as
+//   α(ν) = 2π ν n tanδ / c          (Lau 2006: tanδ power loss per radian)
+//   ABSLENGTH(ν) = 1/α = c / (2π ν n tanδ)
+// so ABSLENGTH ∝ 1/ν. Tabulated on the same 10 GHz–20 THz log grid as the
+// Cu REFLECTIVITY / Planck CDF.
+// ---------------------------------------------------------------------------
+inline G4Material* BuildDielectricMaterial(const G4String& name,
+                                            const G4String& nistBase,
+                                            G4double n_index,
+                                            G4double tan_delta)
+{
+  G4Material* mat = G4Material::GetMaterial(name, false);
+  if (mat) return mat;
+
+  // Clone the NIST base under our own name so distinct (n, tanδ) tables never
+  // collide on the shared NIST instance, and the ROOT legend records a
+  // meaningful material name.
+  mat = G4NistManager::Instance()->BuildMaterialWithNewDensity(name, nistBase);
+
+  const G4double c_SI  = 2.998e8;             // m/s
+  const G4double h_eVs = 4.13566769692e-15;   // eV·s
+
+  const int      N    = 24;
+  const G4double Emin = 4.14e-5*eV;   // 10 GHz
+  const G4double Emax = 8.27e-2*eV;   // 20 THz
+
+  std::vector<G4double> energies(N), abslen(N);
+  const G4double logMin = std::log(Emin), logMax = std::log(Emax);
+  for (int i = 0; i < N; ++i) {
+    energies[i]         = std::exp(logMin + i*(logMax - logMin)/(N - 1.));
+    const G4double nu   = (energies[i]/eV) / h_eVs;                 // Hz
+    const G4double alpha = 2.*CLHEP::pi * nu * n_index * tan_delta / c_SI; // 1/m
+    abslen[i]           = (1./alpha) * m;     // 1/m → Geant4 length units
+  }
+
+  const std::vector<G4double> e2 = {Emin, Emax};
+  const std::vector<G4double> ri = {n_index, n_index};
+
+  auto* mpt = new G4MaterialPropertiesTable();
+  mpt->AddProperty("RINDEX",    e2,       ri);
+  mpt->AddProperty("ABSLENGTH", energies, abslen);
+  mat->SetMaterialPropertiesTable(mpt);
+  return mat;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -186,6 +244,29 @@ inline G4Material* GetCopperByName(const G4String& name)
   if (name == "OF_Cu")   return GetCopper(  3, 4.0);
   if (name == "HP_Cu")   return GetCopper(  6, 4.0);
   return nullptr;
+}
+
+// Cirlex (pressure-formed DuPont Kapton polyimide) at cryogenic temperature.
+// n ≈ 1.95, tan δ ≈ 0.015 — single complex-permittivity fit at 5 K over
+// 300 GHz–3 THz (Lau et al. 2006, Appl. Opt. 45, 3746; corroborated by the
+// CMBPol optics review, Table 1). Base material G4_KAPTON.
+inline G4Material* GetCirlex()
+{
+  return BuildDielectricMaterial("Cirlex", "G4_KAPTON", 1.95, 0.015);
+}
+
+// Crystalline silicon detector substrate. n = 3.39 (flat in the trans-mm
+// band, YYC / Frey NASA Goddard); tan δ = 1e-4 (Chang §5.3.1.4).
+inline G4Material* GetSiliconCrystal()
+{
+  return BuildDielectricMaterial("Si", "G4_Si", 3.39, 1.0e-4);
+}
+
+// Crystalline germanium detector substrate. n ≈ 4.0 (flat in the trans-mm
+// band); tan δ = 6e-5 (Chang §5.3.1.4).
+inline G4Material* GetGermaniumCrystal()
+{
+  return BuildDielectricMaterial("Ge", "G4_Ge", 4.0, 6.0e-5);
 }
 
 } // namespace BBRMaterials
