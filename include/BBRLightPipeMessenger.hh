@@ -26,6 +26,8 @@ private:
   G4UIcmdWithADoubleAndUnit* fLengthCmd;
   G4UIcmdWithADoubleAndUnit* fWallCmd;
   G4UIcmdWithAString*        fWallMatCmd;
+  G4UIcmdWithAString*        fModeCmd;
+  G4UIcmdWithAString*        fStlPathCmd;
 };
 
 #endif

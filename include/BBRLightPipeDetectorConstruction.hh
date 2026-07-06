@@ -25,15 +25,20 @@ public:
   void SetLength(G4double v)              { fLength = v; }
   void SetWallThickness(G4double v)       { fWallThickness = v; }
   void SetWallMaterial(const G4String& m) { fWallMaterialName = m; }
+  void SetMode(const G4String& m)         { fMode = m; }
+  void SetStlPath(const G4String& p)      { fStlPath = p; }
 
 private:
   void        BuildParametric(G4LogicalVolume* worldLV);
+  void        BuildFromCAD(G4LogicalVolume* worldLV);
   G4Material* ResolveWallMaterial();
 
   G4double fBore            = 5.*mm;
   G4double fLength          = 100.*mm;
   G4double fWallThickness   = 2.*mm;
   G4String fWallMaterialName = "Cu";
+  G4String fMode            = "parametric";
+  G4String fStlPath         = "";
 
   BBRLightPipeMessenger* fMessenger = nullptr;
 };
