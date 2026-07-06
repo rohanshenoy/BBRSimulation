@@ -39,6 +39,19 @@ BBRLightPipeMessenger::BBRLightPipeMessenger(
   fWallMatCmd->SetCandidates("Cu reflector");
   fWallMatCmd->AvailableForStates(G4State_PreInit);
   fWallMatCmd->SetToBeBroadcasted(false);
+
+  fModeCmd = new G4UIcmdWithAString("/bbr/lightpipe/mode", this);
+  fModeCmd->SetGuidance("Build mode: parametric | cad.");
+  fModeCmd->SetParameterName("mode", false);
+  fModeCmd->SetCandidates("parametric cad");
+  fModeCmd->AvailableForStates(G4State_PreInit);
+  fModeCmd->SetToBeBroadcasted(false);
+
+  fStlPathCmd = new G4UIcmdWithAString("/bbr/lightpipe/stlPath", this);
+  fStlPathCmd->SetGuidance("ASCII .STL path (cad mode).");
+  fStlPathCmd->SetParameterName("stlPath", false);
+  fStlPathCmd->AvailableForStates(G4State_PreInit);
+  fStlPathCmd->SetToBeBroadcasted(false);
 }
 
 BBRLightPipeMessenger::~BBRLightPipeMessenger()
@@ -47,6 +60,8 @@ BBRLightPipeMessenger::~BBRLightPipeMessenger()
   delete fLengthCmd;
   delete fWallCmd;
   delete fWallMatCmd;
+  delete fModeCmd;
+  delete fStlPathCmd;
   delete fDir;
 }
 
@@ -60,4 +75,8 @@ void BBRLightPipeMessenger::SetNewValue(G4UIcommand* cmd, G4String val)
     fDet->SetWallThickness(fWallCmd->GetNewDoubleValue(val));
   else if (cmd == fWallMatCmd)
     fDet->SetWallMaterial(val);
+  else if (cmd == fModeCmd)
+    fDet->SetMode(val);
+  else if (cmd == fStlPathCmd)
+    fDet->SetStlPath(val);
 }

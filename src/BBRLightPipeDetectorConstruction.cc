@@ -13,6 +13,9 @@
 #include "G4PhysicalConstants.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
+#include "G4VSolid.hh"
+#include "CADMesh.hh"
+#include <fstream>
 
 BBRLightPipeDetectorConstruction::BBRLightPipeDetectorConstruction()
   : fMessenger(new BBRLightPipeMessenger(this)) {}
@@ -60,6 +63,38 @@ void BBRLightPipeDetectorConstruction::BuildParametric(G4LogicalVolume* worldLV)
          << "mm material=" << wall->GetName() << G4endl;
 }
 
+void BBRLightPipeDetectorConstruction::BuildFromCAD(G4LogicalVolume* worldLV)
+{
+  if (fStlPath.empty()) {
+    G4Exception("BBRLightPipeDetectorConstruction::BuildFromCAD", "LP010",
+                FatalException, "cad mode requires /bbr/lightpipe/stlPath");
+  }
+  // Fail loudly on a missing file rather than building an empty world.
+  if (!std::ifstream(fStlPath).good()) {
+    G4Exception("BBRLightPipeDetectorConstruction::BuildFromCAD", "LP011",
+                FatalException, ("STL not found: " + fStlPath).c_str());
+  }
+
+  G4VSolid* solid = nullptr;
+  try {
+    auto mesh = CADMesh::TessellatedMesh::FromSTL(fStlPath);
+    mesh->SetScale(mm);
+    solid = mesh->GetSolid();
+  } catch (...) {
+    G4Exception("BBRLightPipeDetectorConstruction::BuildFromCAD", "LP012",
+                FatalException,
+                ("failed to parse STL (built-in reader is ASCII-only): "
+                 + fStlPath).c_str());
+  }
+
+  auto* lv = new G4LogicalVolume(solid, ResolveWallMaterial(), "logic-LightPipe");
+  new G4PVPlacement(nullptr, G4ThreeVector(), lv, "LightPipeWall",
+                    worldLV, false, 0, true);
+
+  G4cout << "[BBR] LightPipe CAD: " << fStlPath
+         << " material=" << lv->GetMaterial()->GetName() << G4endl;
+}
+
 G4VPhysicalVolume* BBRLightPipeDetectorConstruction::Construct()
 {
   // Vacuum world (matches the test world: G4_Galactic, RINDEX=1).
@@ -78,6 +113,7 @@ G4VPhysicalVolume* BBRLightPipeDetectorConstruction::Construct()
   auto* worldPhys = new G4PVPlacement(nullptr, G4ThreeVector(), worldLogical,
                                       "World", nullptr, false, 0, true);
 
-  BuildParametric(worldLogical);
+  if (fMode == "cad") BuildFromCAD(worldLogical);
+  else                BuildParametric(worldLogical);
   return worldPhys;
 }
