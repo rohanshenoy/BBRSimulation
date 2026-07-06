@@ -1,0 +1,6 @@
+# Parametric light-pipe scaffold: 4 K Planck emitter into the bore.
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/run/initialize
+/run/beamOn 50000
