@@ -8,6 +8,7 @@
 
 class G4LogicalVolume;
 class G4Material;
+class BBRLightPipeMessenger;
 
 // 4 K -> mixing-chamber light pipe. Parametric G4Tubs now; CAD .STL in a later
 // task. Physics rides on the wall material's REFLECTIVITY MPT, so
@@ -33,6 +34,8 @@ private:
   G4double fLength          = 100.*mm;
   G4double fWallThickness   = 2.*mm;
   G4String fWallMaterialName = "Cu";
+
+  BBRLightPipeMessenger* fMessenger = nullptr;
 };
 
 #endif

@@ -1,4 +1,5 @@
 #include "BBRLightPipeDetectorConstruction.hh"
+#include "BBRLightPipeMessenger.hh"
 #include "BBRConfigManager.hh"
 #include "BBRMaterials.hh"
 
@@ -13,8 +14,13 @@
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
 
-BBRLightPipeDetectorConstruction::BBRLightPipeDetectorConstruction() = default;
-BBRLightPipeDetectorConstruction::~BBRLightPipeDetectorConstruction() = default;
+BBRLightPipeDetectorConstruction::BBRLightPipeDetectorConstruction()
+  : fMessenger(new BBRLightPipeMessenger(this)) {}
+
+BBRLightPipeDetectorConstruction::~BBRLightPipeDetectorConstruction()
+{
+  delete fMessenger;
+}
 
 G4Material* BBRLightPipeDetectorConstruction::ResolveWallMaterial()
 {
