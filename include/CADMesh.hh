@@ -482,7 +482,7 @@ public:
   G4bool GetReverse() { return this->reverse_; };
 
 private:
-  G4bool reverse_;
+  G4bool reverse_ = false;
 };
 }
 
