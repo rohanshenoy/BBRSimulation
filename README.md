@@ -36,6 +36,8 @@ next milestones.
   touchable state after the in-volume transport shortcut.
 - The shared crack/HFSS dataset cache is protected during lazy initialization
   and lookup, making concurrent worker access safe in multithreaded runs.
+- CADMesh's optional reverse-coordinate flag is explicitly initialized, so CAD
+  light-pipe construction does not depend on indeterminate state.
 
 These changes were smoke-tested with a 10,000-event fixed-gun run using 15
 workers; no geometry-navigation warnings or stuck tracks were observed.
