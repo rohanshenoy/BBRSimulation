@@ -9,7 +9,8 @@
 
 // Singleton that owns HFSS dataset loading and caching.
 // Routing key: volume name stripped of any ":N" placement suffix = dataset ID.
-// Lazy-loads BBRHFSSData on first Lookup; safe for single-threaded runs.
+// Lazy-loads BBRHFSSData on first Lookup; cache mutation is protected in the
+// implementation because the simulation runs with Geant4 worker threads.
 class BBRCrackLibrary
 {
  public:
