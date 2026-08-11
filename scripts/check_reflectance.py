@@ -4,7 +4,10 @@ Analyse build/output/bbr.root produced by reflectance.mac and compare
 observed reflectance R_obs against the Drude model prediction R_theory.
 
 Usage:
-    conda run -n bbrsim python scripts/check_reflectance.py [--csv path]
+    conda run -n bbrsim python scripts/check_reflectance.py [--root path]
+
+`--csv` is accepted as a deprecated alias for `--root` (the input has been a
+ROOT file since the Phase-A output migration; the flag name is historical).
 """
 
 import argparse
@@ -19,20 +22,21 @@ from bbrsim import physics, select
 
 # ── parse args ────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-parser.add_argument("--csv", default=os.path.join(
+parser.add_argument("--root", "--csv", dest="root", default=os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "build", "output", "bbr.root"))
+    "build", "output", "bbr.root"),
+    help="Path to bbr.root (--csv is a deprecated alias)")
 parser.add_argument("--RRR",  type=int,   default=100)
 parser.add_argument("--T_K",  type=float, default=4.0)
 parser.add_argument("--freq", type=float, default=500.0,
                     help="Gun frequency [GHz] (default 500)")
 args = parser.parse_args()
 
-if not os.path.exists(args.csv):
-    print(f"ERROR: {args.csv} not found.  Run reflectance.mac first.", file=sys.stderr)
+if not os.path.exists(args.root):
+    print(f"ERROR: {args.root} not found.  Run reflectance.mac first.", file=sys.stderr)
     sys.exit(1)
 
-df = load_crossings(args.csv)
+df = load_crossings(args.root)
 
 if select.cu_boundary(df).empty:
     print("No Cu boundary steps found.  Did the gun hit the Cu slab?")

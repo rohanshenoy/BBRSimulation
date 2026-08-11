@@ -22,12 +22,23 @@ wave propagation through gaps via pre-computed HFSS S-parameters — on the same
 event-by-event footing, so BBR backgrounds can be simulated rather than
 debugged after the fact.
 
-## Status (June 2026)
+## Status (August 2026)
 
 Core physics is operational and validated. The HFSS diffraction path, the Cu
-reflectance model, and the Planck thermal emitter are all implemented and
-tested. CAD-accurate geometry import and the non-Cu material database are the
-next milestones.
+reflectance model, the Planck thermal emitter, and the ROOT output/analysis
+layer are implemented and tested. The loss-tangent dielectrics (Cirlex, Si, Ge)
+are implemented but not yet placed in any geometry. CAD-accurate geometry
+import exists on the `light-pipe-example` branch only.
+
+**Read status claims by branch:**
+
+| Branch | Adds |
+|---|---|
+| `main` | Core simulation: HFSS diffraction, Cu Drude reflectance, Planck emitter, ROOT output + `analysis/bbrsim`, Cirlex/Si/Ge dielectric getters |
+| `fix/core-hardening` | Navigator relocation after non-local HFSS transmission; mutex-protected crack/HFSS dataset cache |
+| `light-pipe-example` | `BBRLightPipe` executable, parametric + CAD (`.STL`) light-pipe geometry, CADMesh header, plus the `fix/core-hardening` fixes |
+
+CAD/STL import is **not** available on `main`.
 
 ### Recent correctness hardening
 
@@ -35,10 +46,17 @@ next milestones.
   crack before applying a non-local exit state. This prevents stale safety and
   touchable state after the in-volume transport shortcut.
 - The shared crack/HFSS dataset cache is protected during lazy initialization
-  and lookup, making concurrent worker access safe in multithreaded runs.
+  and lookup, making concurrent worker access safe in multithreaded runs. It is
+  shared mutable state with synchronized lazy initialization, not an immutable
+  singleton.
+- On `light-pipe-example` only: CADMesh's optional reverse-coordinate flag is
+  explicitly initialized, so CAD light-pipe construction does not depend on
+  indeterminate state.
 
 These changes were smoke-tested with a 10,000-event fixed-gun run using 15
-workers; no geometry-navigation warnings or stuck tracks were observed.
+workers; no geometry-navigation warnings, boundary-process errors, or stuck
+tracks were observed. There is no registered `ctest` suite — correctness is
+checked by the `scripts/check_*.py` PASS/FAIL validators.
 
 ### Working
 
@@ -61,17 +79,48 @@ workers; no geometry-navigation warnings or stuck tracks were observed.
   set at runtime via `/bbr/thermal/setT`.
 
 - **Test geometry** — `BBRTestDetectorConstruction`: 50 cm world, 4 mm Cu slab,
-  two `vacuum_wg` crack daughters at z = 0 and z = 3 mm. Cu material and gun
-  position fully configurable via messenger before `/run/initialize`.
+  two `vacuum_wg` crack daughters at z = 0 and z = 3 mm. Cu material is
+  configurable via `/bbr/det/` before `/run/initialize`; gun and emitter
+  settings via `/bbr/gun/` and `/bbr/thermal/` at any time.
+
+- **Loss-tangent dielectrics** — `BBRMaterials::GetCirlex()`,
+  `GetSiliconCrystal()`, `GetGermaniumCrystal()`: flat `RINDEX` plus
+  `ABSLENGTH = c/(2πν·n·tanδ)` on the same 10 GHz–20 THz grid, with bulk
+  absorption via stock `G4OpAbsorption` and Fresnel via the stock boundary
+  process. Compile- and link-verified only — not yet placed in any geometry
+  and not covered by a `check_*` validator.
+
+- **ROOT output + analysis layer** — `BBRRunAction` / `BBRTestSteppingAction`
+  write `output/bbr.root` (`crossings` + `abspoints` ntuples) and
+  `output/bbr_legend.json` via `G4AnalysisManager` with ntuple merging under
+  multithreading. `analysis/bbrsim/` (`io.py`, `physics.py`, `select.py`) is
+  the single source of truth for loading and for the Drude / Planck /
+  Hagen-Rubens formulas; every `check_*` and `plot_*` script reads through it.
 
 ### Not yet implemented
 
-- CADMesh / SOLIDWORKS `.STL` import
+- CADMesh / SOLIDWORKS `.STL` import **on `main`** (implemented on
+  `light-pipe-example`; see *Light-pipe geometry* below)
 - Patched `G4OpBoundaryProcess` with `REFLECTIVITY` on `G4MaterialPropertiesTable`
-  (upstream Geant4 PR target)
-- ROOT `TTree` absorption output and leakage-current post-processing
-- Full cryogenic material database beyond Cu (Si, Ge, Cirlex, PCB)
+  (upstream Geant4 PR target — BBRsim currently *wraps* the stock process rather
+  than patching it)
+- Leakage-current post-processing (the `abspoints` ntuple that feeds it exists;
+  the loss-tangent-weighting analysis is Phase B2)
+- PCB material; geometry placement and a transmission validator for the
+  existing Si/Ge/Cirlex getters
 - BBR calibration geometry (BB source + mesh-TES detector models)
+- Anomalous-skin-effect correction to the classical Drude boundary optics
+
+### Known scope limits
+
+- **HFSS data is single-frequency.** Only a 500 GHz dataset exists per crack,
+  and `BBRHFSSData` is not keyed by frequency. The Planck emitter spans
+  10 GHz–20 THz, so a broadband run applies the 500 GHz transmittance and
+  angular PDFs to every photon. This is a deliberate modeling approximation,
+  not an interpolation bug; lifting it requires a frequency-keyed HFSS data
+  model and API.
+- **Oblique incidence is unvalidated.** The quarter-symmetry azimuth
+  fold/unfold has only been checked at normal incidence.
 
 ## Build
 
@@ -81,9 +130,15 @@ a C++17 compiler. Python scripts require the `bbrsim` conda environment
 
 ```bash
 mkdir build && cd build
-cmake ..
+cmake -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ ..
 make
 ```
+
+On macOS, configure with Apple Clang explicitly as shown. A bare `cmake ..` can
+pick up Homebrew GCC (libstdc++), which compiles but fails at link against a
+Geant4 built with Apple Clang (libc++) on every API whose signature contains
+`std::` types. If you see undefined Geant4 symbols at link time, check
+`CMAKE_CXX_COMPILER` in `build/CMakeCache.txt`.
 
 Batch-only (no UI/visualization):
 
@@ -122,8 +177,10 @@ names:
 conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr.root --temp 4
 ```
 
-(`check_planck_spectrum.py` and `check_reflectance.py` read the ROOT file; the
-remaining `check_*`/`plot_*` scripts are being ported off the old CSV format.)
+Every `check_*` / `plot_*` script reads BBRsim output through `analysis/bbrsim`;
+none of them read a BBRsim-produced CSV. The only remaining `pandas.read_csv`
+calls load external reference data (HFSS far-field tables and the Palik / Serov /
+Geant4-IR copper comparison sets).
 
 ### Cu reflectance smoke test
 
@@ -188,6 +245,42 @@ when touching the wrapper, run the smoke tests (`reflectance.mac`,
 ```
 
 Requires a Geant4 build with UI and visualization drivers enabled.
+
+## Light-pipe geometry (branch `light-pipe-example`)
+
+A second executable, `BBRLightPipe`, models a 4 K → mixing-chamber light pipe.
+It is **not on `main`** — check out `light-pipe-example` to build it. It shares
+the physics list, materials, emitter, and ROOT output with `BBRSim`; only the
+detector construction differs.
+
+```bash
+git checkout light-pipe-example
+cd build && cmake -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ .. && make
+./BBRLightPipe lightpipe.mac
+```
+
+Two build modes, selected by `/bbr/lightpipe/mode`:
+
+- **`parametric`** (default) — a tube generated from bore radius, length, and
+  wall thickness.
+- **`cad`** — an ASCII `.STL` imported through the bundled header-only CADMesh
+  (`include/CADMesh.hh`). The built-in reader is ASCII-only; binary STL needs
+  assimp. A sample mesh ships at `data/cad/box_sample.stl`.
+
+| Command | Argument | Description |
+|---|---|---|
+| `/bbr/lightpipe/mode` | `parametric \| cad` | Build mode |
+| `/bbr/lightpipe/bore` | length + unit | Inner bore radius (aperture) |
+| `/bbr/lightpipe/length` | length + unit | Tube length along +x |
+| `/bbr/lightpipe/wallThickness` | length + unit | Wall thickness |
+| `/bbr/lightpipe/wallMaterial` | `Cu \| reflector` | Wall optical material |
+| `/bbr/lightpipe/stlPath` | path | ASCII `.STL` to load (`cad` mode) |
+
+All `/bbr/lightpipe/` commands are **`PreInit` only** and are not broadcast to
+worker threads — issue them before `/run/initialize`. There is no runtime
+geometry reinitialization; changing a parameter after initialization requires a
+new session. The differential 4 K → MXC measurement this geometry is meant to
+support is not implemented yet.
 
 ## Project plan and team
 
