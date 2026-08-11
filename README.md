@@ -29,6 +29,17 @@ reflectance model, and the Planck thermal emitter are all implemented and
 tested. CAD-accurate geometry import and the non-Cu material database are the
 next milestones.
 
+### Recent correctness hardening
+
+- HFSS diffraction now relocates Geant4's navigator to a point just inside the
+  crack before applying a non-local exit state. This prevents stale safety and
+  touchable state after the in-volume transport shortcut.
+- The shared crack/HFSS dataset cache is protected during lazy initialization
+  and lookup, making concurrent worker access safe in multithreaded runs.
+
+These changes were smoke-tested with a 10,000-event fixed-gun run using 15
+workers; no geometry-navigation warnings or stuck tracks were observed.
+
 ### Working
 
 - **HFSS diffraction** — `BBRHFSSData` loads far-field + waveguide CSVs; `BBRCrackLibrary`
