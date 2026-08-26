@@ -58,6 +58,19 @@ workers; no geometry-navigation warnings, boundary-process errors, or stuck
 tracks were observed. There is no registered `ctest` suite — correctness is
 checked by the `scripts/check_*.py` PASS/FAIL validators.
 
+### Recent correctness hardening
+
+- HFSS diffraction now relocates Geant4's navigator to a point just inside the
+  crack before applying a non-local exit state. This prevents stale safety and
+  touchable state after the in-volume transport shortcut.
+- The shared crack/HFSS dataset cache is protected during lazy initialization
+  and lookup, making concurrent worker access safe in multithreaded runs.
+- CADMesh's optional reverse-coordinate flag is explicitly initialized, so CAD
+  light-pipe construction does not depend on indeterminate state.
+
+These changes were smoke-tested with a 10,000-event fixed-gun run using 15
+workers; no geometry-navigation warnings or stuck tracks were observed.
+
 ### Working
 
 - **HFSS diffraction** — `BBRHFSSData` loads far-field + waveguide CSVs; `BBRCrackLibrary`

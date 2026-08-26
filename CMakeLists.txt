@@ -34,6 +34,9 @@ file(GLOB headers ${PROJECT_SOURCE_DIR}/include/*.hh)
 add_executable(BBRSim BBRSim.cc ${sources} ${headers})
 target_link_libraries(BBRSim ${Geant4_LIBRARIES} )
 
+add_executable(BBRLightPipe BBRLightPipe.cc ${sources} ${headers})
+target_link_libraries(BBRLightPipe ${Geant4_LIBRARIES})
+
 #----------------------------------------------------------------------------
 # Copy macros to the build directory (the directory in which we build BBRSim)
 # so the executable can be run directly from there: it reads these macros from
@@ -49,6 +52,7 @@ set(BBRSim_SCRIPTS
     reflectance.mac
     planck.mac
     verify_config_mt.mac
+    lightpipe.mac
     )
 
 foreach(_script ${BBRSim_SCRIPTS})
