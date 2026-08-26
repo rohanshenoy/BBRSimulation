@@ -31,9 +31,15 @@ All Python scripts must be run as `conda run -n bbrsim python <script>` — not
 ```bash
 cd BBRSimulation
 mkdir build && cd build
-cmake ..
+cmake -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ ..
 make
 ```
+
+On macOS, always configure with Apple Clang explicitly. A bare `cmake ..` can
+select Homebrew GCC (libstdc++); it compiles, then fails at link against an
+Apple-Clang (libc++) Geant4 install with undefined symbols on every API taking
+`std::` types. That is a compiler/ABI mismatch, not a code bug — check
+`CMAKE_CXX_COMPILER` in `build/CMakeCache.txt`.
 
 Batch-only build (no UI or visualization — faster, no display required):
 
@@ -95,12 +101,26 @@ conda run -n bbrsim python scripts/check_planck_spectrum.py build/output/bbr.roo
 
 Photons entering a `vacuum_wg` crack volume are routed through the HFSS
 S-parameter lookup. The `[BBR] diffraction` stdout line reports the running
-observed transmittance. Expected at 500 GHz normal incidence:
+observed transmittance. At 500 GHz normal incidence:
 
-| Crack | Gap | Expected T |
+| Crack | Gap | Observed T |
 |---|---|---|
-| crack1 | 52 µm | ≈ 52.7% |
-| crack2 | 102 µm | ≈ 50.4% |
+| crack1 | 52 µm | 51.9% |
+| crack2 | 102 µm | 50.5% |
+
+The benchmark is **50%**: a parallel-plate gap thinner than λ/2 is a perfect
+polarization filter — only the cutoff-free TEM mode transmits — so an
+unpolarized beam transmits exactly half. Both observations sit within about a
+point of that ideal. (An older "52.7%" figure appears in archived plans; it was
+contaminated by an HFSS normalization artifact and should not be quoted.)
+
+> **Scope limit — single HFSS frequency.** The only HFSS dataset per crack is at
+> 500 GHz, and `BBRHFSSData` is not keyed by frequency. Planck-mode runs span
+> 10 GHz–20 THz but apply the 500 GHz transmittance and angular PDFs to every
+> photon. This is a declared modeling approximation, not an interpolation bug.
+> Broadband crack results are therefore indicative, not quantitative. Likewise,
+> the quarter-symmetry azimuth fold/unfold used for oblique incidence has only
+> been validated at normal incidence.
 
 To aim the fixed gun at a crack:
 
@@ -118,10 +138,9 @@ conda run -n bbrsim python scripts/check_crack_ratio.py build/output/bbr.root
 conda run -n bbrsim python scripts/plot_crack_angular.py build/output/bbr.root --iwt 180 --iwp 0
 ```
 
-> **Note (Phase A):** `check_crack_ratio.py` and `plot_crack_angular.py` still
-> read the legacy CSV via pandas and are being ported to the ROOT loader
-> (`analysis/bbrsim/io.py`). Only `check_planck_spectrum.py` and
-> `check_reflectance.py` read `output/bbr.root` today.
+Crack entries are selected as `mat_post == "vacuum_wg"` and split by `vol_post`.
+Every crossing is logged World-side, so `mat_pre`/`vol_pre` are always
+`G4_Galactic`/`World`; a `mat_pre == "vacuum_wg"` filter matches zero rows.
 
 ### 3. Copper reflectance
 
@@ -155,11 +174,14 @@ conda run -n bbrsim python scripts/check_reflectance.py
 ```
 
 For Planck-mode runs, compare the aggregate absorptance against the
-Planck-weighted Drude integral:
+Planck-weighted Drude integral. The script reads the ROOT file and computes
+absorptance from decoded crossings; it defaults to `build/output/bbr.root` and
+infers RRR and temperature from the run, so `--rrr` / `--temp` are overrides
+only:
 
 ```bash
-./BBRSim test.mac >out.txt 2>&1
-conda run -n bbrsim python scripts/check_cu_absorptance.py out.txt --rrr 100
+./BBRSim test.mac
+conda run -n bbrsim python scripts/check_cu_absorptance.py build/output/bbr.root
 ```
 
 Plot reflectance curves for all three grades:
@@ -219,16 +241,62 @@ for the derivation.
 
 ---
 
+## Command availability (PreInit vs Idle)
+
+All `/bbr/...` commands are owned by `BBRConfigMessenger`, which
+`BBRConfigManager` registers at startup, so every command exists from the first
+macro line. What differs is *when* each is allowed and whether it reaches worker
+threads:
+
+| Directory | Valid states | Broadcast to workers? | Notes |
+|---|---|---|---|
+| `/bbr/det/` | `PreInit` **only** | No | Geometry is built on the master in `Construct()`; issue before `/run/initialize` |
+| `/bbr/gun/` | `PreInit` and `Idle` | Yes | Read fresh each event |
+| `/bbr/thermal/` | `PreInit` and `Idle` | Yes | Planck CDF re-initializes on the next event |
+| `/bbr/config/print` | `PreInit` and `Idle` | — | Dumps all current settings |
+
+`BBRConfigManager::Instance()` is a thread-local clone: the master builds from
+compiled defaults and each worker copy-constructs from the master, so broadcast
+settings propagate without shared mutable state. `verify_config_mt.mac`
+exercises this with two runs (4 K then 10 K) in one session.
+
+There is **no runtime geometry reinitialization**. `/run/reinitializeGeometry`
+is not supported by any BBRsim detector construction; changing a `/bbr/det/`
+value after `/run/initialize` requires a new session.
+
+---
+
+## Planck emitter configuration
+
+```mac
+/bbr/thermal/setT 10.0     # emitter temperature [K], default 4.0
+/run/initialize
+/run/beamOn 10000
+```
+
+Photon energies are drawn from the Planck **photon-number** spectrum
+∝ ν²/(e^{hν/kT}−1) over a fixed 10 GHz–20 THz range — the correct weighting for
+an unweighted photon Monte Carlo, where each event is one photon. Note this
+peaks at u = hν/kT ≈ 1.5936 (≈133 GHz at 4 K), *not* at the familiar
+energy-spectrum peak hν = 2.82 kT (≈235 GHz at 4 K).
+
+Direction is sampled uniformly over the outward hemisphere (θ uniform in
+[0°, 90°], φ uniform in [0°, 360°]). This is Chang's original convention and is
+intentional — a known approximation whose effect washes out after multiple
+reflections inside a cavity.
+
+---
+
 ## Gun configuration
 
-The particle gun is a 500 GHz optical photon. All gun commands must appear
-after `/run/initialize`.
+The particle gun is a 500 GHz optical photon. Gun commands are read fresh each
+event and are valid both before and after `/run/initialize`.
 
 ```mac
 /run/initialize
 
-/bbr/gun/mode true         # true = direct-hit mode (solid Cu, z=5 mm)
-                           # false = crack-test mode (default)
+/bbr/gun/mode true         # true  = fixed particle gun
+                           # false = Planck thermal emitter (default)
 
 /bbr/gun/posX -20.0        # gun X position [mm]
 /bbr/gun/posY   0.0
@@ -267,23 +335,34 @@ crossings, abspoints = load("build/output/bbr.root")   # decoded DataFrames
 ## Analysis scripts
 
 All scripts live in `scripts/` and must be run from the repo root with
-`conda run -n bbrsim python scripts/<name>.py`. `check_planck_spectrum.py` and
-`check_reflectance.py` read `build/output/bbr.root` via the `analysis/bbrsim`
-loader; the remaining `check_*`/`plot_*` scripts still default to the legacy
-CSV and are being ported to the ROOT loader. All accept a path argument.
+`conda run -n bbrsim python scripts/<name>.py`. Every one of them reads BBRsim
+output as `build/output/bbr.root` through the `analysis/bbrsim` loader — none
+read a BBRsim-produced CSV. (`plot_crack_angular.py` and `plot_cu_reflectance.py`
+additionally load external reference CSVs: the HFSS far-field tables and the
+Palik / Serov / Geant4-IR copper comparison sets.)
+
+Physics formulas are not duplicated per script: `analysis/bbrsim/physics.py` is
+the single source of truth for the complex-Drude reflectance, the Planck
+photon-number spectrum, and Hagen-Rubens, mirroring the C++ implementation and
+self-tested by `check_physics.py`.
 
 | Script | Purpose | Key flags |
 |---|---|---|
-| `check_reflectance.py` | Poisson test of absorbed count vs full-Drude theory (reflectance.mac) | `--RRR`, `--T_K`, `--freq` |
-| `check_cu_absorptance.py` | Compare stdout A_obs to Planck-weighted Drude theory; PASS/FAIL | `--rrr <N>` |
+| `check_physics.py` | Self-test of `bbrsim.physics` against C++ anchors | — |
+| `check_reflectance.py` | Poisson test of absorbed count vs full-Drude theory (reflectance.mac) | `--root`, `--RRR`, `--T_K`, `--freq` |
+| `check_cu_absorptance.py` | Compare A_obs from decoded crossings to Planck-weighted Drude theory; PASS/FAIL | positional path, `--rrr`, `--temp` |
 | `check_cu_serov.py` | Verify σ_eff values reproduce Serov (2016) reference points | — |
-| `check_planck_spectrum.py` | Validate emitted spectrum against Planck photon-number peak | `--temp <K>` |
+| `check_planck_spectrum.py` | Validate emitted spectrum against Planck photon-number peak | positional path, `--temp <K>` |
 | `check_nreflect.py` | Per-track reflection-count distribution sanity checks | — |
 | `check_angle_distribution.py` | KS test of Cu incidence angles | — |
-| `check_crack_ratio.py` | crack2/crack1 rate ratio vs aperture ratio | — |
+| `check_crack_ratio.py` | crack2/crack1 rate ratio vs aperture ratio | positional path |
 | `plot_cu_reflectance.py` | Reflectance/absorptance curves vs frequency, temperature panel | `--out <path>` |
 | `plot_crack_angular.py` | Outgoing crack angular distributions vs HFSS far-field theory | `--iwt`, `--iwp` |
-| `plot_test_output.py` | Overview plots of the boundary-crossing output (legacy CSV; ROOT port pending) | `--temp <K>` |
+| `plot_test_output.py` | Overview plots of the boundary-crossing output | `--temp <K>` |
+
+`check_angle_distribution.py` is a KS test and is therefore N-sensitive: it
+passes on its designated 10k-event `planck.mac` workload but over-rejects on a
+5M-event run. That is a property of the test, not a regression.
 
 ---
 
@@ -304,9 +383,16 @@ events have run.
 
 **`RESULT: FAIL` from `check_cu_absorptance.py`**
 A_obs/A_theory outside [0.3, 3.0]. Common causes: too few events (< 1000 give
-high statistical noise), wrong `--rrr` flag (must match the mac file's RRR),
-or a photon energy far from 500 GHz (Planck-weighted theory assumes a 4 K
-spectrum).
+high statistical noise — at RRR=100 the absorptance is ~4.9×10⁻⁵, so a 10k run
+yields ~0–2 absorptions), or an `--rrr`/`--temp` override that contradicts the
+Cu material actually used in the run. Without overrides the script parses RRR
+and T from the material name, so a mismatch is usually a stale override.
+
+**`check_cu_absorptance.py` reports "no Cu boundary crossings found"**
+You passed the wrong file, or the run never reached the Cu slab. The script
+takes a **ROOT path** (positional, default `build/output/bbr.root`). The old
+`check_cu_absorptance.py out.txt --rrr 100` stdout-parsing form no longer
+exists.
 
 **Python scripts crash with `ModuleNotFoundError`**
 Run as `conda run -n bbrsim python scripts/<name>.py`, not `python3 scripts/<name>.py`.
