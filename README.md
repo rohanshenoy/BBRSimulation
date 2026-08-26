@@ -27,18 +27,12 @@ debugged after the fact.
 Core physics is operational and validated. The HFSS diffraction path, the Cu
 reflectance model, the Planck thermal emitter, and the ROOT output/analysis
 layer are implemented and tested. The loss-tangent dielectrics (Cirlex, Si, Ge)
-are implemented but not yet placed in any geometry. CAD-accurate geometry
-import exists on the `light-pipe-example` branch only.
+are implemented but not yet placed in any geometry.
 
-**Read status claims by branch:**
-
-| Branch | Adds |
-|---|---|
-| `main` | Core simulation: HFSS diffraction, Cu Drude reflectance, Planck emitter, ROOT output + `analysis/bbrsim`, Cirlex/Si/Ge dielectric getters |
-| `fix/core-hardening` | Navigator relocation after non-local HFSS transmission; mutex-protected crack/HFSS dataset cache |
-| `light-pipe-example` | `BBRLightPipe` executable, parametric + CAD (`.STL`) light-pipe geometry, CADMesh header, plus the `fix/core-hardening` fixes |
-
-CAD/STL import is **not** available on `main`.
+As of 2026-08-12 the `fix/core-hardening` and `light-pipe-example` branches are
+**merged into `main`**, so everything below ships from a single branch: the core
+simulation, the navigator/cache hardening, and the `BBRLightPipe` executable
+with CAD (`.STL`) import.
 
 ### Recent correctness hardening
 
@@ -49,27 +43,13 @@ CAD/STL import is **not** available on `main`.
   and lookup, making concurrent worker access safe in multithreaded runs. It is
   shared mutable state with synchronized lazy initialization, not an immutable
   singleton.
-- On `light-pipe-example` only: CADMesh's optional reverse-coordinate flag is
-  explicitly initialized, so CAD light-pipe construction does not depend on
-  indeterminate state.
+- CADMesh's optional reverse-coordinate flag is explicitly initialized, so CAD
+  light-pipe construction does not depend on indeterminate state.
 
 These changes were smoke-tested with a 10,000-event fixed-gun run using 15
 workers; no geometry-navigation warnings, boundary-process errors, or stuck
 tracks were observed. There is no registered `ctest` suite — correctness is
 checked by the `scripts/check_*.py` PASS/FAIL validators.
-
-### Recent correctness hardening
-
-- HFSS diffraction now relocates Geant4's navigator to a point just inside the
-  crack before applying a non-local exit state. This prevents stale safety and
-  touchable state after the in-volume transport shortcut.
-- The shared crack/HFSS dataset cache is protected during lazy initialization
-  and lookup, making concurrent worker access safe in multithreaded runs.
-- CADMesh's optional reverse-coordinate flag is explicitly initialized, so CAD
-  light-pipe construction does not depend on indeterminate state.
-
-These changes were smoke-tested with a 10,000-event fixed-gun run using 15
-workers; no geometry-navigation warnings or stuck tracks were observed.
 
 ### Working
 
@@ -112,8 +92,6 @@ workers; no geometry-navigation warnings or stuck tracks were observed.
 
 ### Not yet implemented
 
-- CADMesh / SOLIDWORKS `.STL` import **on `main`** (implemented on
-  `light-pipe-example`; see *Light-pipe geometry* below)
 - Patched `G4OpBoundaryProcess` with `REFLECTIVITY` on `G4MaterialPropertiesTable`
   (upstream Geant4 PR target — BBRsim currently *wraps* the stock process rather
   than patching it)
@@ -259,17 +237,15 @@ when touching the wrapper, run the smoke tests (`reflectance.mac`,
 
 Requires a Geant4 build with UI and visualization drivers enabled.
 
-## Light-pipe geometry (branch `light-pipe-example`)
+## Light-pipe geometry
 
 A second executable, `BBRLightPipe`, models a 4 K → mixing-chamber light pipe.
-It is **not on `main`** — check out `light-pipe-example` to build it. It shares
-the physics list, materials, emitter, and ROOT output with `BBRSim`; only the
-detector construction differs.
+It shares the physics list, materials, emitter, and ROOT output with `BBRSim`;
+only the detector construction differs. Both executables are built by the
+standard build above.
 
 ```bash
-git checkout light-pipe-example
-cd build && cmake -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ .. && make
-./BBRLightPipe lightpipe.mac
+cd build && ./BBRLightPipe lightpipe.mac
 ```
 
 Two build modes, selected by `/bbr/lightpipe/mode`:
