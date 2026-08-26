@@ -2,12 +2,15 @@
 
 #include "BBRCrackLibrary.hh"
 #include "G4AffineTransform.hh"
+#include "G4Exception.hh"
 #include "G4GeometryTolerance.hh"
 #include "G4NavigationHistory.hh"
 #include "G4PhysicalConstants.hh"
+#include "G4SafetyHelper.hh"
 #include "G4Step.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4Track.hh"
+#include "G4TransportationManager.hh"
 #include "G4VSolid.hh"
 #include "Randomize.hh"
 
@@ -162,9 +165,36 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
         E_theta, E_phi, iwavePhi_deg, iwaveTheta_deg,
         exitCenter, theta_f, phi_f);
 
+    // The HFSS model is non-local: it samples the state at the far face of
+    // the crack. Keep the track just inside that same crack volume and update
+    // Geant4's navigator before proposing the displacement. The following
+    // transportation step will then cross crack -> World normally and update
+    // the track touchable/material state. Placing the track directly outside
+    // would leave the ordinary G4ParticleChange touchable inconsistent.
+    const G4double surfaceTolerance =
+        G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
+    const G4double inset = 10. * surfaceTolerance;
+    if (halfLen <= inset) {
+      G4Exception("BBSimOpBoundaryProcess::HandleDiffractionBoundary",
+                  "BBR004", FatalException,
+                  "Crack half-length is too small for the navigation inset.");
+    }
+
+    const G4ThreeVector pos_inside = pos_out - inset * normal_hat;
+    const G4ThreeVector local_inside = xf.TransformPoint(pos_inside);
+    if (touch->GetSolid()->Inside(local_inside) != kInside) {
+      G4Exception("BBSimOpBoundaryProcess::HandleDiffractionBoundary",
+                  "BBR005", FatalException,
+                  "HFSS exit sample is not inside the crack volume.");
+    }
+
+    auto* safetyHelper =
+        G4TransportationManager::GetTransportationManager()->GetSafetyHelper();
+    safetyHelper->Locate(pos_inside, dir_out);
+
     fParticleChange.ProposeMomentumDirection(dir_out);
     fParticleChange.ProposePolarization(pol_out);
-    fParticleChange.ProposePosition(pos_out);
+    fParticleChange.ProposePosition(pos_inside);
     fParticleChange.ProposeTrackStatus(fAlive);
   } else {
     fLastBBRStatus = kBBRDiffractionReflect;
