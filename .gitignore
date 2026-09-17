@@ -1,4 +1,5 @@
 build/
+build-*/
 output/
 .DS_Store
 *.root
@@ -9,6 +10,7 @@ GNUmakefile
 History
 docs/
 .worktrees/
+tmp/
 
 # Generated analysis plots
 *_check.png
