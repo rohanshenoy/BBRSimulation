@@ -54,6 +54,7 @@ set(BBRSim_SCRIPTS
     verify_config_mt.mac
     lightpipe.mac
     crack_wall.mac
+    crack_transmit.mac
     )
 
 foreach(_script ${BBRSim_SCRIPTS})

@@ -27,6 +27,13 @@ std::vector<std::string> SplitCSV(const std::string& line)
 // Stable floating-point map key: round to nearest 0.01 degree.
 G4double RoundDeg(G4double d) { return std::round(d * 100.) / 100.; }
 
+// Far-field grid directions whose component along the exit-face normal is
+// below this carry no flux through the face and are never sampled. The HFSS
+// Phi sweep runs -90.0 .. +89.67 deg, so Phi = -90 (a direction lying IN the
+// face plane, cos = 6e-17) is on the grid; sampling it left a transmitted
+// photon skating along the exit face into the crack wall.
+constexpr G4double kMinNormalComponent = 1e-6;
+
 std::pair<G4double, G4double> MakeKey(G4double phi, G4double theta)
 {
   return {RoundDeg(phi), RoundDeg(theta)};
@@ -48,6 +55,21 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& datasetId)
   if (fData.empty())
     G4Exception("BBRHFSSData", "BBR000", FatalException,
                 "No angle datasets loaded — check dataDir path.");
+
+  // Both CSVs use fData[key] (inserting) while loading, so an incidence key
+  // present in one file but not the other leaves an empty table that the
+  // samplers would index out of bounds. Refuse such a dataset up front.
+  for (const auto& [key, ds] : fData) {
+    if (ds.farField.empty() || ds.exitPoints.empty()) {
+      G4ExceptionDescription ed;
+      ed << "Dataset " << datasetId << " key (IWavePhi=" << key.first
+         << ", IWaveTheta=" << key.second << ") has " << ds.farField.size()
+         << " far-field rows and " << ds.exitPoints.size()
+         << " exit-point rows; far_field.csv and waveguide.csv must share the "
+            "same incidence keys.";
+      G4Exception("BBRHFSSData", "BBR007", FatalException, ed);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +168,18 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag)
     // Transmittance is constant per (IWavePhi, IWaveTheta): read from first row.
     if (!tSet[key]) {
       G4double T = (inPow > 0.) ? outPow / inPow : 0.;
+      // HFSS port normalization can report OutgoingPower/IngoingPower slightly
+      // above 1 (1.0545 for the 52 um gap at normal incidence). A per-
+      // polarization transmittance cannot exceed 1, so renormalize here at
+      // load time. Clamping only the polarization-weighted result (the old
+      // behaviour) left the unpolarized mean about 2 points above the exact
+      // 50% of a sub-cutoff parallel-plate gap.
+      if (T > 1.) {
+        G4cout << "[BBR] HFSS " << path << " key (" << iwPhi << ", " << iwThe
+               << "): raw T = " << T
+               << " > 1 (port-normalization artefact), capped to 1" << G4endl;
+        T = 1.;
+      }
       if (ephi_flag == 0) ds.T_Ephi0 = T;
       else                ds.T_Ephi1 = T;
       tSet[key] = true;
@@ -216,13 +250,17 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
   const std::size_t N = ff.size();
 
   // Runtime CDF: combined power |E_theta·F₀ + E_phi·F₁|² per far-field point,
-  // weighted by sinT to account for solid angle dΩ = sinT·dT·dPhi.
-  // that all map to the same physical direction.
+  // weighted by sinT to account for solid angle dΩ = sinT·dT·dPhi (this also
+  // zeroes the Theta = 0 / 180 rows, which all map to the same direction).
+  // Directions lying in the exit-face plane (normal component below
+  // kMinNormalComponent) get zero weight: see the constant's comment.
   std::vector<G4double> cdf(N);
   G4double sum = 0.;
   for (std::size_t i = 0; i < N; ++i) {
     const auto& fp = ff[i];
     G4double sinT   = std::sin(fp.theta_deg * CLHEP::pi / 180.);
+    G4double cosN   = sinT * std::cos(fp.phi_deg * CLHEP::pi / 180.);
+    if (cosN < kMinNormalComponent) { cdf[i] = sum; continue; }
     G4double Eth_re = E_theta*fp.rEtheta_re_0 + E_phi*fp.rEtheta_re_1;
     G4double Eth_im = E_theta*fp.rEtheta_im_0 + E_phi*fp.rEtheta_im_1;
     G4double Eph_re = E_theta*fp.rEphi_re_0   + E_phi*fp.rEphi_re_1;
