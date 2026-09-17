@@ -235,27 +235,35 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
   // exactly as stock G4OpBoundaryProcess does (theGlobalNormal). It points out
   // of the exited volume into mat2; flip it to oppose k (back into the vacuum).
   //
-  // Do NOT derive it from the entered solid's SurfaceNormal(): when the entered
-  // volume is the MOTHER of the exited one (a photon inside a vacuum_wg crack
-  // striking the crack's side wall and entering the Cu slab), the hit point is
-  // interior to the slab box and G4Box::SurfaceNormal silently returns the
-  // nearest slab face (x) instead of the wall normal (z). The photon was then
-  // reflected about the wrong axis and continued through solid copper.
+  // Do NOT derive it from the entered solid's SurfaceNormal() in general: when
+  // the entered volume is the MOTHER of the exited one (a photon inside a
+  // vacuum_wg crack striking the crack's side wall and entering the Cu slab),
+  // the hit point is interior to the slab box and G4Box::SurfaceNormal
+  // silently returns the nearest slab face (x) instead of the wall normal (z).
+  // The photon was then reflected about the wrong axis and continued through
+  // solid copper. The entered solid's normal is kept only as a fallback for
+  // the rare case where the navigator cannot provide one; that fallback is
+  // correct whenever the entered solid's surface IS the boundary (the usual
+  // vacuum -> metal hit), so it is reported as a warning, not a fatal error.
+  const G4ThreeVector hitPos = aStep.GetPostStepPoint()->GetPosition();
   G4bool validNormal = false;
   const G4int hNavId = G4ParallelWorldProcess::GetHypNavigatorID();
   auto iNav = G4TransportationManager::GetTransportationManager()
                   ->GetActiveNavigatorsIterator();
-  G4ThreeVector nhat = (iNav[hNavId])->GetGlobalExitNormal(
-      aStep.GetPostStepPoint()->GetPosition(), &validNormal);
+  G4ThreeVector nhat = (iNav[hNavId])->GetGlobalExitNormal(hitPos, &validNormal);
   if (!validNormal) {
+    const G4VTouchable*      postTouch = aStep.GetPostStepPoint()->GetTouchable();
+    const G4AffineTransform& postXF   = postTouch->GetHistory()->GetTopTransform();
+    const G4ThreeVector      posLocal = postXF.TransformPoint(hitPos);
+    nhat = postXF.InverseTransformAxis(postTouch->GetSolid()->SurfaceNormal(posLocal));
     G4ExceptionDescription ed;
-    ed << "Navigator returned no valid exit normal at "
-       << aStep.GetPostStepPoint()->GetPosition() / mm << " mm ("
+    ed << "Navigator returned no valid exit normal at " << hitPos / mm << " mm ("
        << aStep.GetPreStepPoint()->GetPhysicalVolume()->GetName() << " -> "
-       << aStep.GetPostStepPoint()->GetPhysicalVolume()->GetName() << ").";
+       << aStep.GetPostStepPoint()->GetPhysicalVolume()->GetName()
+       << "); falling back to the entered solid's SurfaceNormal(), which is "
+          "wrong if the photon is leaving a daughter volume into this one.";
     G4Exception("BBSimOpBoundaryProcess::HandleReflectanceBoundary", "BBR006",
-                EventMustBeAborted, ed);
-    return &fParticleChange;
+                JustWarning, ed);
   }
   if (nhat.dot(aTrack.GetMomentumDirection()) > 0.) nhat = -nhat;
 
