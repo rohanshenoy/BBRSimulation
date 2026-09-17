@@ -63,7 +63,10 @@ with CAD (`.STL`) import.
 These changes were smoke-tested with a 10,000-event fixed-gun run using 15
 workers; no geometry-navigation warnings, boundary-process errors, or stuck
 tracks were observed. There is no registered `ctest` suite — correctness is
-checked by the `scripts/check_*.py` PASS/FAIL validators.
+checked by the `scripts/check_*.py` PASS/FAIL validators, and
+`scripts/run_regression.sh [build-dir]` builds, runs the six regression macros
+and executes every validator in one command (exit code = unexpected
+failures; known reds are listed as XFAIL inside the script).
 
 ### Working
 

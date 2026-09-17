@@ -377,6 +377,7 @@ self-tested by `check_physics.py`.
 | `check_no_photons_in_metal.py` | Invariant: no crossing starts inside a Cu / perfect-metal material | positional path |
 | `check_term_status.py` | Invariant: no `unknown`; world exits are `WorldExit`; absorptions have a volume; BBRAbsorb counts match | positional path |
 | `check_crack_transmittance.py` | crack_transmit.mac: T_obs = 0.50 ± 3σ, no tangential exits | positional path |
+| `run_regression.sh` | Build + six regression macros (parallel, under `<build>/regression/`) + every validator, one PASS/FAIL line each; exit code = unexpected failures, known reds reported as XFAIL | positional build dir (default `build`) |
 | `check_planck_spectrum.py` | Validate emitted spectrum against Planck photon-number peak | positional path, `--temp <K>` |
 | `check_nreflect.py` | Per-track reflection-count distribution sanity checks | — |
 | `check_angle_distribution.py` | KS test of Cu incidence angles | — |
