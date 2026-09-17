@@ -53,6 +53,7 @@ set(BBRSim_SCRIPTS
     planck.mac
     verify_config_mt.mac
     lightpipe.mac
+    crack_wall.mac
     )
 
 foreach(_script ${BBRSim_SCRIPTS})

@@ -1,0 +1,23 @@
+# crack_wall.mac — regression for the reflection normal on daughter->mother
+# crossings. 1000 photons start INSIDE crack1 (x = 2 mm, mid-slab) heading
+# mostly +z, so each strikes the crack's z-wall (Cu) ~380 times before leaving
+# through the x = 4 mm face. Correct behaviour: specular reflection about z
+# (pz flips sign), the photon never enters the copper.
+#
+# Validate:
+#   conda run -n bbrsim python scripts/check_crack_wall_reflection.py build/output/bbr.root
+#   conda run -n bbrsim python scripts/check_no_photons_in_metal.py    build/output/bbr.root
+#   conda run -n bbrsim python scripts/check_term_status.py            build/output/bbr.root
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/random/setSeeds 4242 17
+/run/initialize
+/bbr/gun/mode true
+/bbr/gun/posX 2.0
+/bbr/gun/posY 0.0
+/bbr/gun/posZ 0.0
+/bbr/gun/dirX 0.1
+/bbr/gun/dirY 0.0
+/bbr/gun/dirZ 0.995
+/run/beamOn 1000

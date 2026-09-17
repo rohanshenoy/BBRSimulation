@@ -5,6 +5,8 @@
 #include "G4Exception.hh"
 #include "G4GeometryTolerance.hh"
 #include "G4NavigationHistory.hh"
+#include "G4Navigator.hh"
+#include "G4ParallelWorldProcess.hh"
 #include "G4PhysicalConstants.hh"
 #include "G4SafetyHelper.hh"
 #include "G4Step.hh"
@@ -20,9 +22,10 @@ BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
   : G4WrapperProcess(name)
 {}
 
-// PostStepDoIt — intercept TEM_waveguide volumes; fall through otherwise.
-// The pass-through path preserves bit-identical output for all other geometry
-// (verify.mac regression must still pass).
+// PostStepDoIt — intercept steps that ENTER a vacuum_wg crack volume (HFSS
+// diffraction) or a material carrying a REFLECTIVITY table (tabulated
+// reflectance); fall through to the stock process otherwise. Geometries with
+// neither are handled identically to stock G4OpBoundaryProcess.
 //
 // The wrapped G4OpBoundaryProcess is Forced, so this runs on EVERY step of
 // every optical photon. Mirror the stock process's own entry guards before
@@ -228,14 +231,32 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
   G4double E = aTrack.GetKineticEnergy();   // YYC: thePhotonMomentum
   G4double R = rvec->Value(E);              // YYC: PropertyPointer->Value(thePhotonMomentum)
 
-  // Surface normal pointing away from mat2 back into the vacuum (opposes k).
-  // YYC: theGlobalNormal (computed internally by G4OpBoundaryProcess).
-  const G4VTouchable*      postTouch = aStep.GetPostStepPoint()->GetTouchable();
-  const G4AffineTransform& postXF   = postTouch->GetHistory()->GetTopTransform();
-  G4ThreeVector posLocal  = postXF.TransformPoint(
-                                aStep.GetPostStepPoint()->GetPosition());
-  G4ThreeVector normLocal = postTouch->GetSolid()->SurfaceNormal(posLocal);
-  G4ThreeVector nhat      = postXF.InverseTransformAxis(normLocal);
+  // Surface normal of the boundary just crossed, taken from the navigator
+  // exactly as stock G4OpBoundaryProcess does (theGlobalNormal). It points out
+  // of the exited volume into mat2; flip it to oppose k (back into the vacuum).
+  //
+  // Do NOT derive it from the entered solid's SurfaceNormal(): when the entered
+  // volume is the MOTHER of the exited one (a photon inside a vacuum_wg crack
+  // striking the crack's side wall and entering the Cu slab), the hit point is
+  // interior to the slab box and G4Box::SurfaceNormal silently returns the
+  // nearest slab face (x) instead of the wall normal (z). The photon was then
+  // reflected about the wrong axis and continued through solid copper.
+  G4bool validNormal = false;
+  const G4int hNavId = G4ParallelWorldProcess::GetHypNavigatorID();
+  auto iNav = G4TransportationManager::GetTransportationManager()
+                  ->GetActiveNavigatorsIterator();
+  G4ThreeVector nhat = (iNav[hNavId])->GetGlobalExitNormal(
+      aStep.GetPostStepPoint()->GetPosition(), &validNormal);
+  if (!validNormal) {
+    G4ExceptionDescription ed;
+    ed << "Navigator returned no valid exit normal at "
+       << aStep.GetPostStepPoint()->GetPosition() / mm << " mm ("
+       << aStep.GetPreStepPoint()->GetPhysicalVolume()->GetName() << " -> "
+       << aStep.GetPostStepPoint()->GetPhysicalVolume()->GetName() << ").";
+    G4Exception("BBSimOpBoundaryProcess::HandleReflectanceBoundary", "BBR006",
+                EventMustBeAborted, ed);
+    return &fParticleChange;
+  }
   if (nhat.dot(aTrack.GetMomentumDirection()) > 0.) nhat = -nhat;
 
   ++fNReflectance;
