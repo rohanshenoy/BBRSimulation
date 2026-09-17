@@ -1,0 +1,31 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "clang-release",
+      "displayName": "Apple Clang, Release (default)",
+      "description": "The only supported configuration on macOS: the Geant4 install is built with Apple Clang (libc++); Homebrew GCC (libstdc++) compiles but fails to link.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "clang-debug",
+      "displayName": "Apple Clang, Debug (separate build-debug/)",
+      "inherits": "clang-release",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "clang-release", "configurePreset": "clang-release", "jobs": 8 },
+    { "name": "clang-debug",   "configurePreset": "clang-debug",   "jobs": 8 }
+  ]
+}

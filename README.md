@@ -137,10 +137,16 @@ a C++17 compiler. Python scripts require the `bbrsim` conda environment
 (NumPy, SciPy, Matplotlib, Pandas).
 
 ```bash
-mkdir build && cd build
-cmake -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ ..
-make
+cmake --preset clang-release          # Apple Clang, Release, binaryDir build/
+cmake --build --preset clang-release
 ```
+
+`CMakePresets.json` pins `/usr/bin/clang`/`clang++` and `Release`; IDE CMake
+integrations (VSCode CMake Tools) pick the preset up automatically instead of
+offering their own compiler kits. The manual equivalent is
+`cmake -S . -B build -DCMAKE_C_COMPILER=/usr/bin/clang
+-DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Release`; a
+`clang-debug` preset builds into `build-debug/`.
 
 On macOS, configure with Apple Clang explicitly as shown. A bare `cmake ..` can
 pick up Homebrew GCC (libstdc++), which compiles but fails at link against a
