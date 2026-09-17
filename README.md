@@ -22,7 +22,7 @@ wave propagation through gaps via pre-computed HFSS S-parameters — on the same
 event-by-event footing, so BBR backgrounds can be simulated rather than
 debugged after the fact.
 
-## Status (August 2026)
+## Status (September 2026)
 
 Core physics is operational and validated. The HFSS diffraction path, the Cu
 reflectance model, the Planck thermal emitter, and the ROOT output/analysis
@@ -45,6 +45,20 @@ with CAD (`.STL`) import.
   singleton.
 - CADMesh's optional reverse-coordinate flag is explicitly initialized, so CAD
   light-pipe construction does not depend on indeterminate state.
+- (September 2026 audit) The tabulated-reflectance handler now takes the
+  reflecting normal from the navigator's exit normal, as stock Geant4 does. It
+  previously used the entered solid's `SurfaceNormal()`, which for a photon
+  leaving a crack through its side wall into the Cu slab returned the slab's
+  x-face and sent the photon through solid copper (`crack_wall.mac`).
+- `abspoints.term_status` is now `WorldExit` for photons killed at the world
+  boundary; it used to echo the boundary process's stale per-thread status,
+  including `BBRAbsorb` for photons that were never absorbed (`world_exit.mac`).
+- The Planck emitter box is configurable (`/bbr/thermal/emitterCenter`,
+  `/bbr/thermal/emitterSize`); `lightpipe.mac` sizes it to the bore, so photons
+  are no longer created inside the light-pipe wall.
+- Raw HFSS power ratios above 1 are capped at load time and exit-face-plane
+  far-field directions get zero sampling weight; crack transmittance at normal
+  incidence is 50.0% / 50.3% against the 50% ideal (`crack_transmit.mac`).
 
 These changes were smoke-tested with a 10,000-event fixed-gun run using 15
 workers; no geometry-navigation warnings, boundary-process errors, or stuck
@@ -56,9 +70,12 @@ checked by the `scripts/check_*.py` PASS/FAIL validators.
 - **HFSS diffraction** — `BBRHFSSData` loads far-field + waveguide CSVs; `BBRCrackLibrary`
   lazy-loads datasets by volume name; `BBSimOpBoundaryProcess` intercepts photons entering
   `vacuum_wg` crack volumes and routes them through the HFSS lookup.
-  Validated at 500 GHz normal incidence: observed transmittance 51.9% (50 µm
-  gap) / 50.5% (100 µm gap), consistent with the 50% unpolarized ideal — only
-  the TEM component transmits through a sub-cutoff gap.
+  Validated at 500 GHz normal incidence: observed transmittance
+  50.0 ± 0.25% (52 µm gap) / 50.3 ± 0.25% (102 µm gap) over 40k photons each,
+  against the exact 50% unpolarized ideal — only the TEM component transmits
+  through a sub-cutoff gap. Raw HFSS power ratios above 1 (a port-normalization
+  artefact, 1.0545 for the 52 µm gap) are capped at 1 when the tables load;
+  before that cap the observed values were 51.9% / 50.5%.
 
 - **Cu reflectance** — Full complex Drude model (σ(ω) = σ_DC/(1−iωτ) in
   ε̃ = 1 + iσ/(ε₀ω); Griffiths §9.4 generalized) parameterized by RRR and
@@ -154,8 +171,9 @@ The executable is `BBRSim` (not `OpNovice2`). All commands below run from the
 ```
 
 Photons entering the `vacuum_wg` cracks are routed through the HFSS lookup;
-expected transmittance at 500 GHz normal incidence is ≈ 50% per crack (the
-unpolarized TEM-only ideal; observed 51.9% / 50.5%). Output is a ROOT file
+expected transmittance at 500 GHz normal incidence is 50% per crack (the
+unpolarized TEM-only ideal; observed 50.0% / 50.3%, see `crack_transmit.mac`
+and `check_crack_transmittance.py`). Output is a ROOT file
 `output/bbr.root` — two ntuples, `crossings` (one row per optical-photon
 boundary crossing) and `abspoints` (one row per photon termination) — plus a
 `output/bbr_legend.json` sidecar that maps the integer code columns
@@ -228,6 +246,16 @@ boundary optics, not the unbuilt OpNovice2 example — is open work. Until then,
 when touching the wrapper, run the smoke tests (`reflectance.mac`,
 `planck.mac`) and their `check_*` scripts before merging.
 
+Three fixed-gun regression macros cover the wrapper's own physics:
+`crack_wall.mac` (a photon inside a crack striking its Cu wall must reflect
+about the wall normal and never enter the copper), `world_exit.mac` (photons
+leaving the world are labelled `WorldExit` in `abspoints`), and
+`crack_transmit.mac` (40k photons at normal incidence into crack1 must transmit
+50% and never leave tangentially). Validate with
+`check_crack_wall_reflection.py`, `check_no_photons_in_metal.py`,
+`check_term_status.py` and `check_crack_transmittance.py`; the first two
+invariant checks are meaningful on any output.
+
 ### Interactive (UI + visualization)
 
 ```bash
@@ -246,6 +274,13 @@ standard build above.
 ```bash
 cd build && ./BBRLightPipe lightpipe.mac
 ```
+
+`lightpipe.mac` places the shared Planck emitter just upstream of the warm
+aperture and inside the 5 mm bore (`/bbr/thermal/emitterCenter -51 0 0 mm`,
+`/bbr/thermal/emitterSize 1 7 7 mm`). With the `BBRSim` default emitter (a
+1×20×20 mm patch centred at x = −50 mm) the emitting face sits inside the tube
+wall and photons are created in the copper; `BuildParametric` warns (`LP002`)
+if the configured emitter reaches into the wall.
 
 Two build modes, selected by `/bbr/lightpipe/mode`:
 

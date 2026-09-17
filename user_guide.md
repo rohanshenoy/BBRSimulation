@@ -105,14 +105,18 @@ observed transmittance. At 500 GHz normal incidence:
 
 | Crack | Gap | Observed T |
 |---|---|---|
-| crack1 | 52 µm | 51.9% |
-| crack2 | 102 µm | 50.5% |
+| crack1 | 52 µm | 50.0 ± 0.25% |
+| crack2 | 102 µm | 50.3 ± 0.25% |
 
 The benchmark is **50%**: a parallel-plate gap thinner than λ/2 is a perfect
 polarization filter — only the cutoff-free TEM mode transmits — so an
-unpolarized beam transmits exactly half. Both observations sit within about a
-point of that ideal. (An older "52.7%" figure appears in archived plans; it was
-contaminated by an HFSS normalization artifact and should not be quoted.)
+unpolarized beam transmits exactly half. Both observations (40k photons each;
+`crack_transmit.mac` + `check_crack_transmittance.py`) are consistent with that
+ideal. Raw HFSS power ratios above 1 — a port-normalization artefact, 1.0545
+for crack1 — are capped at 1 when the tables load (a `[BBR] HFSS ... capped to
+1` line is printed). Before that cap the observed values were 51.9% / 50.5%,
+and an older "52.7%" figure in archived plans carried the same artefact; do not
+quote either.
 
 > **Scope limit — single HFSS frequency.** The only HFSS dataset per crack is at
 > 500 GHz, and `BBRHFSSData` is not keyed by frequency. Planck-mode runs span
@@ -252,7 +256,7 @@ threads:
 |---|---|---|---|
 | `/bbr/det/` | `PreInit` **only** | No | Geometry is built on the master in `Construct()`; issue before `/run/initialize` |
 | `/bbr/gun/` | `PreInit` and `Idle` | Yes | Read fresh each event |
-| `/bbr/thermal/` | `PreInit` and `Idle` | Yes | Planck CDF re-initializes on the next event |
+| `/bbr/thermal/` | `PreInit` and `Idle` | Yes | Planck CDF / emitter box rebuilt on the next event |
 | `/bbr/config/print` | `PreInit` and `Idle` | — | Dumps all current settings |
 
 `BBRConfigManager::Instance()` is a thread-local clone: the master builds from
@@ -269,10 +273,21 @@ value after `/run/initialize` requires a new session.
 ## Planck emitter configuration
 
 ```mac
-/bbr/thermal/setT 10.0     # emitter temperature [K], default 4.0
+/bbr/thermal/setT 10.0                    # emitter temperature [K], default 4.0
+/bbr/thermal/emitterCenter -50 0 0 mm     # emitter box centre, world frame (default)
+/bbr/thermal/emitterSize   1 20 20 mm     # emitter box FULL extents Wx Wy Wz (default)
 /run/initialize
 /run/beamOn 10000
 ```
+
+The emitter is a box radiating outward from all six faces; its centre and
+extents are read from `BBRConfigManager` and the box is rebuilt on the next
+event when either changes. The defaults suit the `BBRSim` test world (a patch
+50 mm in front of the Cu slab). Other geometries must size it themselves — the
+light pipe uses `-51 0 0 mm` / `1 7 7 mm` so the emitting face sits 0.5 mm
+upstream of the aperture with its corners inside the 5 mm bore (see
+`lightpipe.mac`); the default box would put the emitting face inside the tube
+wall.
 
 Photon energies are drawn from the Planck **photon-number** spectrum
 ∝ ν²/(e^{hν/kT}−1) over a fixed 10 GHz–20 THz range — the correct weighting for
@@ -317,7 +332,7 @@ event and are valid both before and after `/run/initialize`.
 
 | File | Written by | Contents |
 |---|---|---|
-| `output/bbr.root` | `BBRRunAction` / `BBRTestSteppingAction` (via `G4AnalysisManager`) | Two ntuples. **`crossings`** — one row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volume/material/status/event-type codes, per-track crossing count. **`abspoints`** — one row per photon termination (`fStopAndKill`): position, energy, final momentum, n_reflect, terminating volume + status codes. Categorical fields are integer codes; runs are multithreaded and the per-thread ntuples are merged into this one file. |
+| `output/bbr.root` | `BBRRunAction` / `BBRTestSteppingAction` (via `G4AnalysisManager`) | Two ntuples. **`crossings`** — one row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volume/material/status/event-type codes, per-track crossing count. **`abspoints`** — one row per photon termination (`fStopAndKill`): position, energy, final momentum, n_reflect, terminating volume + status codes. `term_status` is `WorldExit` for a photon that left the world, `BulkAbsorption` for a `G4OpAbsorption` kill, otherwise the boundary status of the killing step (e.g. `BBRAbsorb`). Categorical fields are integer codes; runs are multithreaded and the per-thread ntuples are merged into this one file. |
 | `output/bbr_legend.json` | `BBRRunAction` (master thread) | `{category: {code: name}}` dictionary decoding the integer code columns (status / event_type / volume / material). Consumed by `analysis/bbrsim/io.py`. |
 | `bbrsim stdout` | redirect from stdout | `[BBR] reflectance` and `[BBR] diffraction` running tallies |
 | `build/cu_reflectance_plots.png` | `plot_cu_reflectance.py` | 3-panel reflectance / absorptance / temperature-dependence plot |
@@ -351,7 +366,11 @@ self-tested by `check_physics.py`.
 | `check_physics.py` | Self-test of `bbrsim.physics` against C++ anchors | — |
 | `check_reflectance.py` | Poisson test of absorbed count vs full-Drude theory (reflectance.mac) | `--root`, `--RRR`, `--T_K`, `--freq` |
 | `check_cu_absorptance.py` | Compare A_obs from decoded crossings to Planck-weighted Drude theory; PASS/FAIL | positional path, `--rrr`, `--temp` |
-| `check_cu_serov.py` | Verify σ_eff values reproduce Serov (2016) reference points | — |
+| `check_cu_serov.py` | Full-Drude D for the OF_Cu / HP_Cu RRR aliases vs Serov (2016) measured points (±10%). HP_Cu = RRR 6 is currently 13% low — an open decision | — |
+| `check_crack_wall_reflection.py` | crack_wall.mac: crack→Cu wall reflections flip pz, keep px/py | positional path |
+| `check_no_photons_in_metal.py` | Invariant: no crossing starts inside a Cu / perfect-metal material | positional path |
+| `check_term_status.py` | Invariant: no `unknown`; world exits are `WorldExit`; absorptions have a volume; BBRAbsorb counts match | positional path |
+| `check_crack_transmittance.py` | crack_transmit.mac: T_obs = 0.50 ± 3σ, no tangential exits | positional path |
 | `check_planck_spectrum.py` | Validate emitted spectrum against Planck photon-number peak | positional path, `--temp <K>` |
 | `check_nreflect.py` | Per-track reflection-count distribution sanity checks | — |
 | `check_angle_distribution.py` | KS test of Cu incidence angles | — |
