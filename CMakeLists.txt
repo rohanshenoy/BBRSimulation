@@ -55,6 +55,7 @@ set(BBRSim_SCRIPTS
     lightpipe.mac
     crack_wall.mac
     crack_transmit.mac
+    world_exit.mac
     )
 
 foreach(_script ${BBRSim_SCRIPTS})

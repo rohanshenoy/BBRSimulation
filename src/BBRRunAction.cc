@@ -27,14 +27,16 @@ constexpr G4int kNoneCode = -1;
 constexpr G4int kUnknownCode = -2;
 
 // Stock + BBR-wrapper boundary statuses, in a fixed order so their codes are
-// stable across builds. Keep in sync with BBRTestSteppingAction::StatusStr and
-// BBSimOpBoundaryProcess status strings.
+// stable across builds (new names are appended, never inserted). Keep in sync
+// with BBRTestSteppingAction::StatusStr / TerminationStatus and the
+// BBSimOpBoundaryProcess status strings. "WorldExit" and "BulkAbsorption" are
+// termination-only labels (abspoints.term_status).
 const std::vector<G4String> kStatuses = {
     "FresnelRefraction", "FresnelReflection", "TIR", "LambertianReflection",
     "LobeReflection", "SpikeReflection", "BackScattering", "Absorption",
     "Detection", "NotAtBoundary", "SameMaterial", "StepTooSmall", "NoRINDEX",
     "Other", "BBRDiffractionTransmit", "BBRDiffractionReflect", "BBRReflect",
-    "BBRAbsorb", "unknown"};
+    "BBRAbsorb", "unknown", "WorldExit", "BulkAbsorption"};
 }  // namespace
 
 BBRRunAction::BBRRunAction() : G4UserRunAction() {
@@ -196,6 +198,9 @@ G4int BBRRunAction::EventTypeForStatus(const G4String& s) {
       s == "LobeReflection" || s == "LambertianReflection" ||
       s == "BackScattering" || s == "BBRDiffractionReflect" || s == "BBRReflect")
     return 1;
-  if (s == "Absorption" || s == "Detection" || s == "BBRAbsorb") return 2;
-  return 3;  // NotAtBoundary, SameMaterial, StepTooSmall, NoRINDEX, Other, unknown
+  if (s == "Absorption" || s == "Detection" || s == "BBRAbsorb" ||
+      s == "BulkAbsorption")
+    return 2;
+  return 3;  // NotAtBoundary, SameMaterial, StepTooSmall, NoRINDEX, Other,
+             // unknown, WorldExit
 }

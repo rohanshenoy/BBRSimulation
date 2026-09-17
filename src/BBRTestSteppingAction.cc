@@ -47,6 +47,27 @@ G4String ResolveStatus(BBSimOpBoundaryProcess* wrapper,
   if (boundary) return StatusStr(boundary->GetStatus());
   return "unknown";
 }
+
+// Status of the step that killed the photon. On a world-exit step Geant4
+// kills the track inside G4Transportation and does NOT invoke the remaining
+// PostStep processes, so the boundary process's status is stale (left over
+// from an earlier step, or from an earlier track on this thread) and must not
+// be read. Only on a geometry-boundary step did the boundary process run in
+// this very step.
+G4String TerminationStatus(const G4Step* step,
+                           BBSimOpBoundaryProcess* wrapper,
+                           G4OpBoundaryProcess* boundary) {
+  const G4StepPoint* post = step->GetPostStepPoint();
+  switch (post->GetStepStatus()) {
+    case fWorldBoundary: return "WorldExit";
+    case fGeomBoundary:  return ResolveStatus(wrapper, boundary);
+    default: {
+      const G4VProcess* proc = post->GetProcessDefinedStep();
+      if (proc && proc->GetProcessName() == "OpAbsorption") return "BulkAbsorption";
+      return "Other";
+    }
+  }
+}
 } // namespace
 
 BBRTestSteppingAction::BBRTestSteppingAction(BBRRunAction* runAction)
@@ -75,6 +96,21 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
     fNReflect = 0;
   }
 
+  // Resolve the boundary-process pointers once per thread. This must run
+  // BEFORE the termination block below: a photon that leaves the world without
+  // ever crossing a boundary would otherwise be labelled "unknown".
+  if (!fWrapper) {
+    G4ProcessVector* pv = track->GetDefinition()
+                               ->GetProcessManager()->GetProcessList();
+    for (std::size_t i = 0; i < pv->size(); ++i) {
+      if (auto* w = dynamic_cast<BBSimOpBoundaryProcess*>((*pv)[i])) {
+        fWrapper  = w;
+        fBoundary = w->GetWrappedProcess();
+        break;
+      }
+    }
+  }
+
   // Record a termination point (one row per killed optical photon). n_reflect
   // here is the number of boundary crossings BEFORE the terminating contact.
   if (track->GetTrackStatus() == fStopAndKill) {
@@ -83,7 +119,7 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
     const G4ThreeVector ed = end->GetMomentumDirection();
     const G4String tvol =
         end->GetPhysicalVolume() ? end->GetPhysicalVolume()->GetName() : "none";
-    const G4String tstat = ResolveStatus(fWrapper, fBoundary);
+    const G4String tstat = TerminationStatus(step, fWrapper, fBoundary);
     auto* am = G4AnalysisManager::Instance();
     const auto& a = fRunAction->fAbs;
     const G4int aid = fRunAction->fAbsPointsId;
@@ -110,19 +146,6 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   const G4double kCarTolerance =
       G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
   if (step->GetStepLength() <= kCarTolerance / 2.) return;
-
-  // Lazy-init: find BBSimOpBoundaryProcess wrapper on first boundary step
-  if (!fWrapper) {
-    G4ProcessVector* pv = track->GetDefinition()
-                               ->GetProcessManager()->GetProcessList();
-    for (std::size_t i = 0; i < pv->size(); ++i) {
-      if (auto* w = dynamic_cast<BBSimOpBoundaryProcess*>((*pv)[i])) {
-        fWrapper  = w;
-        fBoundary = w->GetWrappedProcess();
-        break;
-      }
-    }
-  }
 
   const G4StepPoint* pre  = step->GetPreStepPoint();
   const G4StepPoint* post = step->GetPostStepPoint();
