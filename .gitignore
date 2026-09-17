@@ -3,6 +3,8 @@ output/
 .DS_Store
 *.root
 *.out
+# ...but keep the stock OpNovice2 reference outputs (see reference/opnovice2/)
+!reference/opnovice2/macros/*.out
 GNUmakefile
 History
 docs/

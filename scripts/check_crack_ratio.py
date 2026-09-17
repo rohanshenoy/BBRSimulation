@@ -1,8 +1,9 @@
 """
 check_crack_ratio.py
 Compare crack2/crack1 event-rate ratio to the expected geometric aperture ratio.
-Both cracks have the same HFSS transmittance (~52%), so the rate ratio should
-equal the opening-area ratio. PASS if within 3 sigma_Poisson of expected.
+The check counts crack ENTRIES (independent of the HFSS transmittance), so the
+rate ratio should equal the opening-area ratio. PASS if within 3 sigma_Poisson
+of expected.
 
 Usage:
     conda run -n bbrsim python scripts/check_crack_ratio.py [path/to/bbr.root]

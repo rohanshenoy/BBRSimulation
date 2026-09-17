@@ -97,7 +97,7 @@ for ax, qty, ylabel, ylim, yscale in [
     ax.set_xlim(0.1, 1e5)
     ax.set_ylim(*ylim)
     ax.grid(True, which="both", ls=":", alpha=0.4)
-    ax.axvspan(50, 20000, alpha=0.06, color="gray", label="BBRsim range (50 GHz–20 THz)")
+    ax.axvspan(10, 20000, alpha=0.06, color="gray", label="BBRsim range (10 GHz–20 THz)")
 
     # Drude curves — one per RRR alias; this is what BBRMaterials.hh computes
     for label, cfg in materials_drude.items():
@@ -164,7 +164,7 @@ ax_T.set_ylabel("Absorptance  D = 1−R")
 ax_T.set_xlim(0.1, 1e5)
 ax_T.set_ylim(1e-5, 0.1)
 ax_T.grid(True, which="both", ls=":", alpha=0.4)
-ax_T.axvspan(50, 20000, alpha=0.06, color="gray", label="BBRsim range")
+ax_T.axvspan(10, 20000, alpha=0.06, color="gray", label="BBRsim range")
 ax_T.set_title("OFHC Cu (RRR=100) — temperature dependence", fontsize=10)
 
 for T, col in zip(temps, tcolors):
