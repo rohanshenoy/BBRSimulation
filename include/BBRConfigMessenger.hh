@@ -7,6 +7,7 @@ class BBRConfigManager;
 class G4UIcmdWithABool;
 class G4UIcmdWithADouble;
 class G4UIcmdWithADoubleAndUnit;
+class G4UIcmdWith3VectorAndUnit;
 class G4UIcmdWithAString;
 class G4UIcmdWithAnInteger;
 class G4UIcmdWithoutParameter;
@@ -29,6 +30,8 @@ class BBRConfigMessenger : public G4UImessenger {
 
   // thermal + gun (wired in Task 2)
   G4UIcmdWithADouble*        fSetTCmd    = nullptr;
+  G4UIcmdWith3VectorAndUnit* fEmitCenterCmd = nullptr;
+  G4UIcmdWith3VectorAndUnit* fEmitSizeCmd   = nullptr;
   G4UIcmdWithABool*          fGunModeCmd = nullptr;
   G4UIcmdWithADouble*        fGunPosXCmd = nullptr;
   G4UIcmdWithADouble*        fGunPosYCmd = nullptr;

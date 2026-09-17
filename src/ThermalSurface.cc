@@ -35,6 +35,13 @@ void ThermalSurface::AddBoxSurface(G4ThreeVector center,
 G4double ThermalSurface::GetArea()    { return area; }
 G4double ThermalSurface::GetEffArea() { return effArea; }
 
+void ThermalSurface::ClearSurfaces()
+{
+  surfaces.clear();
+  area    = 0.;
+  effArea = 0.;
+}
+
 BBEvt ThermalSurface::GenEvt()
 {
   G4ThreeVector X(1, 0, 0), Y(0, 1, 0), Z(0, 0, 1);

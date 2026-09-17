@@ -15,6 +15,7 @@
 #include "G4ThreeVector.hh"
 #include "G4VSolid.hh"
 #include "CADMesh.hh"
+#include <cmath>
 #include <fstream>
 
 BBRLightPipeDetectorConstruction::BBRLightPipeDetectorConstruction()
@@ -48,15 +49,40 @@ void BBRLightPipeDetectorConstruction::BuildParametric(G4LogicalVolume* worldLV)
                           fLength / 2., 0., CLHEP::twopi);
   auto* tubeLV = new G4LogicalVolume(tube, wall, "logic-LightPipe");
 
-  // Lay the tube axis (local z) along world +x; warm aperture just past the
-  // emitter patch at x = -50 mm so BBRTestPGA illuminates the bore. The tube is
-  // symmetric under z -> -z, so the rotation sign is immaterial.
+  // Lay the tube axis (local z) along world +x with the warm aperture at
+  // x = -50 mm. The tube is symmetric under z -> -z, so the rotation sign is
+  // immaterial.
   auto* rot = new G4RotationMatrix();
   rot->rotateY(90.*deg);
-  const G4double xCenter = -50.*mm + fLength / 2.;
+  const G4double xTubeMin = -50.*mm;
+  const G4double xCenter  = xTubeMin + fLength / 2.;
 
   new G4PVPlacement(rot, G4ThreeVector(xCenter, 0., 0.), tubeLV,
                     "LightPipeWall", worldLV, false, 0, true);
+
+  // BBRLightPipe reuses BBRTestPGA, whose Planck emitter box is set with
+  // /bbr/thermal/emitterCenter and /bbr/thermal/emitterSize. The test-world
+  // default (1x20x20 mm centred at x = -50 mm) overlaps this wall: its
+  // emitting face sits 0.5 mm inside the tube and reaches r = 14 mm, so
+  // primaries would be created inside the copper and pass through it. Warn
+  // when the configured emitter reaches into the wall region.
+  const G4ThreeVector ec = BBRConfigManager::GetEmitterCenter_mm() * mm;
+  const G4ThreeVector es = BBRConfigManager::GetEmitterSize_mm() * mm;
+  const G4double emitterXMax = ec.x() + 0.5 * es.x();
+  const G4double emitterRMax = std::hypot(ec.y(), ec.z())
+                             + std::hypot(0.5 * es.y(), 0.5 * es.z());
+  if (emitterXMax > xTubeMin && emitterRMax > fBore) {
+    G4ExceptionDescription ed;
+    ed << "Planck emitter box (centre " << ec / mm << " mm, extents " << es / mm
+       << " mm) reaches into the light-pipe wall (x >= " << xTubeMin / mm
+       << " mm, r in [" << fBore / mm << ", " << (fBore + fWallThickness) / mm
+       << "] mm): primaries would be created inside copper. Set "
+          "/bbr/thermal/emitterCenter and /bbr/thermal/emitterSize so the "
+          "emitter sits upstream of the aperture and inside the bore "
+          "(see lightpipe.mac).";
+    G4Exception("BBRLightPipeDetectorConstruction::BuildParametric", "LP002",
+                JustWarning, ed);
+  }
 
   G4cout << "[BBR] LightPipe parametric: bore=" << fBore/mm
          << "mm length=" << fLength/mm << "mm wall=" << fWallThickness/mm

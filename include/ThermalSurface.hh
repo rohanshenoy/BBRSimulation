@@ -29,6 +29,11 @@ class ThermalSurface {
   G4double     GetArea();
   G4double     GetEffArea();
 
+  // Remove all emitting surfaces (area totals reset). The Planck CDF and
+  // temperature are untouched, so a caller can re-add surfaces and keep
+  // sampling without re-initializing BBSpecCDF.
+  void ClearSurfaces();
+
   // Returns one BBEvt with energy (raw eV), position, and direction sampled
   // from the box surface. BBSpecCDF must be initialized before calling.
   BBEvt GenEvt();

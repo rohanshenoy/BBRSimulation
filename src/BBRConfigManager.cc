@@ -22,6 +22,8 @@ BBRConfigManager* BBRConfigManager::Instance() {
 
 BBRConfigManager::BBRConfigManager()
   : fThermalT_K(4.0),
+    fEmitterCenter_mm(-50.0, 0.0, 0.0),
+    fEmitterSize_mm(1.0, 20.0, 20.0),
     fGunMode(false),
     fGunPosX_mm(-20.0), fGunPosY_mm(0.0), fGunPosZ_mm(0.0),
     fGunDirX(1.0), fGunDirY(0.0), fGunDirZ(0.0),
@@ -31,6 +33,8 @@ BBRConfigManager::BBRConfigManager()
 
 BBRConfigManager::BBRConfigManager(const BBRConfigManager& master)
   : fThermalT_K(master.fThermalT_K),
+    fEmitterCenter_mm(master.fEmitterCenter_mm),
+    fEmitterSize_mm(master.fEmitterSize_mm),
     fGunMode(master.fGunMode),
     fGunPosX_mm(master.fGunPosX_mm), fGunPosY_mm(master.fGunPosY_mm),
     fGunPosZ_mm(master.fGunPosZ_mm),
@@ -48,6 +52,15 @@ void BBRConfigManager::SetThermalT_K(G4double v) {
     return;
   }
   Instance()->fThermalT_K = v;
+}
+
+void BBRConfigManager::SetEmitterSize_mm(const G4ThreeVector& v) {
+  if (v.x() <= 0. || v.y() <= 0. || v.z() <= 0.) {
+    G4cerr << "[BBR] thermal/emitterSize: all extents must be > 0, got "
+           << v << " mm" << G4endl;
+    return;
+  }
+  Instance()->fEmitterSize_mm = v;
 }
 
 void BBRConfigManager::SetCuRRR(G4int rrr) {
@@ -80,6 +93,8 @@ void BBRConfigManager::SetCuMaterial(const G4String& alias) {
 void BBRConfigManager::printConfig(std::ostream& os) const {
   os << "=== BBRConfigManager settings ===\n"
      << "  /bbr/thermal/setT     " << fThermalT_K   << " K\n"
+     << "  /bbr/thermal/emitterCenter " << fEmitterCenter_mm << " mm\n"
+     << "  /bbr/thermal/emitterSize   " << fEmitterSize_mm   << " mm\n"
      << "  /bbr/gun/mode         " << (fGunMode ? "true" : "false") << "\n"
      << "  /bbr/gun/pos[XYZ]     " << fGunPosX_mm << " " << fGunPosY_mm << " "
                                    << fGunPosZ_mm << " mm\n"

@@ -4,6 +4,8 @@
 #include "G4UIcmdWithABool.hh"
 #include "G4UIcmdWithADouble.hh"
 #include "G4UIcmdWithADoubleAndUnit.hh"
+#include "G4UIcmdWith3VectorAndUnit.hh"
+#include "G4SystemOfUnits.hh"
 #include "G4UIcmdWithAString.hh"
 #include "G4UIcmdWithAnInteger.hh"
 #include "G4UIcmdWithoutParameter.hh"
@@ -19,6 +21,22 @@ BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager* mgr)
   fSetTCmd->SetGuidance("Planck emitter temperature [K].");
   fSetTCmd->SetParameterName("T", false);
   fSetTCmd->AvailableForStates(G4State_PreInit, G4State_Idle);
+
+  fEmitCenterCmd = new G4UIcmdWith3VectorAndUnit("/bbr/thermal/emitterCenter", this);
+  fEmitCenterCmd->SetGuidance("Planck emitter box centre in the world frame "
+                              "(default -50 0 0 mm).");
+  fEmitCenterCmd->SetParameterName("x", "y", "z", false);
+  fEmitCenterCmd->SetUnitCategory("Length");
+  fEmitCenterCmd->SetDefaultUnit("mm");
+  fEmitCenterCmd->AvailableForStates(G4State_PreInit, G4State_Idle);
+
+  fEmitSizeCmd = new G4UIcmdWith3VectorAndUnit("/bbr/thermal/emitterSize", this);
+  fEmitSizeCmd->SetGuidance("Planck emitter box FULL extents Wx Wy Wz "
+                            "(default 1 20 20 mm); emits outward from all faces.");
+  fEmitSizeCmd->SetParameterName("Wx", "Wy", "Wz", false);
+  fEmitSizeCmd->SetUnitCategory("Length");
+  fEmitSizeCmd->SetDefaultUnit("mm");
+  fEmitSizeCmd->AvailableForStates(G4State_PreInit, G4State_Idle);
 
   fGunModeCmd = new G4UIcmdWithABool("/bbr/gun/mode", this);
   fGunModeCmd->SetGuidance("true = fixed gun, false = Planck emitter.");
@@ -80,6 +98,7 @@ BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager* mgr)
 BBRConfigMessenger::~BBRConfigMessenger() {
   delete fPrintCmd;
   delete fSetTCmd;
+  delete fEmitCenterCmd; delete fEmitSizeCmd;
   delete fGunModeCmd;
   delete fGunPosXCmd; delete fGunPosYCmd; delete fGunPosZCmd;
   delete fGunDirXCmd; delete fGunDirYCmd; delete fGunDirZCmd;
@@ -90,6 +109,8 @@ BBRConfigMessenger::~BBRConfigMessenger() {
 void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
   if      (cmd == fPrintCmd)   { BBRConfigManager::Print(G4cout); }
   else if (cmd == fSetTCmd)    { BBRConfigManager::SetThermalT_K(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
+  else if (cmd == fEmitCenterCmd) { BBRConfigManager::SetEmitterCenter_mm(G4UIcmdWith3VectorAndUnit::GetNew3VectorValue(value) / mm); }
+  else if (cmd == fEmitSizeCmd)   { BBRConfigManager::SetEmitterSize_mm(G4UIcmdWith3VectorAndUnit::GetNew3VectorValue(value) / mm); }
   else if (cmd == fGunModeCmd) { BBRConfigManager::SetGunMode(G4UIcmdWithABool::GetNewBoolValue(value)); }
   else if (cmd == fGunPosXCmd) { BBRConfigManager::SetGunPosX_mm(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunPosYCmd) { BBRConfigManager::SetGunPosY_mm(G4UIcmdWithADouble::GetNewDoubleValue(value)); }

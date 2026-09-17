@@ -13,18 +13,30 @@ BBRTestPGA::BBRTestPGA()
 {
   fGun->SetParticleDefinition(G4OpticalPhoton::OpticalPhoton());
 
-  // Planck emitter patch at x=-50mm.
-  // Wx=1mm, Wy=Wz=20mm: ~91% of photons from x-faces, ~45% aimed at +x.
+  // Planck emitter box from BBRConfigManager. Test-world default: a 1x20x20 mm
+  // patch centred at x=-50 mm (~91% of photons from the x-faces, ~45% aimed
+  // at +x). Other geometries (e.g. the light pipe) set their own box via
+  // /bbr/thermal/emitterCenter and /bbr/thermal/emitterSize.
   fSurface.temp = BBRConfigManager::GetThermalT_K();
-  fSurface.AddBoxSurface(
-    G4ThreeVector(-50.*mm, 0., 0.),  // center
-    1.*mm, 20.*mm, 20.*mm,           // Wx, Wy, Wz
-    true,                            // in_out=1 -> outward emission
-    0., 0., 0.,                      // no rotation
-    1.0);                            // emissivity=1
+  BuildEmitter();
 
   // Energy range 10 GHz-20 THz in eV (bare eV). 8.27e-2 eV = 20 THz.
   fSurface.BBSpecCDF.initialize(fSurface.temp, 4.14e-5, 8.27e-2);
+}
+
+void BBRTestPGA::BuildEmitter()
+{
+  fEmitterCenter_mm = BBRConfigManager::GetEmitterCenter_mm();
+  fEmitterSize_mm   = BBRConfigManager::GetEmitterSize_mm();
+  fSurface.ClearSurfaces();
+  fSurface.AddBoxSurface(
+    fEmitterCenter_mm * mm,                         // center
+    fEmitterSize_mm.x() * mm,                       // Wx
+    fEmitterSize_mm.y() * mm,                       // Wy
+    fEmitterSize_mm.z() * mm,                       // Wz
+    true,                                           // in_out=1 -> outward emission
+    0., 0., 0.,                                     // no rotation
+    1.0);                                           // emissivity=1
 }
 
 void BBRTestPGA::GeneratePrimaries(G4Event* event)
@@ -53,6 +65,11 @@ void BBRTestPGA::GeneratePrimaries(G4Event* event)
   if (fSurface.temp != T) {
     fSurface.temp = T;
     fSurface.BBSpecCDF.initialize(T, 4.14e-5, 8.27e-2);
+  }
+  // Rebuild the emitter box if its geometry changed via messenger.
+  if (BBRConfigManager::GetEmitterCenter_mm() != fEmitterCenter_mm ||
+      BBRConfigManager::GetEmitterSize_mm()   != fEmitterSize_mm) {
+    BuildEmitter();
   }
 
   BBEvt evt = fSurface.GenEvt();

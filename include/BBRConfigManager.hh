@@ -13,6 +13,7 @@
 // so callers automatically read/write their own thread's copy.
 
 #include "globals.hh"
+#include "G4ThreeVector.hh"
 #include <iosfwd>
 
 class BBRConfigMessenger;
@@ -25,6 +26,15 @@ class BBRConfigManager {
   // --- Emitter ---
   static G4double GetThermalT_K()  { return Instance()->fThermalT_K; }
   static void SetThermalT_K(G4double v);
+
+  // Planck emitter box geometry (values stored bare in mm; the PGA applies
+  // units): world-frame centre and FULL extents (Wx, Wy, Wz). Outward
+  // emission from all six faces. Defaults reproduce the test-world patch
+  // (1 x 20 x 20 mm centred at x = -50 mm).
+  static G4ThreeVector GetEmitterCenter_mm() { return Instance()->fEmitterCenter_mm; }
+  static G4ThreeVector GetEmitterSize_mm()   { return Instance()->fEmitterSize_mm; }
+  static void SetEmitterCenter_mm(const G4ThreeVector& v) { Instance()->fEmitterCenter_mm = v; }
+  static void SetEmitterSize_mm(const G4ThreeVector& v);   // all components > 0
 
   // --- Gun (values stored bare; PGA applies mm / eV) ---
   static G4bool   GetGunMode()     { return Instance()->fGunMode; }
@@ -65,6 +75,8 @@ class BBRConfigManager {
   BBRConfigManager& operator=(BBRConfigManager&&) = delete;
 
   G4double fThermalT_K;
+  G4ThreeVector fEmitterCenter_mm;
+  G4ThreeVector fEmitterSize_mm;
   G4bool   fGunMode;
   G4double fGunPosX_mm, fGunPosY_mm, fGunPosZ_mm;
   G4double fGunDirX, fGunDirY, fGunDirZ;
