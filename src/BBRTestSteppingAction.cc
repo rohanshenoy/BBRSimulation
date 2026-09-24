@@ -8,6 +8,7 @@
 #include "G4ProcessManager.hh"
 #include "G4ProcessVector.hh"
 #include "G4Run.hh"
+#include "G4MTRunManager.hh"
 #include "G4RunManager.hh"
 #include "G4Step.hh"
 #include "G4SystemOfUnits.hh"
@@ -80,7 +81,12 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   G4Track* track = step->GetTrack();
   if (track->GetDefinition() != G4OpticalPhoton::OpticalPhoton()) return;
 
-  const G4int runId   = G4RunManager::GetRunManager()->GetCurrentRun()->GetRunID();
+  // Run ID from the MASTER run: under G4TaskRunManager a pool thread that got
+  // no event of run N starts run N+1 still reporting N (its own runIDCounter
+  // only advances in its RunTermination), which mislabels its rows.
+  const G4RunManager* runMgr = G4MTRunManager::GetMasterRunManager();
+  if (runMgr == nullptr) runMgr = G4RunManager::GetRunManager();   // sequential
+  const G4int runId   = runMgr->GetCurrentRun()->GetRunID();
   const G4int eventId = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
 
   // Per-track reflection counter — reset when run, event, or track changes.
