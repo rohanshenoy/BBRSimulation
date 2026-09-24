@@ -44,3 +44,15 @@ def load_crossings(path):
     """Convenience: crossings DataFrame with the legacy CSV column names."""
     cr, _ = load(path)
     return cr
+
+
+def load_many(paths):
+    """Concatenate the crossings of several ROOT files (one per run).
+
+    Multi-run macros name each run's file with /analysis/setFileName because
+    the run action reopens the output file at every /run/beamOn; the run_id
+    column tells the runs apart after concatenation.
+    """
+    import pandas as pd
+    frames = [load_crossings(p) for p in paths]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()

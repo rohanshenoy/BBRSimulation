@@ -55,6 +55,7 @@ set(BBRSim_SCRIPTS
     lightpipe.mac
     crack_wall.mac
     crack_transmit.mac
+    crack_oblique.mac
     world_exit.mac
     )
 

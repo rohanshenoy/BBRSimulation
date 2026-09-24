@@ -45,23 +45,47 @@ rm -f "$blog"
 
 echo "=== 2. macros ==="
 rm -rf "$REG"; mkdir -p "$REG"; ln -s "$REPO/data" "$REG/data"
+
 run_macro() {  # name executable macro
   mkdir -p "$REG/$1" && ( cd "$REG/$1" && "$BUILD/$2" "$REPO/$3" >run.log 2>&1; echo $? >exit.code )
+}
+
+# Count log lines that indicate trouble. A tolerated exception code, if a case
+# passes one, is subtracted from both the code hits and the two-line
+# G4Exception banner, which a single grep cannot do: a JustWarning prints
+# "G4Exception-START" and "*** G4Exception : CODE" on separate lines, and
+# threads interleave.
+scan_log() {  # case-dir [tolerated-code]
+  local log="$REG/$1/run.log" tol="${2:-}"
+  local n_geom n_lp n_start n_bbr n_tol=0
+  n_geom=$(grep -c -i "GeomNav" "$log" || true)
+  n_lp=$(grep -c "LP002" "$log" || true)
+  n_start=$(grep -c "G4Exception-START" "$log" || true)
+  if [ -n "$tol" ]; then
+    n_bbr=$(grep -E "BBR0[0-9][0-9]" "$log" | grep -v -c "$tol" || true)
+    n_tol=$(grep -c -E "G4Exception : $tol" "$log" || true)
+  else
+    n_bbr=$(grep -c -E "BBR0[0-9][0-9]" "$log" || true)
+  fi
+  echo $(( n_geom + n_lp + (n_start - n_tol) + n_bbr ))
 }
 run_macro refl     BBRSim       reflectance.mac    &
 run_macro planck   BBRSim       planck.mac         &
 run_macro wall     BBRSim       crack_wall.mac     &
 run_macro exit     BBRSim       world_exit.mac     &
 run_macro transmit BBRSim       crack_transmit.mac &
+run_macro oblique  BBRSim       crack_oblique.mac  &
 run_macro lp       BBRLightPipe lightpipe.mac      &
 wait
-for d in refl planck wall exit transmit lp; do
-  code=$(cat "$REG/$d/exit.code"); nbad=$(grep -c -i "GeomNav\|G4Exception-START\|BBR00\|LP002" "$REG/$d/run.log" || true)
-  if [ "$code" -eq 0 ] && [ "$nbad" -eq 0 ] && [ -f "$REG/$d/output/bbr.root" ]; then
-    line PASS "run:$d" "exit 0, no GeomNav/G4Exception/BBR00x/LP002"; pass=$((pass+1))
+for d in refl planck wall exit transmit oblique lp; do
+  code=$(cat "$REG/$d/exit.code")
+  tol=""
+  nbad=$(scan_log "$d" "$tol")
+  if [ "$code" -eq 0 ] && [ "$nbad" -eq 0 ] && ls "$REG/$d"/output/*.root >/dev/null 2>&1; then
+    line PASS "run:$d" "exit 0, no GeomNav/G4Exception/BBR0xx/LP002${tol:+ (except $tol)}"; pass=$((pass+1))
   else
     line FAIL "run:$d" "exit $code, flagged log lines: $nbad"; fail=$((fail+1))
-    grep -i "GeomNav\|G4Exception-START\|BBR00\|LP002" "$REG/$d/run.log" | head -3
+    grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | head -3
   fi
 done
 
@@ -103,6 +127,23 @@ check transmit check_no_photons_in_metal.py
 check transmit check_term_status.py
 check lp       check_no_photons_in_metal.py
 check lp       check_term_status.py
+# crack_oblique.mac writes one file per run (output/bbr_oblique_rNN.root);
+# check_crack_oblique reads the whole directory, the two invariant checks run
+# on every per-run file.
+out=$($PY "$REPO/scripts/check_crack_oblique.py" "$REG/oblique/output" 2>&1); rc=$?
+res=$(echo "$out" | grep -E "^RESULT" | tail -1)
+if [ $rc -eq 0 ]; then line PASS check_crack_oblique.py "[oblique] $res"; pass=$((pass+1))
+else line FAIL check_crack_oblique.py "[oblique] $res"; fail=$((fail+1)); echo "$out" | grep -E "^  FAIL" | head -8 | sed 's/^/       /'; fi
+obl_bad=0; obl_n=0
+for f in "$REG"/oblique/output/bbr_oblique_r*.root; do
+  [ -f "$f" ] || continue
+  obl_n=$((obl_n+1))
+  for s in check_no_photons_in_metal.py check_term_status.py; do
+    out=$($PY "$REPO/scripts/$s" "$f" 2>&1) || { obl_bad=$((obl_bad+1)); line FAIL "$s" "[oblique/$(basename "$f")] $(echo "$out" | grep -E "^RESULT" | tail -1)"; }
+  done
+done
+if [ "$obl_n" -gt 0 ] && [ "$obl_bad" -eq 0 ]; then line PASS "oblique invariants" "[oblique] no_photons_in_metal + term_status on $obl_n per-run files"; pass=$((pass+1))
+else fail=$((fail+obl_bad)); [ "$obl_n" -eq 0 ] && { line FAIL "oblique invariants" "[oblique] no per-run files found"; fail=$((fail+1)); }; fi
 check -        check_physics.py
 check -        check_cu_serov.py
 

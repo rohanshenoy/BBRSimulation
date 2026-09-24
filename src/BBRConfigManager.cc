@@ -28,6 +28,7 @@ BBRConfigManager::BBRConfigManager()
     fGunPosX_mm(-20.0), fGunPosY_mm(0.0), fGunPosZ_mm(0.0),
     fGunDirX(1.0), fGunDirY(0.0), fGunDirZ(0.0),
     fGunEnergy_eV(2.07e-3),
+    fGunPol(0.0, 0.0, 0.0),
     fCuRRR(100), fCuStageT_K(4.0),
     fMessenger(new BBRConfigMessenger(this)) {}
 
@@ -41,6 +42,7 @@ BBRConfigManager::BBRConfigManager(const BBRConfigManager& master)
     fGunDirX(master.fGunDirX), fGunDirY(master.fGunDirY),
     fGunDirZ(master.fGunDirZ),
     fGunEnergy_eV(master.fGunEnergy_eV),
+    fGunPol(master.fGunPol),
     fCuRRR(master.fCuRRR), fCuStageT_K(master.fCuStageT_K),
     fMessenger(new BBRConfigMessenger(this)) {}
 
@@ -101,6 +103,8 @@ void BBRConfigManager::printConfig(std::ostream& os) const {
      << "  /bbr/gun/dir[XYZ]     " << fGunDirX << " " << fGunDirY << " "
                                    << fGunDirZ << "\n"
      << "  /bbr/gun/energy_eV    " << fGunEnergy_eV << " eV\n"
+     << "  /bbr/gun/pol          " << fGunPol
+     << (fGunPol.mag2() > 0. ? "" : "  (random)") << "\n"
      << "  /bbr/det/setCuRRR     " << fCuRRR << "\n"
      << "  /bbr/det/setCuStageT  " << fCuStageT_K  << " K\n"
      << "=================================\n";

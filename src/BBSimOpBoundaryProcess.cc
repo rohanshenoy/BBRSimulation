@@ -88,9 +88,18 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // IWaveTheta = 180° (confirmed: T≈1.055 at IWaveTheta=180°, T≈0 at 0°).
   G4double cosVal = std::min(1., std::max(-1., -khat.dot(normal_hat)));
   G4double iwaveTheta_deg = std::acos(cosVal) * (180. / CLHEP::pi);
-  // IWavePhi: azimuth in HFSS x̂_i=phi_hat, ŷ_i=-theta_hat plane.
-  G4double iwavePhi_raw   = std::atan2(-khat.dot(theta_hat), khat.dot(phi_hat))
-                            * (180. / CLHEP::pi);
+  // IWavePhi: azimuth in HFSS x̂_i=phi_hat, ŷ_i=-theta_hat plane. Transverse
+  // components below 1e-12 are snapped to +0 first: for a k exactly in the
+  // x-z plane (k_y == 0) atan2(-0, -x) is -180° but atan2(+0, -x) is +180°,
+  // and which one the expression yields depends on how the optimiser orders
+  // the dot product. The two results mirror theta_hat (sy) differently; both
+  // are physically equivalent by the plate's y-symmetry, but the choice must
+  // be deterministic so the Python mirror (bbrsim.hfss) reproduces it.
+  G4double kt = -khat.dot(theta_hat);
+  G4double kp =  khat.dot(phi_hat);
+  if (std::abs(kt) < 1e-12) kt = 0.;
+  if (std::abs(kp) < 1e-12) kp = 0.;
+  G4double iwavePhi_raw   = std::atan2(kt, kp) * (180. / CLHEP::pi);
 
   // The HFSS sweep covers IWavePhi ∈ [0°, 90°] only; the parallel-plate
   // geometry is mirror-symmetric about both transverse axes. Fold the azimuth

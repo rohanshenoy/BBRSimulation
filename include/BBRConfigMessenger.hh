@@ -8,6 +8,7 @@ class G4UIcmdWithABool;
 class G4UIcmdWithADouble;
 class G4UIcmdWithADoubleAndUnit;
 class G4UIcmdWith3VectorAndUnit;
+class G4UIcmdWith3Vector;
 class G4UIcmdWithAString;
 class G4UIcmdWithAnInteger;
 class G4UIcmdWithoutParameter;
@@ -40,6 +41,7 @@ class BBRConfigMessenger : public G4UImessenger {
   G4UIcmdWithADouble*        fGunDirYCmd = nullptr;
   G4UIcmdWithADouble*        fGunDirZCmd = nullptr;
   G4UIcmdWithADouble*        fGunECmd    = nullptr;
+  G4UIcmdWith3Vector*        fGunPolCmd  = nullptr;
 
   // det (wired in Task 3)
   G4UIcmdWithAString*        fCuMatCmd   = nullptr;
