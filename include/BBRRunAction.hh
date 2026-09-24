@@ -40,7 +40,7 @@ class BBRRunAction : public G4UserRunAction {
   struct CrossCols {
     G4int run_id, event_id, x, y, z, energy, px_pre, py_pre, pz_pre, px_post,
         py_post, pz_post, theta_in, phi_in, vol_pre, mat_pre, vol_post, mat_post,
-        status, event_type, n_reflect;
+        status, event_type, n_reflect, hfss_freq;
   } fCross;
 
   // abspoints column ids.

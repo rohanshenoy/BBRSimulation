@@ -56,6 +56,7 @@ set(BBRSim_SCRIPTS
     crack_wall.mac
     crack_transmit.mac
     crack_oblique.mac
+    crack_frequency.mac
     world_exit.mac
     )
 

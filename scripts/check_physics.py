@@ -13,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
-from bbrsim import physics
+from bbrsim import hfss, physics
 
 ok = True
 
@@ -25,6 +25,13 @@ def check(name, got, expected, rel_tol):
         ok = False
     print(f"  {'PASS' if rel <= rel_tol else 'FAIL'}  {name:<22} "
           f"got={got:.3e}  expected={expected:.3e}  rel={rel:.1%}  tol={rel_tol:.0%}")
+
+
+def check_bool(name, cond, detail=""):
+    global ok
+    if not cond:
+        ok = False
+    print(f"  {'PASS' if cond else 'FAIL'}  {name:<42} {detail}")
 
 
 print("Drude absorptance at 500 GHz, 4 K (reference values):")
@@ -40,6 +47,34 @@ T = 4.0
 u = np.linspace(0.05, 8.0, 4000)
 pdf = physics.planck_photon_number_pdf(u * physics.K_EV * T, T)
 check("peak u", float(u[int(np.argmax(pdf))]), physics.PLANCK_PEAK_U, 0.02)
+
+print("HFSS frequency selection rule (spec 2026-09-22 section 1.3):")
+# The C++ (BBRCrackLibrary::Lookup) cannot be exercised for ties or edges from a
+# macro, so this is where the rule itself is pinned; the mock-data validator
+# then checks that the C++ agrees photon by photon.
+GRID = [(50.0, "id_50GHz"), (150.0, "id_150GHz"), (500.0, "id_500GHz"),
+        (1500.0, "id_1500GHz"), (5000.0, "id_5000GHz")]
+check_bool("single-entry grid never clamps",
+           hfss.select_frequency([(500.0, "id_500GHz")], 20.0) == (500.0, "id_500GHz", 0))
+check_bool("exact low edge is on-grid",
+           hfss.select_frequency(GRID, 50.0) == (50.0, "id_50GHz", 0))
+check_bool("exact high edge is on-grid",
+           hfss.select_frequency(GRID, 5000.0) == (5000.0, "id_5000GHz", 0))
+check_bool("below the grid clamps low",
+           hfss.select_frequency(GRID, 20.0) == (50.0, "id_50GHz", -1))
+check_bool("above the grid clamps high",
+           hfss.select_frequency(GRID, 10000.0) == (5000.0, "id_5000GHz", +1))
+for lo, hi in zip([50.0, 150.0, 500.0, 1500.0], [150.0, 500.0, 1500.0, 5000.0]):
+    mid = np.sqrt(lo * hi)
+    check_bool(f"{mid:8.3f} GHz x 0.99 -> {lo:g}",
+               hfss.select_frequency(GRID, mid * 0.99)[0] == lo)
+    check_bool(f"{mid:8.3f} GHz x 1.01 -> {hi:g}",
+               hfss.select_frequency(GRID, mid * 1.01)[0] == hi)
+    check_bool(f"{mid:8.3f} GHz exact tie -> lower {lo:g}",
+               hfss.select_frequency(GRID, mid)[0] == lo)
+check_bool("photon_frequency_GHz(2.067834e-3 eV) = 500 GHz",
+           abs(hfss.photon_frequency_GHz(2.067834e-3) - 500.0) < 1e-3,
+           f"got {hfss.photon_frequency_GHz(2.067834e-3):.4f}")
 
 print()
 print("RESULT:", "PASS" if ok else "FAIL")

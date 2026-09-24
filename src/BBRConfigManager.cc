@@ -2,6 +2,7 @@
 #include "BBRConfigMessenger.hh"
 
 #include "G4Threading.hh"
+#include <cstdlib>
 #include "G4ios.hh"
 #include <ostream>
 
@@ -29,6 +30,7 @@ BBRConfigManager::BBRConfigManager()
     fGunDirX(1.0), fGunDirY(0.0), fGunDirZ(0.0),
     fGunEnergy_eV(2.07e-3),
     fGunPol(0.0, 0.0, 0.0),
+    fDataDir(std::getenv("BBRSIMDATA") ? std::getenv("BBRSIMDATA") : "../data"),
     fCuRRR(100), fCuStageT_K(4.0),
     fMessenger(new BBRConfigMessenger(this)) {}
 
@@ -43,6 +45,7 @@ BBRConfigManager::BBRConfigManager(const BBRConfigManager& master)
     fGunDirZ(master.fGunDirZ),
     fGunEnergy_eV(master.fGunEnergy_eV),
     fGunPol(master.fGunPol),
+    fDataDir(master.fDataDir),
     fCuRRR(master.fCuRRR), fCuStageT_K(master.fCuStageT_K),
     fMessenger(new BBRConfigMessenger(this)) {}
 
@@ -105,6 +108,7 @@ void BBRConfigManager::printConfig(std::ostream& os) const {
      << "  /bbr/gun/energy_eV    " << fGunEnergy_eV << " eV\n"
      << "  /bbr/gun/pol          " << fGunPol
      << (fGunPol.mag2() > 0. ? "" : "  (random)") << "\n"
+     << "  /bbr/dataDir          " << fDataDir << "   # BBRSIMDATA\n"
      << "  /bbr/det/setCuRRR     " << fCuRRR << "\n"
      << "  /bbr/det/setCuStageT  " << fCuStageT_K  << " K\n"
      << "=================================\n";

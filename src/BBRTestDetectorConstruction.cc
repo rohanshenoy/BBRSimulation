@@ -36,9 +36,12 @@ G4VPhysicalVolume* BBRTestDetectorConstruction::Construct()
   new G4PVPlacement(nullptr, G4ThreeVector(2.*mm, 0., 0.),
                     cuLogical, "CuSlab", worldLogical, false, 0, true);
 
+  // Crack volume names are the HFSS dataset IDs. The data directory adds the
+  // frequency: <data root>/waveguides/<id>_<freq>GHz_Ephi={0,1}. BBRCrackLibrary
+  // discovers the available frequencies and picks the one nearest each photon.
   // crack1: 52 µm gap (b=26µm half-width), full-span daughter of CuSlab
   {
-    const G4String kId = "InfParallelPlate_crack1Rohan_500GHz";
+    const G4String kId = "InfParallelPlate_crack1Rohan";
     auto* solid   = new G4Box(kId, 2.*mm, 5.1*mm, 0.026*mm);
     auto* logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
     new G4PVPlacement(nullptr, G4ThreeVector(0., 0., 0.),
@@ -47,7 +50,7 @@ G4VPhysicalVolume* BBRTestDetectorConstruction::Construct()
 
   // crack2: 102 µm gap, placed at z=3mm inside CuSlab
   {
-    const G4String kId = "InfParallelPlate_crack2_500GHz";
+    const G4String kId = "InfParallelPlate_crack2";
     auto* solid   = new G4Box(kId, 2.*mm, 5.1*mm, 0.051*mm);
     auto* logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
     new G4PVPlacement(nullptr, G4ThreeVector(0., 0., 3.*mm),

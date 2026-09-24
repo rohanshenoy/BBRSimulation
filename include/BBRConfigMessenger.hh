@@ -43,6 +43,9 @@ class BBRConfigMessenger : public G4UImessenger {
   G4UIcmdWithADouble*        fGunECmd    = nullptr;
   G4UIcmdWith3Vector*        fGunPolCmd  = nullptr;
 
+  // data
+  G4UIcmdWithAString*        fDataDirCmd = nullptr;
+
   // det (wired in Task 3)
   G4UIcmdWithAString*        fCuMatCmd   = nullptr;
   G4UIcmdWithAnInteger*      fCuRRRCmd   = nullptr;

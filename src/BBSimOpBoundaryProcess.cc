@@ -37,6 +37,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::PostStepDoIt(const G4Track& aTrack,
                                                         const G4Step& aStep)
 {
   fLastBBRStatus = kBBRNone;
+  fLastHFSSFreqGHz = -1.;
 
   const G4double kCarTolerance =
       G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
@@ -76,10 +77,16 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // Flip normal_hat to point outward (same half-space as khat, i.e. toward exit face).
   if (khat.dot(normal_hat) < 0.) normal_hat = -normal_hat;
 
-  // Lazy-load the HFSS dataset for this crack volume.
+  // Dataset for this crack volume at this photon's frequency (lazy-loaded).
+  // Units: in Geant4 internals E is in MeV and h_Planck in MeV*ns, so
+  // E/h_Planck is a frequency in 1/ns; 1e9*hertz is exactly 1/ns, so the
+  // quotient is in GHz.
   const G4String volName   = touch->GetVolume()->GetName();
   const G4String datasetId = volName.substr(0, volName.find(':'));
-  BBRHFSSData& hfss = BBRCrackLibrary::Instance().Lookup(datasetId);
+  const G4double nu_GHz =
+      aTrack.GetKineticEnergy() / CLHEP::h_Planck / (1e9 * CLHEP::hertz);
+  const BBRHFSSData& hfss =
+      BBRCrackLibrary::Instance().Lookup(datasetId, nu_GHz, fLastHFSSFreqGHz);
 
   // --- incoming angles in crack-local frame (folded into HFSS quarter-symmetry) ---
   // HFSS convention: ẑ_i points OUT of the crack (= normal_hat = +x_world).

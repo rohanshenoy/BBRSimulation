@@ -64,14 +64,15 @@ These changes were smoke-tested with a 10,000-event fixed-gun run using 15
 workers; no geometry-navigation warnings, boundary-process errors, or stuck
 tracks were observed. There is no registered `ctest` suite — correctness is
 checked by the `scripts/check_*.py` PASS/FAIL validators, and
-`scripts/run_regression.sh [build-dir]` builds, runs the six regression macros
+`scripts/run_regression.sh [build-dir]` builds, runs the eight regression macros
 and executes every validator in one command (exit code = unexpected
 failures; known reds are listed as XFAIL inside the script).
 
 ### Working
 
-- **HFSS diffraction** — `BBRHFSSData` loads far-field + waveguide CSVs; `BBRCrackLibrary`
-  lazy-loads datasets by volume name; `BBSimOpBoundaryProcess` intercepts photons entering
+- **HFSS diffraction** — `BBRHFSSData` loads far-field + waveguide CSVs for one
+  frequency; `BBRCrackLibrary` discovers each crack's frequency grid from the
+  dataset directory names and lazy-loads the grid point nearest the photon; `BBSimOpBoundaryProcess` intercepts photons entering
   `vacuum_wg` crack volumes and routes them through the HFSS lookup.
   Validated at 500 GHz normal incidence: observed transmittance
   50.0 ± 0.25% (52 µm gap) / 50.3 ± 0.25% (102 µm gap) over 40k photons each,
@@ -106,7 +107,9 @@ failures; known reds are listed as XFAIL inside the script).
 - **ROOT output + analysis layer** — `BBRRunAction` / `BBRTestSteppingAction`
   write `output/bbr.root` (`crossings` + `abspoints` ntuples) and
   `output/bbr_legend.json` via `G4AnalysisManager` with ntuple merging under
-  multithreading. `analysis/bbrsim/` (`io.py`, `physics.py`, `select.py`) is
+  multithreading. `notebooks/copper_reflectance.ipynb` walks the copper Drude
+  model end to end against the same module. `analysis/bbrsim/` (`io.py`,
+  `physics.py`, `select.py`, `hfss.py`) is
   the single source of truth for loading and for the Drude / Planck /
   Hagen-Rubens formulas; every `check_*` and `plot_*` script reads through it.
 
@@ -124,14 +127,21 @@ failures; known reds are listed as XFAIL inside the script).
 
 ### Known scope limits
 
-- **HFSS data is single-frequency.** Only a 500 GHz dataset exists per crack,
-  and `BBRHFSSData` is not keyed by frequency. The Planck emitter spans
-  10 GHz–20 THz, so a broadband run applies the 500 GHz transmittance and
-  angular PDFs to every photon. This is a deliberate modeling approximation,
-  not an interpolation bug; lifting it requires a frequency-keyed HFSS data
-  model and API.
-- **Oblique incidence is unvalidated.** The quarter-symmetry azimuth
-  fold/unfold has only been checked at normal incidence.
+- **HFSS data is single-frequency; the lookup is not.** The dataset is chosen
+  per photon by nearest frequency in log space, and the choice is recorded in
+  the `hfss_freq_GHz` output column. Only a 500 GHz dataset exists per crack,
+  so in practice every photon still gets the 500 GHz tables and broadband crack
+  results stay indicative rather than quantitative. Dropping in real exports
+  means adding `<id>_<freq>GHz_Ephi=N` directories; there is no interpolation
+  between grid points. The mechanism is validated against a mock five-frequency
+  tree (`crack_frequency.mac`).
+- **Oblique incidence is validated at 45° only.** `crack_oblique.mac` and
+  `check_crack_oblique.py` verify the azimuth fold/unfold on the θ = 135° row
+  of the HFSS grid (the only oblique incidence in the data): momentum along
+  the plate's long axis keeps its sign, the polarization filter behaves (E
+  across the gap transmits, in-plane E is cut off), ±y and ±z tilts mirror.
+  The z-mirror is unobservable on a parallel plate, and no HFSS run outside
+  the [0°, 90°] wedge exists yet.
 
 ## Build
 
@@ -255,7 +265,7 @@ boundary optics, not the unbuilt OpNovice2 example — is open work. Until then,
 when touching the wrapper, run the smoke tests (`reflectance.mac`,
 `planck.mac`) and their `check_*` scripts before merging.
 
-Three fixed-gun regression macros cover the wrapper's own physics:
+Five fixed-gun regression macros cover the wrapper's own physics:
 `crack_wall.mac` (a photon inside a crack striking its Cu wall must reflect
 about the wall normal and never enter the copper), `world_exit.mac` (photons
 leaving the world are labelled `WorldExit` in `abspoints`), and
@@ -263,7 +273,20 @@ leaving the world are labelled `WorldExit` in `abspoints`), and
 50% and never leave tangentially). Validate with
 `check_crack_wall_reflection.py`, `check_no_photons_in_metal.py`,
 `check_term_status.py` and `check_crack_transmittance.py`; the first two
-invariant checks are meaningful on any output.
+invariant checks are meaningful on any output. `crack_oblique.mac` (16 runs at
+45° off normal, random and fixed polarization via `/bbr/gun/pol`, one output
+file per run) is validated by `check_crack_oblique.py` against the Python
+mirror of the HFSS sampler in `analysis/bbrsim/hfss.py`. `crack_frequency.mac`
+(16 runs spanning and straddling a mock five-frequency grid) is validated by
+`check_crack_frequency.py`; it needs the mock tree first:
+
+```bash
+conda run -n bbrsim python scripts/make_mock_hfss_frequencies.py \
+    --src data/waveguides --dst mock_hfss \
+    --ids InfParallelPlate_crack1Rohan InfParallelPlate_crack2
+cd build && ./BBRSim crack_frequency.mac
+conda run -n bbrsim python scripts/check_crack_frequency.py build/output --data-dir mock_hfss
+```
 
 ### Interactive (UI + visualization)
 

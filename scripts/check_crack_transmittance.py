@@ -54,6 +54,20 @@ print(f"T_obs                      : {T_obs:.5f} +/- {sigma:.5f}")
 print(f"T_ideal                    : {T_IDEAL:.2f}   (z = {z:+.2f} sigma, threshold 3)")
 print(f"tangential exits |px|<1e-6 : {n_tangential}   (must be 0)")
 
-passed = bool(one_entry_each and abs(z) < 3.0 and n_tangential == 0)
+# Frequency-keyed lookup (2026-09-22): each crack entry records the grid
+# frequency the wrapper selected. The real data hold only 500 GHz, so every
+# entry must read 500 and every other crossing the -1 sentinel.
+has_col = "hfss_freq_GHz" in df.columns
+decided = df[(df["mat_post"] == "vacuum_wg")
+             & df["status"].isin(["BBRDiffractionTransmit", "BBRDiffractionReflect"])] \
+    if has_col else df.iloc[0:0]
+freq_ok = bool(has_col and len(decided)
+               and (decided["hfss_freq_GHz"] == 500.0).all()
+               and (df.drop(decided.index)["hfss_freq_GHz"] == -1.0).all())
+print(f"hfss_freq_GHz              : {'present' if has_col else 'MISSING'}; "
+      f"500 on {len(decided)} crack entries, -1 elsewhere: "
+      f"{'yes' if freq_ok else 'NO'}")
+
+passed = bool(one_entry_each and abs(z) < 3.0 and n_tangential == 0 and freq_ok)
 print(f"RESULT: {'PASS' if passed else 'FAIL'}")
 sys.exit(0 if passed else 1)

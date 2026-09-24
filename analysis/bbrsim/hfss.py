@@ -35,9 +35,14 @@ KEY_ROUND = 2                   # RoundDeg: incidence keys rounded to 0.01 deg
 
 
 def default_base_dir():
-    """Directory holding the ``<dataset>_Ephi=N`` folders: ``data/waveguides``
+    """Directory holding the ``<dataset>_Ephi=N`` folders.
+
+    ``$BBRSIMDATA/waveguides`` if the variable is set, else ``data/waveguides``
     of the checkout this file lives in.
     """
+    env = os.environ.get("BBRSIMDATA")
+    if env:
+        return os.path.join(env, "waveguides")
     repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(repo, "data", "waveguides")
 
@@ -238,3 +243,104 @@ def binned_expectation(values, weights, edges):
     out = np.zeros(len(edges) - 1)
     np.add.at(out, idx, weights)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Frequency grid: discovery and selection
+#
+# Mirrors BBRCrackLibrary::Discover and the selection block of
+# BBRCrackLibrary::Lookup (spec docs/specs/
+# 2026-09-22-frequency-keyed-hfss-design.md, sections 1.1 and 1.3). Keep the
+# two implementations in lock-step: the validators compare the C++ choice,
+# recorded per photon in the crossings column hfss_freq_GHz, against
+# select_frequency() evaluated on the same directory tree.
+# ---------------------------------------------------------------------------
+
+H_EV_S = 4.135667696e-15   # Planck constant in eV s (CODATA 2018 = CLHEP's value)
+
+
+def photon_frequency_GHz(energy_eV):
+    """Photon frequency in GHz from its energy in eV (scalar or array)."""
+    nu = np.asarray(energy_eV, dtype=float) / H_EV_S / 1e9
+    return float(nu) if nu.ndim == 0 else nu
+
+
+def _parse_stem_token(name, prefix, suffix):
+    """(value, token) of '<prefix><token><suffix>', or None if it does not match."""
+    if not (name.startswith(prefix) and name.endswith(suffix)):
+        return None
+    token = name[len(prefix):len(name) - len(suffix)]
+    if not token:
+        return None
+    try:
+        value = float(token)
+    except ValueError:
+        return None
+    return (value, token) if value > 0. else None
+
+
+def discover_frequencies(dataset_id, base_dir=None):
+    """[(freq_GHz, dir_stem), ...] for '<dataset_id>_<freq>GHz_Ephi=0' folders.
+
+    Sorted by frequency. The token is kept verbatim because a parsed double
+    cannot regenerate it ('1.5e3' and '1500' are the same value but different
+    directory names). Raises on a legacy '<id>_Ephi=0' folder, on two folders
+    whose tokens parse to the same value, and when nothing matches.
+    """
+    base = base_dir or default_base_dir()
+    prefix, suffix = f"{dataset_id}_", "GHz_Ephi=0"
+    found = {}
+    for name in sorted(os.listdir(base)):
+        if not os.path.isdir(os.path.join(base, name)):
+            continue
+        if name == f"{dataset_id}_Ephi=0":
+            raise ValueError(
+                f"legacy directory {name} has no frequency: "
+                f"rename it to {prefix}<freq>{suffix}")
+        parsed = _parse_stem_token(name, prefix, suffix)
+        if parsed is None:
+            continue
+        value, token = parsed
+        if value in found:
+            raise ValueError(
+                f"duplicate frequency {value} GHz for {dataset_id}: "
+                f"{found[value]} and {dataset_id}_{token}GHz")
+        found[value] = f"{dataset_id}_{token}GHz"
+    if not found:
+        raise FileNotFoundError(
+            f"no {prefix}<freq>{suffix} directories under {base}")
+    return sorted(found.items())
+
+
+def select_frequency(entries, nu_GHz):
+    """(freq_GHz, dir_stem, clamped) for a photon of frequency ``nu_GHz``.
+
+    ``entries`` is the list returned by discover_frequencies (ascending).
+    clamped is -1 below the grid, +1 above it, 0 on-grid. A single-entry grid
+    is never clamped (there is nothing to choose), which keeps single-frequency
+    real data silent. Ties in log distance go to the lower frequency.
+    """
+    if len(entries) == 1:
+        f, stem = entries[0]
+        return f, stem, 0
+    if nu_GHz < entries[0][0]:
+        f, stem = entries[0]
+        return f, stem, -1
+    if nu_GHz > entries[-1][0]:
+        f, stem = entries[-1]
+        return f, stem, +1
+    lnu = np.log10(nu_GHz)
+    best, k = float("inf"), 0
+    for i, (f, _) in enumerate(entries):   # ascending; strict '<' keeps the lower on a tie
+        d = abs(np.log10(f) - lnu)
+        if d < best:
+            best, k = d, i
+    f, stem = entries[k]
+    return f, stem, 0
+
+
+def load_frequency_set(dataset_id, base_dir=None):
+    """{freq_GHz: {(IWavePhi, IWaveTheta): AngleDataset}} for every frequency."""
+    base = base_dir or default_base_dir()
+    return {f: load_dataset(stem, base)
+            for f, stem in discover_frequencies(dataset_id, base)}

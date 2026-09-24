@@ -107,6 +107,8 @@ void BBRRunAction::DefineNtuples() {
   fCross.status = am->CreateNtupleIColumn("status_code");
   fCross.event_type = am->CreateNtupleIColumn("event_type_code");
   fCross.n_reflect = am->CreateNtupleIColumn("n_reflect");
+  // HFSS grid frequency selected for a crack entry; -1 on every other crossing.
+  fCross.hfss_freq = am->CreateNtupleDColumn("hfss_freq_GHz");
   am->FinishNtuple(fCrossingsId);
 
   // --- abspoints ---

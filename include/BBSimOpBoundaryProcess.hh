@@ -7,9 +7,10 @@
 
 // Wrapper around G4OpBoundaryProcess. PostStepDoIt intercepts photons that
 // cross into a volume filled with material "vacuum_wg" and routes them through
-// the HFSS diffraction model. The volume name is the HFSS dataset ID used to
-// look up the correct CSV data via BBRCrackLibrary. Everything else is a
-// pure pass-through.
+// the HFSS diffraction model. The dataset is selected by (volume name, photon
+// frequency): the volume name is the HFSS dataset ID and BBRCrackLibrary picks
+// the grid frequency nearest in log space. Everything else is a pure
+// pass-through.
 class BBSimOpBoundaryProcess : public G4WrapperProcess
 {
  public:
@@ -32,6 +33,11 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   BBRBoundaryStatus GetLastBBRStatus() const { return fLastBBRStatus; }
   G4String GetLastBBRStatusString() const;
 
+  // HFSS grid frequency [GHz] used by the last intercepted crack crossing, or
+  // -1 if the last PostStepDoIt did not run the diffraction handler. Read by
+  // BBRTestSteppingAction for the crossings column hfss_freq_GHz.
+  G4double GetLastHFSSFrequencyGHz() const { return fLastHFSSFreqGHz; }
+
   G4OpBoundaryProcessStatus GetStatus() const;
   // Forward SetInvokeSD to the wrapped G4OpBoundaryProcess (no getter in G4 API).
   void SetInvokeSD(G4bool flag);
@@ -48,6 +54,7 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4ParticleChange fParticleChange;
 
   BBRBoundaryStatus fLastBBRStatus = kBBRNone;
+  G4double fLastHFSSFreqGHz = -1.;
 
   // Per-instance counters (safe in MT — each thread gets its own process clone).
   G4int fNDiffraction         = 0;

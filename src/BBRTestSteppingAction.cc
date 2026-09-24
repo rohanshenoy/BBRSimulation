@@ -201,5 +201,13 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   am->FillNtupleIColumn(id, c.event_type,
                         BBRRunAction::EventTypeForStatus(status));
   am->FillNtupleIColumn(id, c.n_reflect, fNReflect);
+  // HFSS grid frequency, but only on a crossing the wrapper actually decided
+  // with the diffraction handler. Every other row (including the crack->World
+  // exit, where the wrapper falls through to the stock process) gets -1.
+  const G4bool crackDecided =
+      fWrapper && matPost == "vacuum_wg" &&
+      (status == "BBRDiffractionTransmit" || status == "BBRDiffractionReflect");
+  am->FillNtupleDColumn(id, c.hfss_freq,
+                        crackDecided ? fWrapper->GetLastHFSSFrequencyGHz() : -1.);
   am->AddNtupleRow(id);
 }

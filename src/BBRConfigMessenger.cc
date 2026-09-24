@@ -78,6 +78,15 @@ BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager* mgr)
   fGunPolCmd->SetParameterName("px", "py", "pz", false);
   fGunPolCmd->AvailableForStates(G4State_PreInit, G4State_Idle);
 
+  fDataDirCmd = new G4UIcmdWithAString("/bbr/dataDir", this);
+  fDataDirCmd->SetGuidance("Root of the runtime data tree: it must contain a "
+                           "waveguides/ directory of <id>_<freq>GHz_Ephi=N HFSS "
+                           "datasets. Default: $BBRSIMDATA, else ../data. Quote "
+                           "paths containing spaces. Before /run/initialize.");
+  fDataDirCmd->SetParameterName("root", false);
+  fDataDirCmd->SetToBeBroadcasted(false);
+  fDataDirCmd->AvailableForStates(G4State_PreInit);
+
   fCuMatCmd = new G4UIcmdWithAString("/bbr/det/setCuMaterial", this);
   fCuMatCmd->SetGuidance("Named Cu alias: OFHC_Cu (RRR=100) | OF_Cu (RRR=3) | "
                          "HP_Cu (RRR=6). Sets RRR and resets stage T to 4 K.");
@@ -111,6 +120,7 @@ BBRConfigMessenger::~BBRConfigMessenger() {
   delete fGunPosXCmd; delete fGunPosYCmd; delete fGunPosZCmd;
   delete fGunDirXCmd; delete fGunDirYCmd; delete fGunDirZCmd;
   delete fGunECmd; delete fGunPolCmd;
+  delete fDataDirCmd;
   delete fCuMatCmd; delete fCuRRRCmd; delete fCuStageTCmd;
 }
 
@@ -128,6 +138,7 @@ void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
   else if (cmd == fGunDirZCmd) { BBRConfigManager::SetGunDirZ(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunECmd)    { BBRConfigManager::SetGunEnergy_eV(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunPolCmd)  { BBRConfigManager::SetGunPol(G4UIcmdWith3Vector::GetNew3VectorValue(value)); }
+  else if (cmd == fDataDirCmd) { BBRConfigManager::SetDataDir(value); }
   else if (cmd == fCuMatCmd)   { BBRConfigManager::SetCuMaterial(value); }
   else if (cmd == fCuRRRCmd)   { BBRConfigManager::SetCuRRR(G4UIcmdWithAnInteger::GetNewIntValue(value)); }
   else if (cmd == fCuStageTCmd){ BBRConfigManager::SetCuStageT_K(G4UIcmdWithADoubleAndUnit::GetNewDoubleValue(value)); }

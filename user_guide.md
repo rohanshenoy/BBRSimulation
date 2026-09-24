@@ -124,13 +124,18 @@ for crack1 — are capped at 1 when the tables load (a `[BBR] HFSS ... capped to
 and an older "52.7%" figure in archived plans carried the same artefact; do not
 quote either.
 
-> **Scope limit — single HFSS frequency.** The only HFSS dataset per crack is at
-> 500 GHz, and `BBRHFSSData` is not keyed by frequency. Planck-mode runs span
-> 10 GHz–20 THz but apply the 500 GHz transmittance and angular PDFs to every
-> photon. This is a declared modeling approximation, not an interpolation bug.
-> Broadband crack results are therefore indicative, not quantitative. Likewise,
-> the quarter-symmetry azimuth fold/unfold used for oblique incidence has only
-> been validated at normal incidence.
+> **Scope limit — one HFSS frequency of data.** The lookup itself is keyed by
+> frequency: `BBRCrackLibrary` reads the grid from the dataset directory names
+> (`<id>_<freq>GHz_Ephi=N` under `<dataDir>/waveguides`) and gives each photon
+> the grid point nearest in log frequency, recording it in `hfss_freq_GHz`.
+> Only 500 GHz exists, so Planck-mode runs spanning 10 GHz–20 THz still apply
+> the 500 GHz transmittance and angular PDFs to every photon, and broadband
+> crack results remain indicative rather than quantitative. Adding real exports
+> is a matter of adding directories; there is no interpolation between grid
+> points, and a photon beyond the grid uses the nearest edge (one `BBR008`
+> warning per crack and side; a one-point grid never warns). The
+> quarter-symmetry azimuth fold/unfold is validated at normal incidence and at
+> 45° off normal (`crack_oblique.mac`), the only oblique row in the HFSS data.
 
 To aim the fixed gun at a crack:
 
@@ -260,6 +265,7 @@ threads:
 
 | Directory | Valid states | Broadcast to workers? | Notes |
 |---|---|---|---|
+| `/bbr/dataDir` | `PreInit` **only** | No | Root of the runtime data tree (must contain `waveguides/`); default `$BBRSIMDATA`, else `../data` |
 | `/bbr/det/` | `PreInit` **only** | No | Geometry is built on the master in `Construct()`; issue before `/run/initialize` |
 | `/bbr/gun/` | `PreInit` and `Idle` | Yes | Read fresh each event |
 | `/bbr/thermal/` | `PreInit` and `Idle` | Yes | Planck CDF / emitter box rebuilt on the next event |
@@ -328,6 +334,8 @@ event and are valid both before and after `/run/initialize`.
 /bbr/gun/dirZ 0.0
 
 /bbr/gun/energy_eV 2.07e-3 # photon energy in eV (500 GHz = 2.07e-3 eV)
+/bbr/gun/pol 0 0 0         # polarization: 0 0 0 = random (default); any other
+                           # vector is projected perpendicular to the direction
 
 /run/beamOn 1000
 ```
@@ -338,7 +346,7 @@ event and are valid both before and after `/run/initialize`.
 
 | File | Written by | Contents |
 |---|---|---|
-| `output/bbr.root` | `BBRRunAction` / `BBRTestSteppingAction` (via `G4AnalysisManager`) | Two ntuples. **`crossings`** — one row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volume/material/status/event-type codes, per-track crossing count. **`abspoints`** — one row per photon termination (`fStopAndKill`): position, energy, final momentum, n_reflect, terminating volume + status codes. `term_status` is `WorldExit` for a photon that left the world, `BulkAbsorption` for a `G4OpAbsorption` kill, otherwise the boundary status of the killing step (e.g. `BBRAbsorb`). Categorical fields are integer codes; runs are multithreaded and the per-thread ntuples are merged into this one file. |
+| `output/bbr.root` | `BBRRunAction` / `BBRTestSteppingAction` (via `G4AnalysisManager`) | Two ntuples. **`crossings`** — one row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volume/material/status/event-type codes, per-track crossing count, and `hfss_freq_GHz` (the HFSS grid frequency selected for a crack entry, `-1` on every other row). **`abspoints`** — one row per photon termination (`fStopAndKill`): position, energy, final momentum, n_reflect, terminating volume + status codes. `term_status` is `WorldExit` for a photon that left the world, `BulkAbsorption` for a `G4OpAbsorption` kill, otherwise the boundary status of the killing step (e.g. `BBRAbsorb`). Categorical fields are integer codes; runs are multithreaded and the per-thread ntuples are merged into this one file. |
 | `output/bbr_legend.json` | `BBRRunAction` (master thread) | `{category: {code: name}}` dictionary decoding the integer code columns (status / event_type / volume / material). Consumed by `analysis/bbrsim/io.py`. |
 | `bbrsim stdout` | redirect from stdout | `[BBR] reflectance` and `[BBR] diffraction` running tallies |
 | `build/cu_reflectance_plots.png` | `plot_cu_reflectance.py` | 3-panel reflectance / absorptance / temperature-dependence plot |
@@ -377,7 +385,12 @@ self-tested by `check_physics.py`.
 | `check_no_photons_in_metal.py` | Invariant: no crossing starts inside a Cu / perfect-metal material | positional path |
 | `check_term_status.py` | Invariant: no `unknown`; world exits are `WorldExit`; absorptions have a volume; BBRAbsorb counts match | positional path |
 | `check_crack_transmittance.py` | crack_transmit.mac: T_obs = 0.50 ± 3σ, no tangential exits | positional path |
-| `run_regression.sh` | Build + six regression macros (parallel, under `<build>/regression/`) + every validator, one PASS/FAIL line each; exit code = unexpected failures, known reds reported as XFAIL | positional build dir (default `build`) |
+| `check_crack_oblique.py` | crack_oblique.mac: 16 runs at 45° off normal — k_y-sign conservation, T vs table, exit marginals vs the `bbrsim.hfss` mirror, ±y/±z mirror KS, specular reflection (138 checks) | positional output dir (default `build/output`) |
+| `check_crack_frequency.py` | crack_frequency.mac against the mock five-frequency tree: per-photon selection vs the `bbrsim.hfss` mirror, T_obs vs the selected dataset, far-field signature, clamping, Planck bin coverage (89 checks) | positional output dir, `--data-dir MOCK_ROOT` |
+| `notebooks/copper_reflectance.ipynb` | Narrative walkthrough of the copper Drude model: bounce counts, the corner frequency, Hagen-Rubens breakdown, the relaxation plateau, the 24-point Geant4 table, and validation against Serov 2016. Needs `pip install ipykernel` in the `bbrsim` env | open in VS Code / Jupyter |
+| `plot_crack_frequency.py` | Four-panel overview of the frequency-keyed lookup: selection staircase, observed vs predicted transmittance, the Planck spectrum coloured by dataset, and the far-field exit signature | positional output dir, `--data-dir MOCK_ROOT`, `--out PATH` |
+| `make_mock_hfss_frequencies.py` | Build the mock multi-frequency HFSS tree from the real 500 GHz data (scaled transmittance + truncated far field per frequency); refuses to write inside `data/` | `--src --dst --ids [--freqs --scales]` |
+| `run_regression.sh` | Build + eight regression macros (parallel, under `<build>/regression/`) + every validator, one PASS/FAIL line each; exit code = unexpected failures, known reds reported as XFAIL | positional build dir (default `build`) |
 | `check_planck_spectrum.py` | Validate emitted spectrum against Planck photon-number peak | positional path, `--temp <K>` |
 | `check_nreflect.py` | Per-track reflection-count distribution sanity checks | — |
 | `check_angle_distribution.py` | KS test of Cu incidence angles | — |

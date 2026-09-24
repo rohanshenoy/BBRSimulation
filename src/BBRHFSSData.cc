@@ -6,6 +6,8 @@
 #include "Randomize.hh"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cmath>
 #include <complex>
 #include <fstream>
@@ -43,10 +45,12 @@ std::pair<G4double, G4double> MakeKey(G4double phi, G4double theta)
 
 // ---------------------------------------------------------------------------
 
-BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& datasetId)
+BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
+                         G4double expectedFreqGHz)
+  : fFreqGHz(expectedFreqGHz)
 {
-  auto dir0 = baseDir + "/" + datasetId + "_Ephi=0";
-  auto dir1 = baseDir + "/" + datasetId + "_Ephi=1";
+  auto dir0 = baseDir + "/" + dirStem + "_Ephi=0";
+  auto dir1 = baseDir + "/" + dirStem + "_Ephi=1";
   LoadFarField (dir0 + "/far_field.csv",  0);
   LoadFarField (dir1 + "/far_field.csv",  1);
   LoadWaveguide(dir0 + "/waveguide.csv",  0);
@@ -62,13 +66,56 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& datasetId)
   for (const auto& [key, ds] : fData) {
     if (ds.farField.empty() || ds.exitPoints.empty()) {
       G4ExceptionDescription ed;
-      ed << "Dataset " << datasetId << " key (IWavePhi=" << key.first
+      ed << "Dataset " << dirStem << " key (IWavePhi=" << key.first
          << ", IWaveTheta=" << key.second << ") has " << ds.farField.size()
          << " far-field rows and " << ds.exitPoints.size()
          << " exit-point rows; far_field.csv and waveguide.csv must share the "
             "same incidence keys.";
       G4Exception("BBRHFSSData", "BBR007", FatalException, ed);
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Frequency parsing / validation
+// ---------------------------------------------------------------------------
+
+// Accepts "<number><MHz|GHz|THz>" (case-insensitive, surrounding blanks ok).
+G4double BBRHFSSData::ParseFrequencyGHz(const std::string& tokenIn)
+{
+  std::string t;
+  for (char c : tokenIn)
+    if (!std::isspace(static_cast<unsigned char>(c))) t += c;
+  if (t.size() < 4) return -1.;
+
+  std::string unit = t.substr(t.size() - 3);
+  for (auto& c : unit) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  G4double mult;
+  if      (unit == "mhz") mult = 1e-3;
+  else if (unit == "ghz") mult = 1.;
+  else if (unit == "thz") mult = 1e3;
+  else return -1.;
+
+  const std::string num = t.substr(0, t.size() - 3);
+  char* end = nullptr;
+  const double v = std::strtod(num.c_str(), &end);
+  if (num.empty() || end == nullptr || *end != '\0' || !(v > 0.)) return -1.;
+  return v * mult;
+}
+
+// The frequency a dataset is USED as comes from its directory name; this makes
+// sure the file contents agree, so a copied or renamed dataset cannot silently
+// stand in for another frequency.
+void BBRHFSSData::CheckFrequencyColumn(const G4String& path,
+                                       const std::string& token) const
+{
+  const G4double f = ParseFrequencyGHz(token);
+  if (f < 0. || std::abs(f - fFreqGHz) > 1e-3 * fFreqGHz) {
+    G4ExceptionDescription ed;
+    ed << "Freq column '" << token << "' in " << path
+       << " does not match the directory frequency " << fFreqGHz
+       << " GHz (tolerance 0.1 %).";
+    G4Exception("BBRHFSSData::CheckFrequencyColumn", "BBR009", FatalException, ed);
   }
 }
 
@@ -92,11 +139,13 @@ void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag)
   // Row counter per key, used to match ephi=1 rows to the ephi=0 FarFieldPoints
   // by insertion order (both CSVs have the same angular sweep order).
   std::map<std::pair<G4double,G4double>, std::size_t> rowIdx;
+  G4bool freqChecked = false;
 
   while (std::getline(f, line)) {
     if (line.empty()) continue;
     auto v = SplitCSV(line);
     if (v.size() < 10) continue;
+    if (!freqChecked) { CheckFrequencyColumn(path, v[0]); freqChecked = true; }
 
     G4double iwPhi = std::stod(v[2]);
     G4double iwThe = std::stod(v[3]);
@@ -141,12 +190,14 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag)
   std::getline(f, line); // skip header
 
   std::map<std::pair<G4double,G4double>, std::size_t> rowIdx;
+  G4bool freqChecked = false;
   std::map<std::pair<G4double,G4double>, bool>         tSet;
 
   while (std::getline(f, line)) {
     if (line.empty()) continue;
     auto v = SplitCSV(line);
     if (v.size() < 15) continue;
+    if (!freqChecked) { CheckFrequencyColumn(path, v[0]); freqChecked = true; }
 
     G4double iwPhi  = std::stod(v[2]);
     G4double iwThe  = std::stod(v[3]);
