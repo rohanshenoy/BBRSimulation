@@ -81,7 +81,7 @@ BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager* mgr)
   fDataDirCmd = new G4UIcmdWithAString("/bbr/dataDir", this);
   fDataDirCmd->SetGuidance("Root of the runtime data tree: it must contain a "
                            "waveguides/ directory of <id>_<freq>GHz_Ephi=N HFSS "
-                           "datasets. Default: $BBRSIMDATA, else ../data. Quote "
+                           "datasets. Default: $BBRSIMDATA, else <install prefix>/share/BBRsim/data. Quote "
                            "paths containing spaces. Before /run/initialize.");
   fDataDirCmd->SetParameterName("root", false);
   fDataDirCmd->SetToBeBroadcasted(false);

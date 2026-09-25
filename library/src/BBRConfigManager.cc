@@ -6,6 +6,10 @@
 #include "G4ios.hh"
 #include <ostream>
 
+#ifndef BBRSIM_DEFAULT_DATADIR
+#error "BBRSIM_DEFAULT_DATADIR must be defined by the build (library/CMakeLists.txt)"
+#endif
+
 BBRConfigManager* BBRConfigManager::Instance() {
   static const BBRConfigManager* masterInstance = nullptr;
   static G4ThreadLocal BBRConfigManager* theInstance = nullptr;
@@ -30,7 +34,7 @@ BBRConfigManager::BBRConfigManager()
     fGunDirX(1.0), fGunDirY(0.0), fGunDirZ(0.0),
     fGunEnergy_eV(2.07e-3),
     fGunPol(0.0, 0.0, 0.0),
-    fDataDir(std::getenv("BBRSIMDATA") ? std::getenv("BBRSIMDATA") : "../data"),
+    fDataDir(std::getenv("BBRSIMDATA") ? std::getenv("BBRSIMDATA") : BBRSIM_DEFAULT_DATADIR),
     fCuRRR(100), fCuStageT_K(4.0),
     fMessenger(new BBRConfigMessenger(this)) {}
 

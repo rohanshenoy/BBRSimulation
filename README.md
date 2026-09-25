@@ -152,7 +152,13 @@ a C++17 compiler. Python scripts require the `bbrsim` conda environment
 ```bash
 cmake --preset clang-release          # Apple Clang, Release, binaryDir build/
 cmake --build --preset clang-release
+cmake --install build                 # library + HFSS data into install/
 ```
+
+The install step is required: with `BBRSIMDATA` unset and no `/bbr/dataDir`,
+the executables read the HFSS data from `<install prefix>/share/BBRsim/data`
+(the preset's prefix is `install/`), so a crack macro run before installing
+aborts with `BBR011`.
 
 `CMakePresets.json` pins `/usr/bin/clang`/`clang++` and `Release`; IDE CMake
 integrations (VSCode CMake Tools) pick the preset up automatically instead of
@@ -172,6 +178,7 @@ Batch-only (no UI/visualization):
 ```bash
 cmake -DWITH_GEANT4_UIVIS=OFF ..
 make
+make install
 ```
 
 CMake copies all `.mac` files to the build directory alongside the executable.

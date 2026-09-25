@@ -6,9 +6,9 @@
 # 1. Incremental build of BBRSim + BBRLightPipe in BUILD_DIR (fails on errors,
 #    reports compiler warnings).
 # 2. Runs the regression macros in parallel, each in its own directory under
-#    BUILD_DIR/regression/<name>/ (a `data` symlink beside them satisfies the
-#    executables' ../data/waveguides lookup), and scans every log for
-#    GeomNav / G4Exception / BBR00x / LP002 messages.
+#    BUILD_DIR/regression/<name>/ (BBRSIMDATA defaults to <repo>/data, so the
+#    executables and the Python validators read the same tree), and scans every
+#    log for GeomNav / G4Exception / BBR00x / LP002 messages.
 # 3. Runs every scripts/check_*.py validator against the output it belongs to
 #    and prints one PASS/FAIL line per check.
 #
@@ -32,6 +32,10 @@ fail=0; xfail=0; xpass=0; pass=0
 line() { printf '%-6s %-30s %s\n' "$1" "$2" "$3"; }
 
 [ -f "$BUILD/CMakeCache.txt" ] || { echo "ERROR: $BUILD is not a configured build directory (run cmake --preset clang-release first)"; exit 2; }
+# The executables' compiled-in data default is the INSTALLED <prefix>/share/BBRsim/data,
+# and this runner builds without installing. Unless BBRSIMDATA is already set, point
+# the executables and the Python validators at this checkout's data/.
+export BBRSIMDATA="${BBRSIMDATA:-$REPO/data}"
 
 echo "=== 1. build ($BUILD) ==="
 blog="$(mktemp)"

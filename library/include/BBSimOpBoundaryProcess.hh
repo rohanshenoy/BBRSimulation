@@ -35,13 +35,13 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
 
   // HFSS grid frequency [GHz] used by the last intercepted crack crossing, or
   // -1 if the last PostStepDoIt did not run the diffraction handler. Read by
-  // BBRTestSteppingAction for the crossings column hfss_freq_GHz.
+  // an example's stepping action for the crossings column hfss_freq_GHz.
   G4double GetLastHFSSFrequencyGHz() const { return fLastHFSSFreqGHz; }
 
   G4OpBoundaryProcessStatus GetStatus() const;
   // Forward SetInvokeSD to the wrapped G4OpBoundaryProcess (no getter in G4 API).
   void SetInvokeSD(G4bool flag);
-  // Public accessor so external observers (e.g. BBRTestSteppingAction) can
+  // Public accessor so external observers (e.g. an example's stepping action) can
   // query the inner process status directly.
   G4OpBoundaryProcess* GetWrappedProcess() const;
 

@@ -48,6 +48,10 @@ target_include_directories(BBRsim PUBLIC
 # definitions reach consumers through this PUBLIC link.
 target_link_libraries(BBRsim PUBLIC ${Geant4_LIBRARIES})
 target_compile_features(BBRsim PUBLIC cxx_std_${Geant4_CXX_STANDARD})
+# Default data root, baked at configure time; $BBRSIMDATA and /bbr/dataDir
+# override it at run time. Changing CMAKE_INSTALL_PREFIX requires a reconfigure.
+target_compile_definitions(BBRsim PRIVATE
+  "BBRSIM_DEFAULT_DATADIR=\"${CMAKE_INSTALL_PREFIX}/share/BBRsim/data\"")
 
 install(TARGETS BBRsim EXPORT BBRsimTargets LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)
 install(FILES ${BBRsim_HEADERS} DESTINATION include/BBRsim)

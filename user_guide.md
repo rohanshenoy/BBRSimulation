@@ -32,6 +32,7 @@ All Python scripts must be run as `conda run -n bbrsim python <script>` — not
 cd BBRSimulation
 cmake --preset clang-release          # Apple Clang, Release, binaryDir build/
 cmake --build --preset clang-release
+cmake --install build                 # required: the data default is the install prefix
 ```
 
 `CMakePresets.json` pins `/usr/bin/clang`/`clang++` and `Release`; IDE CMake
@@ -52,6 +53,7 @@ Batch-only build (no UI or visualization — faster, no display required):
 ```bash
 cmake -DWITH_GEANT4_UIVIS=OFF ..
 make
+make install
 ```
 
 CMake copies all `.mac` files to `build/` alongside the `BBRSim` executable.
@@ -265,7 +267,7 @@ threads:
 
 | Directory | Valid states | Broadcast to workers? | Notes |
 |---|---|---|---|
-| `/bbr/dataDir` | `PreInit` **only** | No | Root of the runtime data tree (must contain `waveguides/`); default `$BBRSIMDATA`, else `../data` |
+| `/bbr/dataDir` | `PreInit` **only** | No | Root of the runtime data tree (must contain `waveguides/`); default `$BBRSIMDATA`, else the compiled-in `<install prefix>/share/BBRsim/data` |
 | `/bbr/det/` | `PreInit` **only** | No | Geometry is built on the master in `Construct()`; issue before `/run/initialize` |
 | `/bbr/gun/` | `PreInit` and `Idle` | Yes | Read fresh each event |
 | `/bbr/thermal/` | `PreInit` and `Idle` | Yes | Planck CDF / emitter box rebuilt on the next event |

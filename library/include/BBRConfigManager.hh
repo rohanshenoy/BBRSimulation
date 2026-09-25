@@ -7,7 +7,7 @@
 // object. The master/sequential thread constructs the real instance (compiled
 // defaults); each worker thread copy-constructs from the master and owns its
 // own BBRConfigMessenger, so broadcast commands reach every worker's copy.
-// This removes the shared-mutable static config that BBRTestPGA used to hold.
+// This replaces the shared-mutable static config the primary generator used to hold.
 //
 // All tunables are reached through static Get*/Set* that route via Instance(),
 // so callers automatically read/write their own thread's copy.
@@ -64,9 +64,9 @@ class BBRConfigManager {
 
   // --- Data ---
   // Root of the runtime data tree; BBRCrackLibrary reads <root>/waveguides.
-  // Master default: $BBRSIMDATA if set, else "../data" (CWD-relative, i.e. the
-  // checkout's data/ when running from build/). Set before /run/initialize with
-  // /bbr/dataDir; worker clones copy the master's value when they are created.
+  // Master default: $BBRSIMDATA if set, else the compiled-in install path
+  // <prefix>/share/BBRsim/data. Set before /run/initialize with /bbr/dataDir;
+  // worker clones copy the master's value when they are created.
   static G4String GetDataDir()                   { return Instance()->fDataDir; }
   static void     SetDataDir(const G4String& d)  { Instance()->fDataDir = d; }
 
