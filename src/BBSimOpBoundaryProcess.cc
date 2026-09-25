@@ -37,6 +37,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::PostStepDoIt(const G4Track& aTrack,
                                                         const G4Step& aStep)
 {
   fLastBBRStatus = kBBRNone;
+  fLastHFSSFreqGHz = -1.;
 
   const G4double kCarTolerance =
       G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
@@ -76,10 +77,16 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // Flip normal_hat to point outward (same half-space as khat, i.e. toward exit face).
   if (khat.dot(normal_hat) < 0.) normal_hat = -normal_hat;
 
-  // Lazy-load the HFSS dataset for this crack volume.
+  // Dataset for this crack volume at this photon's frequency (lazy-loaded).
+  // Units: in Geant4 internals E is in MeV and h_Planck in MeV*ns, so
+  // E/h_Planck is a frequency in 1/ns; 1e9*hertz is exactly 1/ns, so the
+  // quotient is in GHz.
   const G4String volName   = touch->GetVolume()->GetName();
   const G4String datasetId = volName.substr(0, volName.find(':'));
-  BBRHFSSData& hfss = BBRCrackLibrary::Instance().Lookup(datasetId);
+  const G4double nu_GHz =
+      aTrack.GetKineticEnergy() / CLHEP::h_Planck / (1e9 * CLHEP::hertz);
+  const BBRHFSSData& hfss =
+      BBRCrackLibrary::Instance().Lookup(datasetId, nu_GHz, fLastHFSSFreqGHz);
 
   // --- incoming angles in crack-local frame (folded into HFSS quarter-symmetry) ---
   // HFSS convention: ẑ_i points OUT of the crack (= normal_hat = +x_world).
@@ -88,9 +95,18 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // IWaveTheta = 180° (confirmed: T≈1.055 at IWaveTheta=180°, T≈0 at 0°).
   G4double cosVal = std::min(1., std::max(-1., -khat.dot(normal_hat)));
   G4double iwaveTheta_deg = std::acos(cosVal) * (180. / CLHEP::pi);
-  // IWavePhi: azimuth in HFSS x̂_i=phi_hat, ŷ_i=-theta_hat plane.
-  G4double iwavePhi_raw   = std::atan2(-khat.dot(theta_hat), khat.dot(phi_hat))
-                            * (180. / CLHEP::pi);
+  // IWavePhi: azimuth in HFSS x̂_i=phi_hat, ŷ_i=-theta_hat plane. Transverse
+  // components below 1e-12 are snapped to +0 first: for a k exactly in the
+  // x-z plane (k_y == 0) atan2(-0, -x) is -180° but atan2(+0, -x) is +180°,
+  // and which one the expression yields depends on how the optimiser orders
+  // the dot product. The two results mirror theta_hat (sy) differently; both
+  // are physically equivalent by the plate's y-symmetry, but the choice must
+  // be deterministic so the Python mirror (bbrsim.hfss) reproduces it.
+  G4double kt = -khat.dot(theta_hat);
+  G4double kp =  khat.dot(phi_hat);
+  if (std::abs(kt) < 1e-12) kt = 0.;
+  if (std::abs(kp) < 1e-12) kp = 0.;
+  G4double iwavePhi_raw   = std::atan2(kt, kp) * (180. / CLHEP::pi);
 
   // The HFSS sweep covers IWavePhi ∈ [0°, 90°] only; the parallel-plate
   // geometry is mirror-symmetric about both transverse axes. Fold the azimuth

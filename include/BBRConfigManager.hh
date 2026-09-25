@@ -55,6 +55,21 @@ class BBRConfigManager {
   static void SetGunDirZ(G4double v)    { Instance()->fGunDirZ = v; }
   static void SetGunEnergy_eV(G4double v){ Instance()->fGunEnergy_eV = v; }
 
+  // Fixed gun polarization (dimensionless). The zero vector (default) means
+  // random polarization in the plane perpendicular to the direction; any other
+  // vector is projected perpendicular to the gun direction and normalised by
+  // the PGA each event (/bbr/gun/pol).
+  static G4ThreeVector GetGunPol()               { return Instance()->fGunPol; }
+  static void SetGunPol(const G4ThreeVector& v)  { Instance()->fGunPol = v; }
+
+  // --- Data ---
+  // Root of the runtime data tree; BBRCrackLibrary reads <root>/waveguides.
+  // Master default: $BBRSIMDATA if set, else "../data" (CWD-relative, i.e. the
+  // checkout's data/ when running from build/). Set before /run/initialize with
+  // /bbr/dataDir; worker clones copy the master's value when they are created.
+  static G4String GetDataDir()                   { return Instance()->fDataDir; }
+  static void     SetDataDir(const G4String& d)  { Instance()->fDataDir = d; }
+
   // --- Detector (copper) ---
   static G4int    GetCuRRR()       { return Instance()->fCuRRR; }
   static G4double GetCuStageT_K()  { return Instance()->fCuStageT_K; }
@@ -81,6 +96,8 @@ class BBRConfigManager {
   G4double fGunPosX_mm, fGunPosY_mm, fGunPosZ_mm;
   G4double fGunDirX, fGunDirY, fGunDirZ;
   G4double fGunEnergy_eV;
+  G4ThreeVector fGunPol;
+  G4String fDataDir;
   G4int    fCuRRR;
   G4double fCuStageT_K;
 

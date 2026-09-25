@@ -1,6 +1,7 @@
 build/
 build-*/
 output/
+mock_hfss/
 .DS_Store
 *.root
 *.out
@@ -15,6 +16,9 @@ tmp/
 # Generated analysis plots
 *_check.png
 *_distribution.png
+
+# Jupyter
+.ipynb_checkpoints/
 
 # Python bytecode (analysis package)
 __pycache__/

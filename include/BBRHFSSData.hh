@@ -23,10 +23,22 @@
 class BBRHFSSData
 {
  public:
-  // baseDir: path to the waveguide HFSS data directory (e.g. "../data/waveguides")
-  // datasetId: subdirectory prefix, e.g. "InfParallelPlate_crack1Rohan_500GHz"
-  //   Loads baseDir/datasetId_Ephi=0/ and baseDir/datasetId_Ephi=1/
-  BBRHFSSData(const G4String& baseDir, const G4String& datasetId);
+  // baseDir: the waveguide data directory (<data root>/waveguides).
+  // dirStem: directory name without the "_Ephi=N" suffix, i.e.
+  //   "<id>_<freq>GHz" (e.g. "InfParallelPlate_crack1Rohan_500GHz").
+  //   Loads baseDir/dirStem_Ephi=0/ and baseDir/dirStem_Ephi=1/.
+  // expectedFreqGHz: the frequency parsed from the directory name. Each CSV's
+  //   Freq column must agree with it to 0.1 % (BBR009), so a mislabelled or
+  //   mis-copied dataset cannot be used under the wrong frequency.
+  BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
+              G4double expectedFreqGHz);
+
+  // Frequency this dataset was loaded as [GHz].
+  G4double GetFrequencyGHz() const { return fFreqGHz; }
+
+  // "500GHz" -> 500, "0.5THz" -> 500, "500000MHz" -> 500; -1 if unparseable.
+  // Shared with BBRCrackLibrary, which parses the same token from directory names.
+  static G4double ParseFrequencyGHz(const std::string& token);
 
   // Wang eq. 54: T = E_theta²·T₀ + E_phi²·T₁
   G4double GetTransmittance(G4double E_theta, G4double E_phi,
@@ -73,6 +85,11 @@ class BBRHFSSData
 
   // Keyed by (RoundedIWavePhi_deg, RoundedIWaveTheta_deg); populated dynamically from CSV.
   std::map<std::pair<G4double, G4double>, AngleDataset> fData;
+
+  G4double fFreqGHz = -1.;   // frequency of this dataset [GHz]
+
+  // Fatal BBR009 if the CSV's Freq column disagrees with fFreqGHz.
+  void CheckFrequencyColumn(const G4String& path, const std::string& token) const;
 
   // Nearest-neighbour lookup by L2 distance in (phi, theta) degree space.
   const AngleDataset& FindDataset(G4double iwavePhi_deg, G4double iwaveTheta_deg) const;

@@ -49,9 +49,28 @@ void BBRTestPGA::GeneratePrimaries(G4Event* event)
                       BBRConfigManager::GetGunDirY(),
                       BBRConfigManager::GetGunDirZ());
     dir = dir.unit();
-    G4ThreeVector perp = dir.orthogonal().unit();
-    G4double phi = G4UniformRand() * CLHEP::twopi;
-    G4ThreeVector pol = std::cos(phi)*perp + std::sin(phi)*dir.cross(perp).unit();
+    // Polarization: a fixed vector from /bbr/gun/pol (projected perpendicular
+    // to the direction and normalised), or, for the zero vector (default),
+    // random in the plane perpendicular to the direction.
+    G4ThreeVector pol;
+    const G4ThreeVector polReq  = BBRConfigManager::GetGunPol();
+    const G4ThreeVector polPerp = polReq - polReq.dot(dir) * dir;
+    if (polReq.mag2() > 0. && polPerp.mag() > 1e-9) {
+      pol = polPerp.unit();
+    } else {
+      if (polReq.mag2() > 0.) {
+        static G4ThreadLocal G4bool warned = false;
+        if (!warned) {
+          warned = true;
+          G4Exception("BBRTestPGA::GeneratePrimaries", "BBR010", JustWarning,
+                      "/bbr/gun/pol is parallel to the gun direction; "
+                      "using random polarization.");
+        }
+      }
+      G4ThreeVector perp = dir.orthogonal().unit();
+      G4double phi = G4UniformRand() * CLHEP::twopi;
+      pol = std::cos(phi)*perp + std::sin(phi)*dir.cross(perp).unit();
+    }
     fGun->SetParticlePosition(pos);
     fGun->SetParticleMomentumDirection(dir);
     fGun->SetParticleEnergy(BBRConfigManager::GetGunEnergy_eV() * eV);

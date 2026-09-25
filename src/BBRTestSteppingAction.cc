@@ -8,6 +8,7 @@
 #include "G4ProcessManager.hh"
 #include "G4ProcessVector.hh"
 #include "G4Run.hh"
+#include "G4MTRunManager.hh"
 #include "G4RunManager.hh"
 #include "G4Step.hh"
 #include "G4SystemOfUnits.hh"
@@ -80,7 +81,12 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   G4Track* track = step->GetTrack();
   if (track->GetDefinition() != G4OpticalPhoton::OpticalPhoton()) return;
 
-  const G4int runId   = G4RunManager::GetRunManager()->GetCurrentRun()->GetRunID();
+  // Run ID from the MASTER run: under G4TaskRunManager a pool thread that got
+  // no event of run N starts run N+1 still reporting N (its own runIDCounter
+  // only advances in its RunTermination), which mislabels its rows.
+  const G4RunManager* runMgr = G4MTRunManager::GetMasterRunManager();
+  if (runMgr == nullptr) runMgr = G4RunManager::GetRunManager();   // sequential
+  const G4int runId   = runMgr->GetCurrentRun()->GetRunID();
   const G4int eventId = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
 
   // Per-track reflection counter — reset when run, event, or track changes.
@@ -195,5 +201,13 @@ void BBRTestSteppingAction::UserSteppingAction(const G4Step* step)
   am->FillNtupleIColumn(id, c.event_type,
                         BBRRunAction::EventTypeForStatus(status));
   am->FillNtupleIColumn(id, c.n_reflect, fNReflect);
+  // HFSS grid frequency, but only on a crossing the wrapper actually decided
+  // with the diffraction handler. Every other row (including the crack->World
+  // exit, where the wrapper falls through to the stock process) gets -1.
+  const G4bool crackDecided =
+      fWrapper && matPost == "vacuum_wg" &&
+      (status == "BBRDiffractionTransmit" || status == "BBRDiffractionReflect");
+  am->FillNtupleDColumn(id, c.hfss_freq,
+                        crackDecided ? fWrapper->GetLastHFSSFrequencyGHz() : -1.);
   am->AddNtupleRow(id);
 }

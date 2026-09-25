@@ -15,6 +15,10 @@
 
 namespace {
 const char* kOutputDir = "output";
+// Default output file. It is registered with G4AnalysisManager::SetFileName in
+// the ctor and opened by name-less OpenFile() at every run, so a macro can
+// redirect a run with /analysis/setFileName (e.g. one file per run in a
+// multi-run session; the same name is otherwise overwritten by the next run).
 const char* kOutputFile = "output/bbr.root";
 const char* kLegendFile = "output/bbr_legend.json";
 
@@ -80,6 +84,7 @@ void BBRRunAction::DefineNtuples() {
   am->SetVerboseLevel(1);
 
   // --- crossings ---
+  am->SetFileName(kOutputFile);
   fCrossingsId = am->CreateNtuple("crossings", "Optical-photon boundary crossings");
   fCross.run_id = am->CreateNtupleIColumn("run_id");
   fCross.event_id = am->CreateNtupleIColumn("event_id");
@@ -102,6 +107,8 @@ void BBRRunAction::DefineNtuples() {
   fCross.status = am->CreateNtupleIColumn("status_code");
   fCross.event_type = am->CreateNtupleIColumn("event_type_code");
   fCross.n_reflect = am->CreateNtupleIColumn("n_reflect");
+  // HFSS grid frequency selected for a crack entry; -1 on every other crossing.
+  fCross.hfss_freq = am->CreateNtupleDColumn("hfss_freq_GHz");
   am->FinishNtuple(fCrossingsId);
 
   // --- abspoints ---
@@ -126,7 +133,7 @@ void BBRRunAction::BeginOfRunAction(const G4Run* run) {
   std::filesystem::create_directories(kOutputDir, ec);
 
   auto* am = G4AnalysisManager::Instance();
-  am->OpenFile(kOutputFile);
+  am->OpenFile();   // kOutputFile unless /analysis/setFileName changed it
 
   // Under MT, BuildForMaster() runs the master's ctor before the master builds
   // the detector, so the geometry stores were empty and the master's
@@ -173,7 +180,7 @@ void BBRRunAction::EndOfRunAction(const G4Run* run) {
   am->Write();
   am->CloseFile();
   if (IsMaster())
-    G4cout << "=== BBR Run " << run->GetRunID() << " end: " << kOutputFile
+    G4cout << "=== BBR Run " << run->GetRunID() << " end: " << am->GetFileName()
            << " written ===" << G4endl;
 }
 
