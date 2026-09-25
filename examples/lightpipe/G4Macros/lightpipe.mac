@@ -1,0 +1,20 @@
+# lightpipe.mac — parametric light-pipe scaffold: 4 K Planck emitter into the bore.
+#
+# bbrsimLightPipe uses its own copy of the test-world Planck emitter
+# (LightPipePrimaryGeneratorAction). Its test-world default box (1x20x20 mm
+# centred at x = -50 mm) overlaps the tube wall, which starts at x = -50 mm
+# with a 5 mm bore, so photons would be created inside the copper. Place a
+# 1x7x7 mm box centred at x = -51 mm instead: the emitting face is at
+# x = -50.5 mm, 0.5 mm upstream of the aperture, and its corners sit at
+# r = 4.95 mm, inside the bore.
+#
+# Validate:
+#   conda run -n bbrsim python <repo>/validation/check_no_photons_in_metal.py output/bbr.root
+#   conda run -n bbrsim python <repo>/validation/check_term_status.py         output/bbr.root
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/bbr/thermal/emitterCenter -51 0 0 mm
+/bbr/thermal/emitterSize 1 7 7 mm
+/run/initialize
+/run/beamOn 50000

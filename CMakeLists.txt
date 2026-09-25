@@ -49,19 +49,3 @@ write_basic_package_version_file(${PROJECT_BINARY_DIR}/BBRsimConfigVersion.cmake
 install(FILES ${PROJECT_BINARY_DIR}/BBRsimConfig.cmake
               ${PROJECT_BINARY_DIR}/BBRsimConfigVersion.cmake
         DESTINATION lib/cmake/BBRsim)
-
-#----------------------------------------------------------------------------
-# BRIDGE — removed in Task 4 of the reorg plan. The two pre-reorg executables,
-# linked against the in-tree library, keep the repository runnable from build/.
-file(GLOB bridge_sources ${PROJECT_SOURCE_DIR}/src/*.cc)
-foreach(_exe BBRSim BBRLightPipe)
-  add_executable(${_exe} ${_exe}.cc ${bridge_sources})
-  target_include_directories(${_exe} PRIVATE ${PROJECT_SOURCE_DIR}/include)
-  target_link_libraries(${_exe} PRIVATE BBRsim)
-endforeach()
-set(BBRSim_SCRIPTS vis.mac test.mac test_10K.mac test_50M.mac test_of_cu.mac test_hp_cu.mac
-    reflectance.mac planck.mac verify_config_mt.mac lightpipe.mac crack_wall.mac
-    crack_transmit.mac crack_oblique.mac crack_frequency.mac world_exit.mac)
-foreach(_script ${BBRSim_SCRIPTS})
-  configure_file(${PROJECT_SOURCE_DIR}/${_script} ${PROJECT_BINARY_DIR}/${_script} COPYONLY)
-endforeach()

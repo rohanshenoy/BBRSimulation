@@ -3,11 +3,14 @@
 #
 #   scripts/run_regression.sh [BUILD_DIR]        (default: build)
 #
-# 1. Incremental build of BBRSim + BBRLightPipe in BUILD_DIR (fails on errors,
-#    reports compiler warnings).
+# 1. Configures, builds and installs the library (BUILD_DIR, prefix BBR_PREFIX,
+#    default <repo>/install), sources the installed bbrsim_env.sh, then builds
+#    examples/testworld and examples/lightpipe against it (BUILD_DIR/examples/<name>).
+#    Fails on build errors; compiler warnings are a FAIL. Release only: a BUILD_DIR
+#    already configured with another build type (e.g. build-debug) is refused.
 # 2. Runs the regression macros in parallel, each in its own directory under
-#    BUILD_DIR/regression/<name>/ (BBRSIMDATA defaults to <repo>/data, so the
-#    executables and the Python validators read the same tree), and scans every
+#    BUILD_DIR/regression/<name>/ (BBRSIMDATA comes from the installed env script, so
+#    the executables and the Python validators read the same tree), and scans every
 #    log for GeomNav / G4Exception / BBR00x / LP002 messages.
 # 3. Runs every scripts/check_*.py validator against the output it belongs to
 #    and prints one PASS/FAIL line per check.
@@ -23,6 +26,13 @@ BUILD="${1:-build}"
 case "$BUILD" in /*) ;; *) BUILD="$REPO/$BUILD" ;; esac
 PY="${BBR_PYTHON:-conda run -n bbrsim python}"
 REG="$BUILD/regression"
+PREFIX="${BBR_PREFIX:-$REPO/install}"
+case "$PREFIX" in /*) ;; *) PREFIX="$REPO/$PREFIX" ;; esac
+# Canonical, as bbrsim_env.sh's BBRSIMINSTALL (pwd -P) and hence PYTHONPATH; this also
+# removes symlinks (/tmp -> /private/tmp), .. and trailing slashes, which CMake collapses.
+mkdir -p "$PREFIX" && PREFIX="$(cd "$PREFIX" >/dev/null && pwd -P)" || { echo "ERROR: cannot create $PREFIX"; exit 2; }
+EXB="$BUILD/examples"
+CLANG=(-DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Release)
 JOBS="${BBR_JOBS:-8}"
 
 # Known red validators, "script|reason" entries separated by ";". BBR_XFAIL="" disables the list.
@@ -31,21 +41,64 @@ XFAIL="${BBR_XFAIL-check_cu_serov.py|HP_Cu alias RRR 6 is 13% low vs Serov under
 fail=0; xfail=0; xpass=0; pass=0
 line() { printf '%-6s %-30s %s\n' "$1" "$2" "$3"; }
 
-[ -f "$BUILD/CMakeCache.txt" ] || { echo "ERROR: $BUILD is not a configured build directory (run cmake --preset clang-release first)"; exit 2; }
-# The executables' compiled-in data default is the INSTALLED <prefix>/share/BBRsim/data,
-# and this runner builds without installing. Unless BBRSIMDATA is already set, point
-# the executables and the Python validators at this checkout's data/.
-export BBRSIMDATA="${BBRSIMDATA:-$REPO/data}"
-
-echo "=== 1. build ($BUILD) ==="
-blog="$(mktemp)"
-if ! make -C "$BUILD" -j"$JOBS" >"$blog" 2>&1; then
-  echo "BUILD FAILED:"; grep -E "error|Error" "$blog" | head -20; rm -f "$blog"; exit 2
+if [ -f "$BUILD/CMakeCache.txt" ] && ! grep -q '^CMAKE_PROJECT_NAME:STATIC=BBRsim$' "$BUILD/CMakeCache.txt"; then
+  echo "ERROR: $BUILD was configured by the pre-reorg single-project build; delete it and rerun."; exit 2
 fi
+# The configure below forces Release, which would silently turn a Debug build dir
+# (clang-debug preset) into a Release one: refuse it instead.
+if [ -f "$BUILD/CMakeCache.txt" ] && ! grep -qE '^CMAKE_BUILD_TYPE:[A-Z]*=Release$' "$BUILD/CMakeCache.txt"; then
+  echo "ERROR: $BUILD is configured as CMAKE_BUILD_TYPE=$(sed -n 's/^CMAKE_BUILD_TYPE:[A-Z]*=//p' "$BUILD/CMakeCache.txt"); the runner builds Release only (default BUILD_DIR: build)."; exit 2
+fi
+echo "=== 1. build ($BUILD -> $PREFIX) ==="
+clog="$(mktemp)"; blog="$(mktemp)"
+step() {  # log label command... ; aborts the whole run on failure
+  local log="$1" label="$2"; shift 2
+  if ! "$@" >>"$log" 2>&1; then
+    echo "BUILD FAILED ($label):"; grep -E "error|Error" "$log" | head -20; rm -f "$clog" "$blog"; exit 2
+  fi
+}
+step "$clog" "configure library" cmake -S "$REPO" -B "$BUILD" "${CLANG[@]}" -DCMAKE_INSTALL_PREFIX="$PREFIX"
+step "$blog" "build library"     cmake --build "$BUILD" -j"$JOBS"
+step "$clog" "install library"   cmake --install "$BUILD"
+# The executables read the installed data copy (BBRSIMDATA from the env script), and
+# cmake --install never deletes: a dataset once installed and since removed from
+# data/ (e.g. mock data written there by mistake) would survive only there, unseen
+# by the real-data leak guard below, which checks data/.
+if ! diff -rq -x .DS_Store "$REPO/data" "$PREFIX/share/BBRsim/data" >/dev/null 2>&1; then
+  echo "ERROR: $PREFIX/share/BBRsim/data differs from $REPO/data (cmake --install never deletes stale files); remove it and rerun."
+  rm -f "$clog" "$blog"; exit 2
+fi
+. "$PREFIX/share/BBRsim/bbrsim_env.sh" || { echo "ERROR: cannot source $PREFIX/share/BBRsim/bbrsim_env.sh"; exit 2; }
+# Binaries resolve libBBRsim, Geant4 and their own example library through RPATH.
+# dyld searches DYLD_LIBRARY_PATH by leaf name before @rpath, so the env script's
+# $PREFIX/lib entry would let an example library previously installed there
+# (cmake --install of an example; the presets use the same prefix) shadow the one
+# just built in $EXB, and the fixtures would silently test stale example code.
+# /bin/bash is SIP-protected, so this removes only what the env script added.
+unset DYLD_LIBRARY_PATH LD_LIBRARY_PATH
+# An example/consumer build dir configured against another prefix keeps its cached
+# BBRsim_DIR (a new CMAKE_PREFIX_PATH is ignored), so it would keep the old prefix's
+# headers, link line and RPATH: start it fresh.
+for d in "$EXB/testworld" "$EXB/lightpipe" "$BUILD/consumer_smoke"; do
+  if [ -f "$d/CMakeCache.txt" ] && ! grep -qxF "BBRsim_DIR:PATH=$PREFIX/lib/cmake/BBRsim" "$d/CMakeCache.txt"; then
+    rm -rf "$d"
+  fi
+done
+# NO_SYSTEM_FROM_IMPORTED passes imported include dirs as -I, not -isystem. As
+# -isystem, BBRsim::BBRsim's would hide warnings in header-only library code that
+# only the examples compile (BBRMaterials.hh, CADMesh.hh), so they would escape the
+# zero-warnings gate. Geant4's dirs become -I too; its headers compile clean.
+for ex in testworld lightpipe; do
+  step "$clog" "configure $ex" cmake -S "$REPO/examples/$ex" -B "$EXB/$ex" "${CLANG[@]}" \
+       -DCMAKE_PREFIX_PATH="$PREFIX" -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON
+  step "$blog" "build $ex" cmake --build "$EXB/$ex" -j"$JOBS"
+done
 nwarn=$(grep -c -i "warning" "$blog" || true)
 echo "build ok; compiler warnings: $nwarn"
 [ "$nwarn" -eq 0 ] || { grep -i "warning" "$blog" | head -10; fail=$((fail+1)); line FAIL build "compiler warnings: $nwarn"; }
-rm -f "$blog"
+rm -f "$clog" "$blog"
+TESTWORLD="$EXB/testworld/bbrsimTestWorld"
+LIGHTPIPE="$EXB/lightpipe/bbrsimLightPipe"
 
 echo "=== 2. macros ==="
 rm -rf "$REG"; mkdir -p "$REG"; ln -s "$REPO/data" "$REG/data"
@@ -75,8 +128,8 @@ if out=$($PY -c "$LEAK_PY" "$REPO" "$REPO/data/waveguides" 2>&1); then
   line PASS "real-data leak guard" "data/waveguides holds only 500 GHz"; pass=$((pass+1))
 else line FAIL "real-data leak guard" "$(echo "$out" | tail -1)"; fail=$((fail+1)); fi
 
-run_macro() {  # name executable macro
-  mkdir -p "$REG/$1" && ( cd "$REG/$1" && "$BUILD/$2" "$REPO/$3" >run.log 2>&1; echo $? >exit.code )
+run_macro() {  # case executable macro-path
+  mkdir -p "$REG/$1" && ( cd "$REG/$1" && "$2" "$3" >run.log 2>&1; echo $? >exit.code )
 }
 
 # Count log lines that indicate trouble. A tolerated exception code (the
@@ -98,14 +151,14 @@ scan_log() {  # case-dir [tolerated-code]
   fi
   echo $(( n_geom + n_lp + (n_start - n_tol) + n_bbr ))
 }
-run_macro refl     BBRSim       reflectance.mac    &
-run_macro planck   BBRSim       planck.mac         &
-run_macro wall     BBRSim       crack_wall.mac     &
-run_macro exit     BBRSim       world_exit.mac     &
-run_macro transmit BBRSim       crack_transmit.mac &
-run_macro oblique  BBRSim       crack_oblique.mac  &
-run_macro frequency BBRSim      crack_frequency.mac &
-run_macro lp       BBRLightPipe lightpipe.mac      &
+run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
+run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
+run_macro wall      "$TESTWORLD" "$REPO/crack_wall.mac"                              &
+run_macro exit      "$TESTWORLD" "$REPO/world_exit.mac"                              &
+run_macro transmit  "$TESTWORLD" "$REPO/crack_transmit.mac"                          &
+run_macro oblique   "$TESTWORLD" "$REPO/crack_oblique.mac"                           &
+run_macro frequency "$TESTWORLD" "$REPO/crack_frequency.mac"                         &
+run_macro lp        "$LIGHTPIPE" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac"   &
 wait
 for d in refl planck wall exit transmit oblique frequency lp; do
   code=$(cat "$REG/$d/exit.code")
