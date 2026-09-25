@@ -53,3 +53,5 @@ install(TARGETS BBRsim EXPORT BBRsimTargets LIBRARY DESTINATION lib ARCHIVE DEST
 install(FILES ${BBRsim_HEADERS} DESTINATION include/BBRsim)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/data DESTINATION share/BBRsim PATTERN .DS_Store EXCLUDE)
 install(EXPORT BBRsimTargets NAMESPACE BBRsim:: DESTINATION lib/cmake/BBRsim)
+install(FILES ${PROJECT_SOURCE_DIR}/bbrsim_env.sh ${PROJECT_SOURCE_DIR}/bbrsim_env.csh
+        DESTINATION share/BBRsim)
