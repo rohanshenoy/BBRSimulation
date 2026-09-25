@@ -1,4 +1,4 @@
-# crack_oblique.mac — oblique-incidence validation of the HFSS azimuth
+# Validation_CrackOblique.mac — oblique-incidence validation of the HFSS azimuth
 # fold/unfold. 16 fixed-gun runs at 45 deg off normal (IWaveTheta = 135 deg)
 # into crack1, every photon aimed at the crack face centre (0,0,0):
 #   runs 0-7  : random polarization, all eight azimuths (+-y, +-z, four
@@ -7,13 +7,13 @@
 #               of incidence), 3000 photons each.
 # Each run writes its own file, output/bbr_oblique_rNN.root, because the run
 # action reopens (and would overwrite) the output file at every /run/beamOn.
-# The run ORDER is what scripts/check_crack_oblique.py expects; keep in sync.
+# The run ORDER is what validation/check_crack_oblique.py expects; keep in sync.
 #
 # Validate:
-#   conda run -n bbrsim python scripts/check_crack_oblique.py build/output
-#   for f in build/output/bbr_oblique_r*.root; do
-#     conda run -n bbrsim python scripts/check_no_photons_in_metal.py $f
-#     conda run -n bbrsim python scripts/check_term_status.py $f
+#   conda run -n bbrsim python <repo>/validation/check_crack_oblique.py output
+#   for f in output/bbr_oblique_r*.root; do
+#     conda run -n bbrsim python <repo>/validation/check_no_photons_in_metal.py $f
+#     conda run -n bbrsim python <repo>/validation/check_term_status.py $f
 #   done
 /run/verbose 0
 /event/verbose 0

@@ -12,12 +12,12 @@ Breaks this catches:
 
 PASS if zero rows have a metal mat_pre and the file holds at least one
 crossing (so an empty output cannot pass). Runs with no metal contact at all
-(e.g. crack_transmit.mac at normal incidence) are still meaningful: a photon
+(e.g. Validation_CrackTransmit.mac at normal incidence) are still meaningful: a photon
 that skated into a crack wall and was reflected into the copper would appear
 here as a row starting in Cu.
 
 Usage:
-    conda run -n bbrsim python scripts/check_no_photons_in_metal.py [path/to/bbr.root]
+    conda run -n bbrsim python validation/check_no_photons_in_metal.py [path/to/bbr.root]
 """
 import os
 import sys
@@ -28,7 +28,7 @@ from bbrsim.io import load_crossings
 
 METAL_PREFIXES = ("Cu_RRR", "BBR_Perfect")
 
-PATH = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr.root"
+PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 df = load_crossings(PATH)
 
 

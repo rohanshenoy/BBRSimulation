@@ -1,10 +1,10 @@
 """
 check_reflectance.py
-Analyse build/output/bbr.root produced by reflectance.mac and compare
+Analyse output/bbr.root produced by reflectance.mac and compare
 observed reflectance R_obs against the Drude model prediction R_theory.
 
 Usage:
-    conda run -n bbrsim python scripts/check_reflectance.py [--root path]
+    conda run -n bbrsim python validation/check_reflectance.py [--root path]
 
 `--csv` is accepted as a deprecated alias for `--root` (the input has been a
 ROOT file since the Phase-A output migration; the flag name is historical).
@@ -22,9 +22,7 @@ from bbrsim import physics, select
 
 # ── parse args ────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-parser.add_argument("--root", "--csv", dest="root", default=os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "build", "output", "bbr.root"),
+parser.add_argument("--root", "--csv", dest="root", default="output/bbr.root",
     help="Path to bbr.root (--csv is a deprecated alias)")
 parser.add_argument("--RRR",  type=int,   default=100)
 parser.add_argument("--T_K",  type=float, default=4.0)

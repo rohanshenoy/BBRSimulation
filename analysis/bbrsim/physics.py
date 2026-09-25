@@ -1,8 +1,9 @@
 """Shared BBRsim physics: Drude copper reflectance, Planck spectrum, Hagen-Rubens.
 
 Single source of truth for the theory previously copy-pasted across the
-scripts/ validators and plots. Mirrors the C++ BBRMaterials (Drude) and
-ThermalSurface (Planck) math. Pure functions, NumPy-vectorized, no I/O.
+validators (validation/check_*) and plots (scripts/plot_*). Mirrors the C++
+BBRMaterials (Drude) and ThermalSurface (Planck) math. Pure functions,
+NumPy-vectorized, no I/O.
 """
 import numpy as np
 from scipy.integrate import quad

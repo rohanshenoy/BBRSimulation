@@ -1,0 +1,25 @@
+# Validation fixture (frozen copy of examples/testworld/G4Macros/reflectance.mac); run by validation/Scripts/run_regression.sh.
+# reflectance.mac — Drude Cu reflectance smoke test
+#
+# Fires 10 000 optical photons at normal incidence to the OFHC_Cu slab
+# (RRR=100, 4 K) at 500 GHz (E = 2.07e-3 eV).
+#
+# Gun aimed at z=10 mm to avoid crack1 (z=0) and crack2 (z=3 mm).
+# Full complex Drude (relaxation regime): expected absorptance
+# D ≈ 4.9e-5 at 500 GHz → ~0-2 absorptions in 10 000 events (λ ≈ 0.5).
+#
+# Analysis:
+#   conda run -n bbrsim python <repo>/validation/check_reflectance.py
+# The [BBR] reflectance lines printed every 1000 events also give R_obs.
+
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+
+/random/setSeeds 42 42
+/run/initialize
+
+/bbr/gun/mode true
+/bbr/gun/posZ 10.0
+
+/run/beamOn 10000

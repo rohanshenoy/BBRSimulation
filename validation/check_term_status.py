@@ -17,7 +17,7 @@ earlier step or track (StepTooSmall, or even BBRAbsorb for a photon that was
 never absorbed), plus "unknown" before the first boundary crossing per thread.
 
 Usage:
-    conda run -n bbrsim python scripts/check_term_status.py [path/to/bbr.root]
+    conda run -n bbrsim python validation/check_term_status.py [path/to/bbr.root]
 """
 import os
 import sys
@@ -28,7 +28,7 @@ from bbrsim.io import load
 
 ABSORB = {"BBRAbsorb", "Absorption", "Detection", "BulkAbsorption"}
 
-PATH = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr.root"
+PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 cr, ab = load(PATH)
 
 if len(ab) == 0:

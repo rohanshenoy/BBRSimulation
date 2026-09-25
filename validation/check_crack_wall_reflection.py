@@ -2,7 +2,7 @@
 check_crack_wall_reflection.py
 Validate the reflection normal when a photon inside a vacuum_wg crack strikes
 the crack's side wall (crack daughter -> Cu slab mother). Run on the output of
-crack_wall.mac (gun inside crack1 heading mostly +z, so every photon hits the
+Validation_CrackWall.mac (gun inside crack1 heading mostly +z, so every photon hits the
 z-wall at z = +0.026 mm).
 
 Expected physics: specular reflection about the WALL normal (z):
@@ -15,7 +15,7 @@ PASS if every crack->Cu BBRReflect row flips pz and preserves px, py
 (|delta| < 1e-9), and at least one such row exists.
 
 Usage:
-    conda run -n bbrsim python scripts/check_crack_wall_reflection.py [path/to/bbr.root]
+    conda run -n bbrsim python validation/check_crack_wall_reflection.py [path/to/bbr.root]
 """
 import os
 import sys
@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim.io import load_crossings
 
-PATH = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr.root"
+PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 TOL = 1e-9
 
 df = load_crossings(PATH)
@@ -37,7 +37,7 @@ wall = df[(df["mat_pre"] == "vacuum_wg")
 n = len(wall)
 print(f"crack -> Cu wall reflections : {n}")
 if n == 0:
-    print("no crack-wall reflections found — did you run crack_wall.mac?")
+    print("no crack-wall reflections found — did you run Validation_CrackWall.mac?")
     print("RESULT: FAIL")
     sys.exit(1)
 

@@ -7,7 +7,7 @@ PASS criteria:
   - counts are non-increasing for n in 1..10
 
 Usage:
-    conda run -n bbrsim python scripts/check_nreflect.py [path/to/bbr.root]
+    conda run -n bbrsim python validation/check_nreflect.py [path/to/bbr.root]
 """
 
 import os
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim.io import load_crossings
 
-PATH = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr.root"
+PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 
 df = load_crossings(PATH)
 n = df["n_reflect"].values.astype(int)

@@ -26,7 +26,7 @@ is 1.0 reproduces the real data exactly.
 Writing inside --src is refused: mock data must never enter data/.
 
 Usage:
-  conda run -n bbrsim python scripts/make_mock_hfss_frequencies.py \\
+  conda run -n bbrsim python validation/Scripts/make_mock_hfss_frequencies.py \\
       --src data/waveguides --dst build/mock_hfss \\
       --ids InfParallelPlate_crack1Rohan InfParallelPlate_crack2 \\
       --source-freq 500 --freqs 50 150 500 1500 5000 --scales 0.2 0.4 1.0 0.6 0.8

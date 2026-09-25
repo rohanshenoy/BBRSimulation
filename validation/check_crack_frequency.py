@@ -1,8 +1,8 @@
 """
 check_crack_frequency.py
-Validate the frequency-keyed HFSS lookup on the output of crack_frequency.mac:
+Validate the frequency-keyed HFSS lookup on the output of Validation_CrackFrequency.mac:
 16 runs, one ROOT file each (output/bbr_freq_rNN.root), taken against the MOCK
-five-frequency tree written by scripts/make_mock_hfss_frequencies.py.
+five-frequency tree written by validation/Scripts/make_mock_hfss_frequencies.py.
 
 What makes a wrong implementation fail here:
   * recording a frequency but sampling another dataset - the mock scales the
@@ -20,11 +20,11 @@ What makes a wrong implementation fail here:
 
 Clamping (runs 13-14) changes only the warning, never the selected dataset, so
 it is checked by the runner counting BBR008 lines, not here. The tie rule is
-unobservable from a macro; scripts/check_physics.py unit-tests it instead.
+unobservable from a macro; validation/check_physics.py unit-tests it instead.
 
 Usage:
-    conda run -n bbrsim python scripts/check_crack_frequency.py [output_dir] [--data-dir MOCK_ROOT]
-    defaults: build/output, and <output_dir>/../../mock_hfss
+    conda run -n bbrsim python validation/check_crack_frequency.py [output_dir] [--data-dir MOCK_ROOT]
+    defaults: output, and ../mock_hfss (the fixture's /bbr/dataDir)
 """
 import argparse
 import glob
@@ -49,7 +49,7 @@ KZ_POSITIVE_SETS = {150.0, 1500.0}
 PLANCK_MIN = {50.0: 100, 150.0: 700, 500.0: 4000, 1500.0: 6000, 5000.0: 400}
 SIGMA_T = 4.0
 
-# Run order of crack_frequency.mac: (label, nu_GHz or None for Planck,
+# Run order of Validation_CrackFrequency.mac: (label, nu_GHz or None for Planck,
 # expected selection or None, events).
 RUNS = [("near 50 GHz", 50.05, 50.0, 4000),
         ("on-grid 150 GHz", 150.0, 150.0, 4000),
@@ -64,7 +64,7 @@ RUNS.append(("10 THz (clamp high)", 10000.0, 5000.0, 4000))
 RUNS.append(("Planck 20 K", None, None, 100000))
 
 ap = argparse.ArgumentParser()
-ap.add_argument("output_dir", nargs="?", default="build/output")
+ap.add_argument("output_dir", nargs="?", default="output")
 ap.add_argument("--data-dir", default=None,
                 help="mock data ROOT (contains waveguides/); "
                      "default <output_dir>/../../mock_hfss")

@@ -5,7 +5,7 @@ uniform-in-theta convention. KS-test the clipping-free window (theta < 15 deg).
 PASS if KS p-value > 0.01.
 
 Usage:
-    conda run -n bbrsim python scripts/check_angle_distribution.py [path/to/bbr.root]
+    conda run -n bbrsim python validation/check_angle_distribution.py [path/to/bbr.root]
 """
 
 import os
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(
 from bbrsim.io import load_crossings
 from bbrsim import select
 
-PATH = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr.root"
+PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 
 df = load_crossings(PATH)
 theta = select.first_hit_cu(df)["theta_in_deg"].values

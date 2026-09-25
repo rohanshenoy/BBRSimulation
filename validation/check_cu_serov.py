@@ -13,7 +13,7 @@ Reference points (Serov Figs 6 and 8, read at T = 4 K):
 The expected values are the measured literals; nothing here is derived from
 the model under test, so a wrong RRR mapping or a broken Drude formula fails.
 
-Run: conda run -n bbrsim python scripts/check_cu_serov.py
+Run: conda run -n bbrsim python validation/check_cu_serov.py
 """
 import os
 import sys

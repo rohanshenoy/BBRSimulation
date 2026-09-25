@@ -1,7 +1,7 @@
 """
 check_crack_oblique.py
 Validate the HFSS azimuth fold/unfold at OBLIQUE incidence on the output of
-crack_oblique.mac: 16 fixed-gun runs at 45 deg off normal (IWaveTheta = 135)
+Validation_CrackOblique.mac: 16 fixed-gun runs at 45 deg off normal (IWaveTheta = 135)
 into crack1, one ROOT file per run (output/bbr_oblique_r00.root ... r15).
 
 Physics the checks rest on (independent of the code under test):
@@ -27,8 +27,8 @@ against the predicted table (p > 1e-3); two-sample KS mirror tests between
 partner runs (p > 0.01).
 
 Usage:
-    conda run -n bbrsim python scripts/check_crack_oblique.py [output_dir | glob]
-    (default: build/output)
+    conda run -n bbrsim python validation/check_crack_oblique.py [output_dir | glob]
+    (default: output)
 """
 import glob
 import os
@@ -45,7 +45,7 @@ from bbrsim.io import load_many
 DIR_STEM = "InfParallelPlate_crack1Rohan_500GHz"
 S = 0.70710678
 
-# Must match the run order in crack_oblique.mac: (label, gun dir, pol, events).
+# Must match the run order in Validation_CrackOblique.mac: (label, gun dir, pol, events).
 # pol None = random polarization; otherwise the requested vector, which the
 # PGA projects perpendicular to the direction and normalises.
 RUNS = [
@@ -76,7 +76,7 @@ P_KS_MIN = 0.01      # mirror KS
 TOL_DIR = 1e-6       # entry direction vs configured
 TOL_REFL = 1e-9      # specular reflection
 
-arg = sys.argv[1] if len(sys.argv) > 1 else "build/output"
+arg = sys.argv[1] if len(sys.argv) > 1 else "output"
 files = sorted(glob.glob(os.path.join(arg, "bbr_oblique_r*.root")) if os.path.isdir(arg)
                else glob.glob(arg))
 if not files:

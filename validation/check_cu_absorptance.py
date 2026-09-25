@@ -6,8 +6,8 @@ absorbed (status BBRAbsorb). RRR/T are inferred from the Cu material name in
 the data (override with --rrr / --temp). PASS if 0.3 < A_obs/A_theory < 3.0.
 
 Usage:
-    ./BBRSim test.mac          # a Planck run with enough Cu absorptions
-    conda run -n bbrsim python scripts/check_cu_absorptance.py [path/to/bbr.root]
+    bbrsimTestWorld planck_5M.mac          # a Planck run with enough Cu absorptions
+    conda run -n bbrsim python validation/check_cu_absorptance.py [path/to/bbr.root]
                                  [--rrr N] [--temp T]
 """
 
@@ -21,7 +21,7 @@ from bbrsim.io import load_crossings
 from bbrsim import physics, select
 
 parser = argparse.ArgumentParser()
-parser.add_argument("path", nargs="?", default="build/output/bbr.root")
+parser.add_argument("path", nargs="?", default="output/bbr.root")
 parser.add_argument("--rrr", type=int, default=None,
                     help="Override RRR (default: inferred from Cu material name)")
 parser.add_argument("--temp", type=float, default=None,
@@ -29,7 +29,7 @@ parser.add_argument("--temp", type=float, default=None,
 args = parser.parse_args()
 
 if not os.path.exists(args.path):
-    print(f"ERROR: {args.path} not found. Run a Planck macro (e.g. test.mac) first.",
+    print(f"ERROR: {args.path} not found. Run a Planck macro (e.g. planck_5M.mac) first.",
           file=sys.stderr)
     sys.exit(1)
 

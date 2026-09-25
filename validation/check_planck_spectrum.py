@@ -4,7 +4,7 @@ the Planck photon-number spectrum at the given temperature.  The number spectrum
 B ∝ ν²/(e^{hν/kT}−1) peaks at u = E/kT ≈ 1.5936.
 
 Usage:
-    conda run -n bbrsim python scripts/check_planck_spectrum.py [path/to/bbr.root] [--temp T]
+    conda run -n bbrsim python validation/check_planck_spectrum.py [path/to/bbr.root] [--temp T]
 """
 
 import argparse
@@ -21,7 +21,7 @@ from bbrsim.io import load_crossings
 from bbrsim import physics
 
 parser = argparse.ArgumentParser()
-parser.add_argument("csv", nargs="?", default="build/output/bbr.root")
+parser.add_argument("csv", nargs="?", default="output/bbr.root")
 parser.add_argument("--temp", type=float, default=4.0, help="Emitter temperature in K")
 args = parser.parse_args()
 

@@ -6,7 +6,7 @@ rate ratio should equal the opening-area ratio. PASS if within 3 sigma_Poisson
 of expected.
 
 Usage:
-    conda run -n bbrsim python scripts/check_crack_ratio.py [path/to/bbr.root]
+    conda run -n bbrsim python validation/check_crack_ratio.py [path/to/bbr.root]
 """
 
 import os
@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(
 from bbrsim.io import load_crossings
 from bbrsim import select
 
-PATH = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr.root"
+PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 
 # Aperture areas [mm^2]
 A1 = 2 * 5.1 * 2 * 0.026   # crack1

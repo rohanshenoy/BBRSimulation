@@ -1,14 +1,14 @@
-# crack_frequency.mac — validation of the frequency-keyed HFSS lookup against a
+# Validation_CrackFrequency.mac — validation of the frequency-keyed HFSS lookup against a
 # MOCK five-frequency data tree (50 / 150 / 500 / 1500 / 5000 GHz) built from
-# the single real 500 GHz dataset by scripts/make_mock_hfss_frequencies.py.
+# the single real 500 GHz dataset by validation/Scripts/make_mock_hfss_frequencies.py.
 # Each mock frequency carries two signatures so the dataset actually sampled is
 # observable: a scaled transmittance, and (for 150 and 1500 GHz) a far field
 # truncated to Theta <= 90 deg, i.e. exits with k_z >= 0 only.
 #
 # /bbr/dataDir names the data ROOT (it must contain waveguides/) and is
-# PreInit-only, so it precedes /run/initialize. ../mock_hfss resolves to
-# <repo>/mock_hfss when run from build/, and to <build>/regression/mock_hfss
-# under scripts/run_regression.sh.
+# PreInit-only, so it precedes /run/initialize. ../mock_hfss is resolved from
+# the run directory: validation/Scripts/run_regression.sh links
+# <build>/regression/mock_hfss there.
 #
 # Runs 0-4 sit on (or, at the two grid edges, 0.1 % inside) the grid; runs 5-12
 # straddle the four log-space midpoints by +-1 %, which is where a linear or
@@ -18,13 +18,12 @@
 # every /run/beamOn reopens the analysis file, so without /analysis/setFileName
 # each run would overwrite the last.
 #
-# Generate the mock tree and validate:
-#   conda run -n bbrsim python scripts/make_mock_hfss_frequencies.py \
-#       --src data/waveguides --dst mock_hfss \
+# By hand, from an empty run dir D:
+#   conda run -n bbrsim python <repo>/validation/Scripts/make_mock_hfss_frequencies.py \
+#       --src <repo>/data/waveguides --dst D/../mock_hfss \
 #       --ids InfParallelPlate_crack1Rohan InfParallelPlate_crack2
-#   cd build && ./BBRSim crack_frequency.mac 2>&1 | tee frequency.log
-#   conda run -n bbrsim python scripts/check_crack_frequency.py build/output \
-#       --data-dir mock_hfss
+#   cd D && bbrsimTestWorld <repo>/validation/G4Macros/Validation_CrackFrequency.mac 2>&1 | tee frequency.log
+#   conda run -n bbrsim python <repo>/validation/check_crack_frequency.py output
 #   grep -c 'BBR008 dataset=InfParallelPlate_crack1Rohan side=low'  frequency.log  # 1
 #   grep -c 'BBR008 dataset=InfParallelPlate_crack1Rohan side=high' frequency.log  # 1
 /run/verbose 0
@@ -40,7 +39,7 @@
 # ---- runs 0-4: on the grid (edges nudged 0.1 % inward) ---------------------
 # 50.05 GHz, not exactly 50: h*50 GHz at 7 significant figures reads back as
 # 49.9992 GHz and would clamp. The exact-edge rule is unit-tested in
-# scripts/check_physics.py instead.
+# validation/check_physics.py instead.
 /bbr/gun/energy_eV 2.069902e-04
 /analysis/setFileName output/bbr_freq_r00
 /run/beamOn 4000

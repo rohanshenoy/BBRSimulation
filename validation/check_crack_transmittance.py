@@ -1,7 +1,7 @@
 """
 check_crack_transmittance.py
 Validate the HFSS crack transmittance at normal incidence on the output of
-crack_transmit.mac (40 000 photons, 500 GHz, into crack1, seeds 2024 7).
+Validation_CrackTransmit.mac (40 000 photons, 500 GHz, into crack1, seeds 2024 7).
 
 Expected physics (hand-derived): a sub-cutoff parallel-plate gap is a perfect
 polarization filter — the TEM component transmits (T=1), the orthogonal
@@ -17,7 +17,7 @@ PASS if |T_obs - 0.50| < 3 sigma_binomial and no transmitted photon has
 |dir . n| < 1e-6, and every event entered crack1 exactly once.
 
 Usage:
-    conda run -n bbrsim python scripts/check_crack_transmittance.py [path/to/bbr.root]
+    conda run -n bbrsim python validation/check_crack_transmittance.py [path/to/bbr.root]
 """
 import os
 import sys
@@ -30,7 +30,7 @@ from bbrsim.io import load_crossings
 from bbrsim import select
 
 T_IDEAL = 0.50
-PATH = sys.argv[1] if len(sys.argv) > 1 else "build/output/bbr.root"
+PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 
 df = load_crossings(PATH)
 n_events = df["event_id"].nunique()

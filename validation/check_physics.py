@@ -4,7 +4,7 @@ Anchors the shared physics against documented reference numbers (user_guide.md,
 Serov) so the Python theory cannot silently drift from the C++ BBRMaterials.
 PASS only if every anchor is within tolerance.
 
-Run: conda run -n bbrsim python scripts/check_physics.py
+Run: conda run -n bbrsim python validation/check_physics.py
 """
 import os
 import sys

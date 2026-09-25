@@ -49,3 +49,14 @@ write_basic_package_version_file(${PROJECT_BINARY_DIR}/BBRsimConfigVersion.cmake
 install(FILES ${PROJECT_BINARY_DIR}/BBRsimConfig.cmake
               ${PROJECT_BINARY_DIR}/BBRsimConfigVersion.cmake
         DESTINATION lib/cmake/BBRsim)
+if(INSTALL_EXAMPLES)
+  install(DIRECTORY examples DESTINATION . PATTERN build EXCLUDE PATTERN .DS_Store EXCLUDE)
+endif()
+if(INSTALL_VALIDATION)
+  # USE_SOURCE_PERMISSIONS keeps the runner and drift guards executable; the last
+  # four patterns keep run artifacts (plots, ROOT files, build/output dirs) out.
+  install(DIRECTORY validation DESTINATION . USE_SOURCE_PERMISSIONS
+          PATTERN __pycache__ EXCLUDE PATTERN .DS_Store EXCLUDE
+          PATTERN build EXCLUDE PATTERN output EXCLUDE
+          PATTERN "*.root" EXCLUDE PATTERN "*.png" EXCLUDE)
+endif()

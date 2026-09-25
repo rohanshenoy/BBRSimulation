@@ -1,10 +1,10 @@
-# world_exit.mac — 2000 photons fired from (-20,0,0) mm toward -x into empty
+# Validation_WorldExit.mac — 2000 photons fired from (-20,0,0) mm toward -x into empty
 # space. No boundary is ever crossed; every photon leaves the world.
 # Regression for abspoints.term_status: every row must read WorldExit
 # (never "unknown" or a stale boundary status).
 #
 # Validate:
-#   conda run -n bbrsim python scripts/check_term_status.py build/output/bbr.root
+#   conda run -n bbrsim python <repo>/validation/check_term_status.py output/bbr.root
 /run/verbose 0
 /event/verbose 0
 /tracking/verbose 0
