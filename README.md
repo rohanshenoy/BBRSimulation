@@ -319,7 +319,7 @@ Two build modes, selected by `/bbr/lightpipe/mode`:
 - **`parametric`** (default) — a tube generated from bore radius, length, and
   wall thickness.
 - **`cad`** — an ASCII `.STL` imported through the bundled header-only CADMesh
-  (`include/CADMesh.hh`). The built-in reader is ASCII-only; binary STL needs
+  (`library/include/CADMesh.hh`). The built-in reader is ASCII-only; binary STL needs
   assimp. A sample mesh ships at `data/cad/box_sample.stl`.
 
 | Command | Argument | Description |

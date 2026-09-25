@@ -1,5 +1,8 @@
 build/
 build-*/
+install/
+install-*/
+.bbrsim-version
 output/
 mock_hfss/
 .DS_Store
