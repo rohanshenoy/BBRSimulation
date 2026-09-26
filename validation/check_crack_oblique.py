@@ -37,8 +37,6 @@ import sys
 import numpy as np
 from scipy import stats
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim import hfss, select
 from bbrsim.io import load_many
 

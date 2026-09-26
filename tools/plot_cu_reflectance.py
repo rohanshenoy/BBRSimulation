@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 plot_cu_reflectance.py
 Plot copper reflectance (R) and absorptance (D = 1-R) vs frequency.
@@ -19,7 +20,7 @@ Data sources:
   - Serov et al. (2016) cryogenic reference points at 4 K
 
 Usage:
-    conda run -n bbrsim python scripts/plot_cu_reflectance.py [--out path/to/out.png]
+    conda run -n bbrsim python tools/plot_cu_reflectance.py [--out path/to/out.png]
 """
 
 import argparse
@@ -31,13 +32,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--out", default="build/cu_reflectance_plots.png")
+parser.add_argument("--out", default="cu_reflectance_plots.png")
 args = parser.parse_args()
 
-import sys
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
-from bbrsim import physics
+from bbrsim import paths, physics
 
 # Local adapters so the existing plotting calls below are unchanged.
 m_e      = physics.M_E
@@ -72,7 +70,7 @@ materials_drude = {
 }
 
 # ── load tabulated data ───────────────────────────────────────────────────────
-data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "materials")
+data_dir = os.path.join(paths.data_dir(), "materials")
 
 g4ir   = pd.read_csv(os.path.join(data_dir, "cu_g4ir_reflectivity.csv"))
 palik  = pd.read_csv(os.path.join(data_dir, "cu_palik_optical_constants.csv"))
@@ -202,6 +200,6 @@ for ax in (ax_R, ax_D, ax_T):
     ax.set_xticklabels(["1 GHz", "10", "100", "1 THz", "10", "100 THz"])
 
 plt.tight_layout()
-os.makedirs(os.path.dirname(args.out), exist_ok=True)
+if os.path.dirname(args.out): os.makedirs(os.path.dirname(args.out), exist_ok=True)
 fig.savefig(args.out, dpi=150, bbox_inches="tight")
 print(f"Saved: {args.out}")

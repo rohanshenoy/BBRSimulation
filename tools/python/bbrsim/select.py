@@ -1,7 +1,7 @@
 """Shared selections / reductions on decoded BBRsim crossings DataFrames.
 
 Small helpers reused across the validators (validation/check_*) and plots
-(scripts/plot_*), built on the string-decoded columns from bbrsim.io.load /
+(tools/plot_*), built on the string-decoded columns from bbrsim.io.load /
 load_crossings.
 """
 import re

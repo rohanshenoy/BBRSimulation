@@ -1,4 +1,4 @@
-"""Self-test for analysis/bbrsim/physics.py.
+"""Self-test for tools/python/bbrsim/physics.py.
 
 Anchors the shared physics against documented reference numbers (user_guide.md,
 Serov) so the Python theory cannot silently drift from the C++ BBRMaterials.
@@ -11,9 +11,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
-from bbrsim import hfss, physics
+from bbrsim import hfss, paths, physics
 
 ok = True
 
@@ -75,6 +73,19 @@ for lo, hi in zip([50.0, 150.0, 500.0, 1500.0], [150.0, 500.0, 1500.0, 5000.0]):
 check_bool("photon_frequency_GHz(2.067834e-3 eV) = 500 GHz",
            abs(hfss.photon_frequency_GHz(2.067834e-3) - 500.0) < 1e-3,
            f"got {hfss.photon_frequency_GHz(2.067834e-3):.4f}")
+
+print("bbrsim.paths.data_dir (Python twin of the C++ data default):")
+_saved = os.environ.pop("BBRSIMDATA", None)
+try:
+    os.environ["BBRSIMDATA"] = "/nonexistent/bbrsim-data"
+    check_bool("BBRSIMDATA wins", paths.data_dir() == "/nonexistent/bbrsim-data")
+    del os.environ["BBRSIMDATA"]
+    _d = paths.data_dir()
+    check_bool("without BBRSIMDATA: nearest data/waveguides tree",
+               os.path.isdir(os.path.join(_d, "waveguides")), _d)
+finally:
+    if _saved is not None:
+        os.environ["BBRSIMDATA"] = _saved
 
 print()
 print("RESULT:", "PASS" if ok else "FAIL")

@@ -19,8 +19,8 @@ Outgoing frame (far_field.csv Theta, Phi), with theta_f = sy*theta_hat and
 phi_f = sx*phi_hat:
     dir_out = sinT cosP normal + sinT sinP theta_f + cosT phi_f
 
-Every formula here has a named counterpart in src/BBSimOpBoundaryProcess.cc
-or src/BBRHFSSData.cc; keep them in lock-step.
+Every formula here has a named counterpart in library/src/BBSimOpBoundaryProcess.cc
+or library/src/BBRHFSSData.cc; keep them in lock-step.
 """
 from __future__ import annotations
 
@@ -30,21 +30,15 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from . import paths
+
 K_MIN_NORMAL_COMPONENT = 1e-6   # kMinNormalComponent in BBRHFSSData.cc
 KEY_ROUND = 2                   # RoundDeg: incidence keys rounded to 0.01 deg
 
 
 def default_base_dir():
-    """Directory holding the ``<dataset>_Ephi=N`` folders.
-
-    ``$BBRSIMDATA/waveguides`` if the variable is set, else ``data/waveguides``
-    of the checkout this file lives in.
-    """
-    env = os.environ.get("BBRSIMDATA")
-    if env:
-        return os.path.join(env, "waveguides")
-    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(repo, "data", "waveguides")
+    """<data root>/waveguides, the root resolved by bbrsim.paths.data_dir()."""
+    return os.path.join(paths.data_dir(), "waveguides")
 
 
 @dataclass

@@ -1,28 +1,26 @@
+#!/usr/bin/env python3
 """
 plot_test_output.py
 Visualise bbr.root: incoming Planck spectrum + outgoing photon distributions.
 
 Usage:
-    conda run -n bbrsim python scripts/plot_test_output.py [path/to/bbr.root] [--temp T]
+    conda run -n bbrsim python tools/plot_test_output.py [path/to/bbr.root] [--temp T]
 """
 
 import argparse
 import os
-import sys
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim.io import load_crossings
 from bbrsim import physics, select
 
 # ── args ────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-parser.add_argument("path", nargs="?", default="build/output/bbr.root")
+parser.add_argument("path", nargs="?", default="output/bbr.root")
 parser.add_argument("--temp", type=float, default=4.0, help="Emitter temperature [K]")
 args = parser.parse_args()
 

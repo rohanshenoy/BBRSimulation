@@ -15,11 +15,8 @@ the model under test, so a wrong RRR mapping or a broken Drude formula fails.
 
 Run: conda run -n bbrsim python validation/check_cu_serov.py
 """
-import os
 import sys
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim import physics
 
 T_K = 4.0

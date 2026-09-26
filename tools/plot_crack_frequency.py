@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 """
 plot_crack_frequency.py
-Visualise the frequency-keyed HFSS lookup on the output of crack_frequency.mac
+Visualise the frequency-keyed HFSS lookup on the output of Validation_CrackFrequency.mac
 (16 runs against the mock five-frequency tree). Four panels:
 
   a) Selection map   - which grid dataset each photon was given, against its own
@@ -26,9 +27,9 @@ ordinal ramp (light = low frequency), not categorical hues. Steps 250-700 of
 the reference ramp; the lightest clears the surface at 2.06:1.
 
 Usage:
-    conda run -n bbrsim python scripts/plot_crack_frequency.py [output_dir] \\
+    conda run -n bbrsim python tools/plot_crack_frequency.py [output_dir] \\
         [--data-dir MOCK_ROOT] [--out PATH]
-    defaults: build/output, <output_dir>/../../mock_hfss,
+    defaults: output, <output_dir>/../../mock_hfss,
               <output_dir>/crack_frequency_overview.png
 """
 import argparse
@@ -42,8 +43,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim import hfss, select
 from bbrsim.io import load_many
 
@@ -61,7 +60,7 @@ INK, INK_2, INK_MUTED = "#0b0b0b", "#52514e", "#8a8a85"
 SURFACE = "#fcfcfb"
 
 ap = argparse.ArgumentParser()
-ap.add_argument("output_dir", nargs="?", default="build/output")
+ap.add_argument("output_dir", nargs="?", default="output")
 ap.add_argument("--data-dir", default=None, help="mock data ROOT (contains waveguides/)")
 ap.add_argument("--out", default=None)
 args = ap.parse_args()

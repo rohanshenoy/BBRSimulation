@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 plot_crack_angular.py
 Compare simulated outgoing theta/phi distributions per crack against HFSS far-field theory.
@@ -9,7 +10,7 @@ Coordinate convention (from memory/project_coord_convention.md):
   Main transmission lobe: T=90°, P=0° → pure +x direction.
 
 Usage:
-    conda run -n bbrsim python scripts/plot_crack_angular.py [path/to/bbr.root] [--iwt T] [--iwp P]
+    conda run -n bbrsim python tools/plot_crack_angular.py [path/to/bbr.root] [--iwt T] [--iwp P]
 
   --iwt / --iwp: fix the HFSS incoming wave angle (IWaveTheta / IWavePhi in degrees).
                  Use for gun-mode runs so theory matches the specific incidence angle.
@@ -25,13 +26,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import sys
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim.io import load_crossings
+from bbrsim import paths
 
 parser = argparse.ArgumentParser()
-parser.add_argument("path", nargs="?", default="build/output/bbr.root")
+parser.add_argument("path", nargs="?", default="output/bbr.root")
 parser.add_argument("--iwt", type=float, default=None,
                     help="Filter HFSS theory to this IWaveTheta [deg]. Default: average all.")
 parser.add_argument("--iwp", type=float, default=None,
@@ -39,7 +38,7 @@ parser.add_argument("--iwp", type=float, default=None,
 args = parser.parse_args()
 
 CSV = args.path
-HFSS_BASE = "data/waveguides"
+HFSS_BASE = os.path.join(paths.data_dir(), "waveguides")
 
 CRACKS = {
     "crack1": "InfParallelPlate_crack1Rohan_500GHz",

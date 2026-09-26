@@ -10,6 +10,7 @@ project(BBRsim VERSION 0.1.0 LANGUAGES C CXX)
 option(WITH_GEANT4_UIVIS "Build with Geant4 UI and Vis drivers" ON)
 option(INSTALL_EXAMPLES "Copy examples/ to the installation area" OFF)
 option(INSTALL_VALIDATION "Copy validation/ to the installation area" ON)
+option(BUILD_BBRSIM_TOOLS "Install the bbrsim Python package and the plot scripts" ON)
 set(BBRSIM_VERSION "${PROJECT_VERSION}" CACHE STRING
     "Version string used when the source is not a git checkout")
 
@@ -26,6 +27,9 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 add_subdirectory(library)
+if(BUILD_BBRSIM_TOOLS)
+  add_subdirectory(tools)
+endif()
 
 # Version stamp (G4CMP CMakeLists.txt:83-95). git -C also works in a worktree,
 # where .git is a file; describe needs an annotated tag to report one.

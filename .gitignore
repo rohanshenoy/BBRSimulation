@@ -26,3 +26,4 @@ tmp/
 # Python bytecode (analysis package)
 __pycache__/
 *.pyc
+*.egg-info/

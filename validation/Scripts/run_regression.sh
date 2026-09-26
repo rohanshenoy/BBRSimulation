@@ -60,7 +60,10 @@ step() {  # log label command... ; aborts the whole run on failure
     echo "BUILD FAILED ($label):"; grep -E "error|Error" "$log" | head -20; rm -f "$clog" "$blog"; exit 2
   fi
 }
-step "$clog" "configure library" cmake -S "$REPO" -B "$BUILD" "${CLANG[@]}" -DCMAKE_INSTALL_PREFIX="$PREFIX"
+# BUILD_BBRSIM_TOOLS=ON: the validators import the installed bbrsim package, so a
+# BUILD_DIR cached with it OFF must not skip reinstalling it.
+step "$clog" "configure library" cmake -S "$REPO" -B "$BUILD" "${CLANG[@]}" -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+     -DBUILD_BBRSIM_TOOLS=ON
 step "$blog" "build library"     cmake --build "$BUILD" -j"$JOBS"
 step "$clog" "install library"   cmake --install "$BUILD"
 # The executables read the installed data copy (BBRSIMDATA from the env script), and
@@ -112,6 +115,18 @@ pass=$((pass + gpass)); fail=$((fail + gfail))
 if [ $((gpass + gfail)) -eq 0 ] || [ "$grc" -ne "$gfail" ]; then
   line FAIL drift_guards "did not run cleanly (rc=$grc, $gpass PASS, $gfail FAIL)"; fail=$((fail+1))
 fi
+# With -c, Python puts the CWD first on the module search path, ahead of
+# PYTHONPATH: a runner started in tools/python would import the source package,
+# so run from /. And cmake --install never deletes, so a module removed or
+# renamed in tools/python/bbrsim would survive in the prefix: compare the
+# contents as well.
+pyinst="$PREFIX/share/BBRsim/python/bbrsim"
+if ! bp=$(cd / && $PY -c 'import bbrsim.paths, bbrsim.hfss, os; print(os.path.dirname(bbrsim.__file__))' 2>&1) \
+   || [ "$bp" != "$pyinst" ]; then line FAIL "bbrsim importable" "got: $bp"; fail=$((fail+1))
+elif ! diff -rq -x __pycache__ -x .DS_Store "$REPO/tools/python/bbrsim" "$pyinst" >/dev/null 2>&1; then
+  line FAIL "bbrsim importable" "$pyinst differs from tools/python/bbrsim (cmake --install never deletes stale files); remove it and rerun"
+  fail=$((fail+1))
+else line PASS "bbrsim importable" "installed copy"; pass=$((pass+1)); fi
 CS="$BUILD/consumer_smoke"; cslog="$BUILD/consumer_smoke.log"
 if cmake -S "$VAL/Scripts/consumer_smoke" -B "$CS" "${CLANG[@]}" -DCMAKE_PREFIX_PATH="$PREFIX" >"$cslog" 2>&1 \
    && cmake --build "$CS" >>"$cslog" 2>&1 \
@@ -141,9 +156,10 @@ ln -s "$MOCK" "$REG/mock_hfss"
 
 # The real tree must stay single-frequency: catches mock data written into data/.
 # Run with -c: conda run does not forward stdin, so a heredoc would never execute
-# and the guard could never fail.
-LEAK_PY='import sys; sys.path.insert(0, sys.argv[1] + "/analysis"); from bbrsim import hfss; bad = [(i, g) for i in ("InfParallelPlate_crack1Rohan", "InfParallelPlate_crack2") for g in [[f for f, _ in hfss.discover_frequencies(i, sys.argv[2])]] if g != [500.0]]; print(bad or "ok"); sys.exit(1 if bad else 0)'
-if out=$($PY -c "$LEAK_PY" "$REPO" "$REPO/data/waveguides" 2>&1); then
+# and the guard could never fail. Run from / so the CWD cannot shadow the
+# installed bbrsim (see the import check above).
+LEAK_PY='import sys; from bbrsim import hfss; bad = [(i, g) for i in ("InfParallelPlate_crack1Rohan", "InfParallelPlate_crack2") for g in [[f for f, _ in hfss.discover_frequencies(i, sys.argv[1])]] if g != [500.0]]; print(bad or "ok"); sys.exit(1 if bad else 0)'
+if out=$(cd / && $PY -c "$LEAK_PY" "$REPO/data/waveguides" 2>&1); then
   line PASS "real-data leak guard" "data/waveguides holds only 500 GHz"; pass=$((pass+1))
 else line FAIL "real-data leak guard" "$(echo "$out" | tail -1)"; fail=$((fail+1)); fi
 

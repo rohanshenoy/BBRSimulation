@@ -9,13 +9,10 @@ Usage:
     conda run -n bbrsim python validation/check_crack_ratio.py [path/to/bbr.root]
 """
 
-import os
 import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim.io import load_crossings
 from bbrsim import select
 

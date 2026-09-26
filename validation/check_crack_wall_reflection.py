@@ -17,13 +17,10 @@ PASS if every crack->Cu BBRReflect row flips pz and preserves px, py
 Usage:
     conda run -n bbrsim python validation/check_crack_wall_reflection.py [path/to/bbr.root]
 """
-import os
 import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
 from bbrsim.io import load_crossings
 
 PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"

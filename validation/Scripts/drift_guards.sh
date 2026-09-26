@@ -28,4 +28,5 @@ report "every fixture is run" "$(for f in "$REPO"/validation/G4Macros/Validation
 NB_PY='import json, sys; nb = json.load(open(sys.argv[1])); sys.exit(1 if any(c.get("outputs") or c.get("execution_count") for c in nb["cells"] if c["cell_type"] == "code") else 0)'
 report "notebooks without outputs" "$(git -C "$REPO" ls-files '*.ipynb' | while read -r nb; do
     $PY -c "$NB_PY" "$REPO/$nb" >/dev/null 2>&1 || echo "$nb"; done)"
+report "tools file lists" "$(unlisted "$REPO/tools/CMakeLists.txt" "$REPO"/tools/python/bbrsim/*.py "$REPO"/tools/plot_*.py)"
 exit $nfail
