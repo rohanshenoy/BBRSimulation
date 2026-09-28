@@ -2,28 +2,21 @@ build/
 build-*/
 install/
 install-*/
-.bbrsim-version
 output/
 mock_hfss/
+.bbrsim-version
+doxygen/
 .DS_Store
 *.root
-*.out
-# ...but keep the stock OpNovice2 reference outputs (see reference/opnovice2/)
-!reference/opnovice2/macros/*.out
-GNUmakefile
-History
 docs/
 .worktrees/
 tmp/
-
 # Generated analysis plots
 *_check.png
 *_distribution.png
-
 # Jupyter
 .ipynb_checkpoints/
-
-# Python bytecode (analysis package)
+# Python
 __pycache__/
 *.pyc
 *.egg-info/

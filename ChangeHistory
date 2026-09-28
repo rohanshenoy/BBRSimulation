@@ -1,0 +1,19 @@
+2026-09-27  reorg : Mirror G4CMP directory layout; standalone examples; validation/ fixtures; tools/python package; executables BBRSim/BBRLightPipe renamed bbrsimTestWorld/bbrsimLightPipe.
+2026-09-24  notebook : Copper reflectance notebook (full Drude model vs Serov 2016).
+2026-09-24  frequency : Frequency-keyed HFSS lookup (nearest in log nu); /bbr/dataDir; hfss_freq_GHz column.
+2026-09-24  oblique : Oblique-incidence HFSS validation at IWaveTheta=135 deg; /bbr/gun/pol.
+2026-09-24  runid : crossings/abspoints run_id taken from the master run (G4TaskRunManager pool threads reported a stale run ID).
+2026-09-17  63952b8 : One-command build-and-validate runner; CMake presets pin Apple Clang.
+2026-09-17  audit : Reflecting normal from navigator exit normal; WorldExit term_status; configurable emitter; HFSS cap at 1.
+2026-08-26  cb78483 : Merge fix/core-hardening and light-pipe-example into main.
+2026-07-05  lightpipe : BBRLightPipe executable, parametric + CAD (CADMesh) modes.
+2026-06-27  27a43c1 : Cirlex, Si, Ge loss-tangent dielectrics.
+2026-06-21  config : BBRConfigManager/Messenger (thread-local clone); analysis package bbrsim (io, physics, select).
+2026-06-19  root : G4Analysis ROOT output (crossings, abspoints, legend); multithreaded run manager.
+2026-06-10  440679e : Complex-sigma Drude fix; HFSS exit anchoring; azimuth fold/unfold.
+2026-06-04  drude : RRR-parameterised Drude copper reflectance replaces Hagen-Rubens.
+2026-05-08  planck : ThermalSurface Planck emitter; REFLECTIVITY-on-material boundary handling.
+2026-04-28  cracklib : BBRCrackLibrary; second crack geometry.
+2026-04-24  51814b8 : Crack detection by vacuum_wg material; runtime orientation.
+2026-04-21  27fea5d : HFSS diffraction physics and smoke test.
+2026-04-18  59ba452 : Initial G4OpBoundaryProcess wrapper skeleton, started from the Geant4 OpNovice2 example.
