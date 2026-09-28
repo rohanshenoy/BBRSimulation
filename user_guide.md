@@ -474,8 +474,10 @@ RRR must be a positive integer. RRR < 1 has no physical meaning.
 
 **No `[BBR] reflectance` lines in output**
 Expected in a multithreaded run: the tally is per worker thread and prints
-every 1000 Cu hits on that thread, so the shipped reflectance macros
-(10 000 or 2 000 events) usually print none. Read the result from
+every 1000 Cu hits on that thread, so the shipped reflectance macros print
+few or none: the 2 000-event OF_Cu/HP_Cu macros print none, and the
+10 000-event `reflectance.mac` prints a line only for the threads that reach
+1000 hits. Read the result from
 `output/bbr.root` with `check_reflectance.py`, or add `/run/numberOfThreads 1`
 before `/run/initialize` for a running tally. If that single-threaded run
 still prints nothing, check that the gun points at the Cu face (x = 0 plane)
