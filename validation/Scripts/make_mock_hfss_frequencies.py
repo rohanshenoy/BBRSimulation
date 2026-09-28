@@ -23,7 +23,8 @@ it against the directory name (BBR009). Every other column is copied verbatim
 (line-by-line text, not a parse/reformat round trip), so the entry whose scale
 is 1.0 reproduces the real data exactly.
 
-Writing inside --src is refused: mock data must never enter data/.
+Writing into --src, or anywhere under the data tree that holds it (the
+parent of --src, i.e. data/), is refused: mock data must never enter data/.
 
 Usage:
   conda run -n bbrsim python validation/Scripts/make_mock_hfss_frequencies.py \\
@@ -54,9 +55,19 @@ args = ap.parse_args()
 
 src = os.path.realpath(args.src)
 dst = os.path.realpath(args.dst)
-if dst == src or dst.startswith(src + os.sep):
-    print(f"refusing: --dst {dst} is inside --src {src}; "
-          "mock data must not enter the real data tree")
+# The datasets land in <dst>/waveguides, so guard that directory, and keep the
+# whole data tree holding --src (data/, which cmake --install copies) clean.
+out_root = os.path.realpath(os.path.join(dst, "waveguides"))
+data_root = os.path.dirname(src)
+
+
+def inside(path, root):
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+if inside(out_root, src) or inside(dst, data_root):
+    print(f"refusing: --dst {dst} writes into the real data tree {data_root}; "
+          "mock data must not enter it")
     sys.exit(2)
 if len(args.freqs) != len(args.scales):
     print(f"--freqs ({len(args.freqs)}) and --scales ({len(args.scales)}) "
@@ -82,7 +93,6 @@ def transform(src_path, dst_path, freq_token, scale, zero_back_hemisphere, is_fa
             fout.write(",".join(v) + "\n")
 
 
-out_root = os.path.join(dst, "waveguides")
 t0 = time.time()
 n_files = 0
 for id_ in args.ids:
@@ -93,6 +103,9 @@ for id_ in args.ids:
             ddir = os.path.join(out_root, f"{id_}_{ftoken}GHz_Ephi={ephi}")
             if not os.path.isdir(sdir):
                 print(f"missing source dataset {sdir}")
+                sys.exit(2)
+            if os.path.exists(ddir) and os.path.samefile(ddir, sdir):
+                print(f"refusing: {ddir} is the source dataset {sdir}")
                 sys.exit(2)
             os.makedirs(ddir, exist_ok=True)
             for name, is_ff in (("far_field.csv", True), ("waveguide.csv", False)):

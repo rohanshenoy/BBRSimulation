@@ -9,7 +9,8 @@
 #
 # Analysis:
 #   conda run -n bbrsim python <repo>/validation/check_reflectance.py
-# The [BBR] reflectance lines printed every 1000 events also give R_obs.
+# The [BBR] reflectance tally (per worker thread, every 1000 Cu hits on it;
+# add /run/numberOfThreads 1 to see it) also gives R_obs.
 
 /run/verbose 0
 /event/verbose 0

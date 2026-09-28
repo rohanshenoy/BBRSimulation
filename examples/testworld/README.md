@@ -41,12 +41,14 @@ Build against an installed BBRsim (see the [top-level README](../../README.md)):
 
 ```bash
 . <prefix>/share/BBRsim/bbrsim_env.sh
-cmake --preset clang-release          # build/; library search path ../../install
+cmake --preset clang-release          # build/; finds the sourced prefix, else ../../install
 cmake --build --preset clang-release
 cd build && ./bbrsimTestWorld planck.mac
 ```
 
-Outside the preset, configure with `-DCMAKE_PREFIX_PATH=<prefix>`. With no
+Outside the preset, configure with `-DCMAKE_PREFIX_PATH=<prefix>`. The preset's
+install prefix stays `../../install`; use `cmake --install build --prefix
+<prefix>` to install the example beside another library prefix. With no
 macro argument the binary opens an interactive session and runs `vis.mac`. The
 macros live in `G4Macros/` and are copied beside the binary:
 
@@ -71,11 +73,13 @@ If you `cmake --install` the example into the library's prefix, a shell that has
 
 ## Testing
 
-The regression fixtures that run this executable are frozen copies in
+The regression fixtures that run this executable live in
 `validation/G4Macros/` (`Validation_Reflectance`, `Validation_Planck`,
 `Validation_CrackWall`, `Validation_WorldExit`, `Validation_CrackTransmit`,
-`Validation_CrackOblique`, `Validation_CrackFrequency`); a change to a macro
-here does not change them. Run them all with
+`Validation_CrackOblique`, `Validation_CrackFrequency`). `Validation_Reflectance`
+and `Validation_Planck` are frozen copies of `reflectance.mac` and `planck.mac`:
+a change to a macro here does not change them. The others exist only in
+`validation/`. Run them all with
 `validation/Scripts/run_regression.sh`; see
 [validation/README.md](../../validation/README.md).
 

@@ -6,8 +6,8 @@ absorbed (status BBRAbsorb). RRR/T are inferred from the Cu material name in
 the data (override with --rrr / --temp). PASS if 0.3 < A_obs/A_theory < 3.0.
 
 Usage:
-    bbrsimTestWorld planck_5M.mac          # a Planck run with enough Cu absorptions
-    conda run -n bbrsim python validation/check_cu_absorptance.py [path/to/bbr.root]
+    cd examples/testworld/build && ./bbrsimTestWorld planck_5M.mac   # enough Cu absorptions
+    conda run -n bbrsim python <repo>/validation/check_cu_absorptance.py [output/bbr.root]
                                  [--rrr N] [--temp T]
 """
 

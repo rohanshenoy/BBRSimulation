@@ -57,10 +57,14 @@ Build against an installed BBRsim (see the [top-level README](../../README.md)):
 
 ```bash
 . <prefix>/share/BBRsim/bbrsim_env.sh
-cmake --preset clang-release          # build/; library search path ../../install
+cmake --preset clang-release          # build/; finds the sourced prefix, else ../../install
 cmake --build --preset clang-release
 cd build && ./bbrsimLightPipe lightpipe.mac
 ```
+
+Outside the preset, configure with `-DCMAKE_PREFIX_PATH=<prefix>`. The preset's
+install prefix stays `../../install`; use `cmake --install build --prefix
+<prefix>` to install the example beside another library prefix.
 
 | Macro | Run |
 |---|---|

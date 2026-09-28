@@ -58,7 +58,8 @@ required).
 
 Two validators need an output the fixtures do not produce, so they are run by
 hand: `check_crack_ratio.py` (crack2/crack1 entry ratio within 3 σ of the
-aperture ratio, on a Planck run) and `check_cu_absorptance.py`
+aperture ratio, on a Planck run of at least 1M events, such as
+`planck_10K.mac`) and `check_cu_absorptance.py`
 (0.3 < A_obs/A_theory < 3 against the Planck-weighted Drude absorptance, on a
 run with enough Cu absorptions, such as `planck_5M.mac`).
 

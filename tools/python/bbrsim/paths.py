@@ -5,6 +5,9 @@ data/waveguides (a source checkout, an editable install, or the CMake install
 <prefix>/share/BBRsim/python/bbrsim, whose ancestor share/BBRsim holds data/);
 else <sys.prefix>/share/BBRsim/data. The C++ side resolves /bbr/dataDir, then
 $BBRSIMDATA, then the compiled-in <install prefix>/share/BBRsim/data.
+
+One difference: an empty $BBRSIMDATA counts as unset here, while the C++ side
+takes it as given and stops with BBR011 (the env scripts never set it empty).
 """
 import os
 import sys

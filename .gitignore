@@ -14,6 +14,7 @@ tmp/
 # Generated analysis plots
 *_check.png
 *_distribution.png
+cu_reflectance_plots.png
 # Jupyter
 .ipynb_checkpoints/
 # Python

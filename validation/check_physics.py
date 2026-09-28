@@ -32,7 +32,7 @@ def check_bool(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'}  {name:<42} {detail}")
 
 
-print("Drude absorptance at 500 GHz, 4 K (reference values):")
+print("Drude absorptance at 500 GHz, 4 K (user_guide.md reference values):")
 check("RRR=100 D", physics.drude_absorptance(500e9, 100, 4.0), 4.9e-5, 0.15)
 check("RRR=3   D", physics.drude_absorptance(500e9,   3, 4.0), 1.0e-3, 0.20)
 check("RRR=6   D", physics.drude_absorptance(500e9,   6, 4.0), 6.3e-4, 0.20)
@@ -81,8 +81,19 @@ try:
     check_bool("BBRSIMDATA wins", paths.data_dir() == "/nonexistent/bbrsim-data")
     del os.environ["BBRSIMDATA"]
     _d = paths.data_dir()
+    # The nearest ancestor of the imported package holding data/waveguides, found
+    # independently: a farther tree or another checkout's data must not pass.
+    _up, _want = os.path.dirname(os.path.abspath(paths.__file__)), None
+    while _want is None:
+        if os.path.isdir(os.path.join(_up, "data", "waveguides")):
+            _want = os.path.join(_up, "data")
+        elif os.path.dirname(_up) == _up:
+            break
+        _up = os.path.dirname(_up)
+    if _want is None and os.path.isdir(os.path.join(sys.prefix, "share", "BBRsim", "data")):
+        _want = os.path.join(sys.prefix, "share", "BBRsim", "data")
     check_bool("without BBRSIMDATA: nearest data/waveguides tree",
-               os.path.isdir(os.path.join(_d, "waveguides")), _d)
+               _want is not None and _d == _want, f"{_d} (expected {_want})")
 finally:
     if _saved is not None:
         os.environ["BBRSIMDATA"] = _saved

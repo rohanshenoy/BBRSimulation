@@ -22,7 +22,8 @@
 #   conda run -n bbrsim python <repo>/validation/Scripts/make_mock_hfss_frequencies.py \
 #       --src <repo>/data/waveguides --dst D/../mock_hfss \
 #       --ids InfParallelPlate_crack1Rohan InfParallelPlate_crack2
-#   cd D && bbrsimTestWorld <repo>/validation/G4Macros/Validation_CrackFrequency.mac 2>&1 | tee frequency.log
+#   cd D && <repo>/examples/testworld/build/bbrsimTestWorld \
+#       <repo>/validation/G4Macros/Validation_CrackFrequency.mac 2>&1 | tee frequency.log
 #   conda run -n bbrsim python <repo>/validation/check_crack_frequency.py output
 #   grep -c 'BBR008 dataset=InfParallelPlate_crack1Rohan side=low'  frequency.log  # 1
 #   grep -c 'BBR008 dataset=InfParallelPlate_crack1Rohan side=high' frequency.log  # 1

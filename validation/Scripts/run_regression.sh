@@ -4,22 +4,32 @@
 #   validation/Scripts/run_regression.sh [BUILD_DIR]        (default: build)
 #
 # 1. Configures, builds and installs the library (BUILD_DIR, prefix BBR_PREFIX,
-#    default <repo>/install), sources the installed bbrsim_env.sh, then builds
-#    examples/testworld and examples/lightpipe against it (BUILD_DIR/examples/<name>).
-#    Fails on build errors; compiler warnings are a FAIL. Release only: a BUILD_DIR
-#    already configured with another build type (e.g. build-debug) is refused.
-# 1b. Runs validation/Scripts/drift_guards.sh, then builds and runs
-#    validation/Scripts/consumer_smoke against the installed library.
-# 2. Runs the validation/G4Macros fixtures in parallel, each in
+#    default <repo>/install), stops if the installed data or headers differ
+#    from data/ or library/include (cmake --install never deletes), sources the
+#    installed bbrsim_env.sh, then builds examples/testworld and
+#    examples/lightpipe against it (BUILD_DIR/examples/<name>). Fails on build
+#    errors; compiler warnings are a FAIL. The builds are incremental, so only
+#    files compiled in this run are seen: use a fresh BUILD_DIR for a full
+#    warnings audit. Release only: a BUILD_DIR already configured with another
+#    build type (e.g. build-debug) is refused.
+# 1b. Runs validation/Scripts/drift_guards.sh, checks that bbrsim imports from
+#    the installed copy and that it matches tools/python/bbrsim, then builds
+#    and runs validation/Scripts/consumer_smoke against the installed library.
+# 2. Builds the mock HFSS tree when needed, checks that the real
+#    data/waveguides holds only 500 GHz (leak guard), runs the
+#    validation/G4Macros fixtures in parallel, each in
 #    BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the installed env
-#    script), and scans every log for GeomNav / G4Exception / BBR00x / LP002
-#    messages.
+#    script), scans every log for GeomNav / G4Exception / BBR0xx / LP002
+#    messages, and checks that the frequency case's BBR008 clamp warning fires
+#    once per side.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
 #    one PASS/FAIL line per check.
 #
 # Exit code is the number of unexpected failures. A check listed in XFAIL is a
-# known, documented red (the open HP_Cu decision); it is reported but
-# does not fail the run, and is flagged XPASS if it unexpectedly passes.
+# known, documented red (see validation/README.md, PASS criteria). It is
+# reported as XFAIL, without failing the run, only when its output shows the
+# documented failure (see xfail_matches); any other failure, a crash included,
+# is a FAIL, and an unexpected pass is flagged XPASS.
 #
 # Python is run as `conda run -n bbrsim python` (override with BBR_PYTHON).
 set -u
@@ -38,8 +48,10 @@ EXB="$BUILD/examples"
 CLANG=(-DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Release)
 JOBS="${BBR_JOBS:-8}"
 
-# Known red validators, "script|reason" entries separated by ";". BBR_XFAIL="" disables the list.
-XFAIL="${BBR_XFAIL-check_cu_serov.py|HP_Cu alias RRR 6 is 13% low vs Serov under Drude (open decision)}"
+# Known red validators, "script|reason|signature" entries separated by ";", where
+# signature is an ERE (no ";" or "|") that every failing row must match (see
+# xfail_matches). BBR_XFAIL="" disables the list.
+XFAIL="${BBR_XFAIL-check_cu_serov.py|HP_Cu alias RRR 6 is 13% low vs Serov under Drude (open decision, see validation/README.md)|^HP_Cu .*OUT OF TOLERANCE}"
 
 fail=0; xfail=0; xpass=0; pass=0
 line() { printf '%-6s %-30s %s\n' "$1" "$2" "$3"; }
@@ -66,14 +78,19 @@ step "$clog" "configure library" cmake -S "$REPO" -B "$BUILD" "${CLANG[@]}" -DCM
      -DBUILD_BBRSIM_TOOLS=ON
 step "$blog" "build library"     cmake --build "$BUILD" -j"$JOBS"
 step "$clog" "install library"   cmake --install "$BUILD"
-# The executables read the installed data copy (BBRSIMDATA from the env script), and
-# cmake --install never deletes: a dataset once installed and since removed from
-# data/ (e.g. mock data written there by mistake) would survive only there, unseen
-# by the real-data leak guard below, which checks data/.
-if ! diff -rq -x .DS_Store "$REPO/data" "$PREFIX/share/BBRsim/data" >/dev/null 2>&1; then
-  echo "ERROR: $PREFIX/share/BBRsim/data differs from $REPO/data (cmake --install never deletes stale files); remove it and rerun."
-  rm -f "$clog" "$blog"; exit 2
-fi
+# cmake --install never deletes, so a file once installed and since removed from
+# the source survives in the prefix. The executables read the installed data copy
+# (BBRSIMDATA from the env script): a stale dataset there (e.g. mock data written
+# into data/ by mistake) would go unseen by the real-data leak guard below, which
+# checks data/. The examples compile against the installed headers: one still
+# including a removed or renamed header would build here and fail on a fresh
+# install.
+for pair in "data:share/BBRsim/data" "library/include:include/BBRsim"; do
+  if ! diff -rq -x .DS_Store "$REPO/${pair%%:*}" "$PREFIX/${pair#*:}" >/dev/null 2>&1; then
+    echo "ERROR: $PREFIX/${pair#*:} differs from $REPO/${pair%%:*} (cmake --install never deletes stale files); remove it and rerun."
+    rm -f "$clog" "$blog"; exit 2
+  fi
+done
 . "$PREFIX/share/BBRsim/bbrsim_env.sh" || { echo "ERROR: cannot source $PREFIX/share/BBRsim/bbrsim_env.sh"; exit 2; }
 # Binaries resolve libBBRsim, Geant4 and their own example library through RPATH.
 # dyld searches DYLD_LIBRARY_PATH by leaf name before @rpath, so the env script's
@@ -146,11 +163,15 @@ if [ ! -d "$MOCK/waveguides" ] || \
    [ -n "$(find "$REPO/data/waveguides" "$VAL/Scripts/make_mock_hfss_frequencies.py" \
             -newer "$MOCK/waveguides" -print -quit 2>/dev/null)" ]; then
   echo "generating mock HFSS frequency tree in $MOCK ..."
-  rm -rf "$MOCK"
-  $PY "$VAL/Scripts/make_mock_hfss_frequencies.py" --src "$REPO/data/waveguides" \
-      --dst "$MOCK" --ids InfParallelPlate_crack1Rohan InfParallelPlate_crack2 \
-      >"$BUILD/mock_hfss.log" 2>&1 \
-    || { echo "MOCK GENERATION FAILED:"; tail -5 "$BUILD/mock_hfss.log"; exit 2; }
+  # Written beside the final path and renamed only on success, so an interrupted
+  # or failed generation cannot leave a partial tree that later runs would reuse.
+  rm -rf "$MOCK" "$MOCK.tmp"
+  if ! $PY "$VAL/Scripts/make_mock_hfss_frequencies.py" --src "$REPO/data/waveguides" \
+         --dst "$MOCK.tmp" --ids InfParallelPlate_crack1Rohan InfParallelPlate_crack2 \
+         >"$BUILD/mock_hfss.log" 2>&1 \
+     || ! mv "$MOCK.tmp" "$MOCK"; then
+    rm -rf "$MOCK.tmp"; echo "MOCK GENERATION FAILED:"; tail -5 "$BUILD/mock_hfss.log"; exit 2
+  fi
 fi
 ln -s "$MOCK" "$REG/mock_hfss"
 
@@ -216,6 +237,17 @@ for side in low high; do
 done
 
 echo "=== 3. validators ==="
+# An XFAIL holds only for the documented failure: the validator reached its
+# "RESULT: FAIL" line, and every failing row (a FAIL or OUT OF TOLERANCE line
+# other than RESULT) matches the entry's signature, at least one of them. A
+# crash, an import error or another row going out of tolerance is a plain FAIL.
+xfail_matches() {  # output signature-ERE (empty: the RESULT line alone)
+  local rows
+  printf '%s\n' "$1" | grep -qE '^ *RESULT *: *FAIL' || return 1
+  [ -n "$2" ] || return 0
+  rows=$(printf '%s\n' "$1" | grep -E 'FAIL|OUT OF TOLERANCE' | grep -vE '^ *RESULT')
+  [ -n "$rows" ] && ! printf '%s\n' "$rows" | grep -qvE "$2"
+}
 check() {  # macro-dir script [extra args...]; macro-dir "-" = no ROOT input
   local d="$1" script="$2"; shift 2
   local out res
@@ -223,13 +255,17 @@ check() {  # macro-dir script [extra args...]; macro-dir "-" = no ROOT input
   else                    out=$($PY "$VAL/$script" "$REG/$d/output/bbr.root" "$@" 2>&1); fi
   local rc=$?
   res=$(echo "$out" | grep -E "RESULT|PASS|FAIL" | tail -1 | sed 's/^ *//')
-  local reason; reason=$(printf '%s\n' "$XFAIL" | tr ';' '\n' | grep "^$script|" | cut -d'|' -f2-)
+  local entry reason sig
+  entry=$(printf '%s\n' "$XFAIL" | tr ';' '\n' | grep "^$script|" | head -1)
+  reason=$(echo "$entry" | cut -d'|' -f2); sig=$(echo "$entry" | cut -d'|' -f3-)
   if [ $rc -eq 0 ]; then
-    if [ -n "$reason" ]; then line XPASS "$script" "[$d] expected to fail but passed — remove it from XFAIL"; xpass=$((xpass+1)); fail=$((fail+1))
+    if [ -n "$entry" ]; then line XPASS "$script" "[$d] expected to fail but passed — remove it from XFAIL"; xpass=$((xpass+1)); fail=$((fail+1))
     else line PASS "$script" "[$d] $res"; pass=$((pass+1)); fi
+  elif [ -n "$entry" ] && xfail_matches "$out" "$sig"; then
+    line XFAIL "$script" "[$d] $reason"; xfail=$((xfail+1))
   else
-    if [ -n "$reason" ]; then line XFAIL "$script" "[$d] $reason"; xfail=$((xfail+1))
-    else line FAIL "$script" "[$d] $res"; fail=$((fail+1)); echo "$out" | tail -6 | sed 's/^/       /'; fi
+    line FAIL "$script" "[$d] $res${entry:+ (not the documented XFAIL)}"; fail=$((fail+1))
+    echo "$out" | tail -6 | sed 's/^/       /'
   fi
 }
 cd "$REG" || exit 2   # validators write plots into the CWD; keep them out of the repo

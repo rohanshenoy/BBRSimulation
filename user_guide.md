@@ -23,7 +23,9 @@ conda run -n bbrsim pip install -e tools/python     # bbrsim + uproot, the ROOT 
 
 Both steps are needed: `bbrsim.io` imports uproot, which only the editable
 install brings in. The install also makes `bbrsim` importable without sourcing
-the env script.
+the env script. The editable install points the shared `bbrsim` env at this
+checkout: for another clone or an install, source that tree's env script
+(`PYTHONPATH` takes precedence) or rerun `pip install -e` there.
 
 All Python scripts must be run as `conda run -n bbrsim python <script>` — not
 `python3` directly, even if packages appear installed in the base environment.
@@ -139,11 +141,20 @@ Validate the emitted spectrum:
 conda run -n bbrsim python validation/check_planck_spectrum.py examples/testworld/build/output/bbr.root --temp 4
 ```
 
+Compare the crack2/crack1 entry ratio with the aperture ratio. Both cracks need
+entries, so run it on at least ~1M Planck events (`planck.mac` gives too few):
+
+```bash
+./bbrsimTestWorld planck_10K.mac
+conda run -n bbrsim python validation/check_crack_ratio.py examples/testworld/build/output/bbr.root
+```
+
 ### 2. HFSS crack diffraction
 
 Photons entering a `vacuum_wg` crack volume are routed through the HFSS
 S-parameter lookup. The `[BBR] diffraction` stdout line reports the running
-observed transmittance. At 500 GHz normal incidence:
+observed transmittance (per worker thread, every 100 crack entries on it). At
+500 GHz normal incidence:
 
 | Crack | Gap | Observed T |
 |---|---|---|
@@ -186,7 +197,6 @@ To aim the fixed gun at a crack:
 Crack analyses read the `crossings` ntuple from `output/bbr.root`:
 
 ```bash
-conda run -n bbrsim python validation/check_crack_ratio.py examples/testworld/build/output/bbr.root
 conda run -n bbrsim python tools/plot_crack_angular.py examples/testworld/build/output/bbr.root --iwt 180 --iwp 0
 ```
 
@@ -197,8 +207,11 @@ Every crossing is logged World-side, so `mat_pre`/`vol_pre` are always
 ### 3. Copper reflectance
 
 Fires 500 GHz photons at the solid Cu wall (away from the cracks) and
-measures the fraction absorbed. The `[BBR] reflectance` output line is
-printed every 1000 events.
+measures the fraction absorbed. Each worker thread keeps a running
+`[BBR] reflectance` tally and prints it every 1000 Cu hits on that thread, so
+with many threads a 10 000-event run may print no line at all. The result is
+in `output/bbr.root` (see `check_reflectance.py` below); for a running tally,
+add `/run/numberOfThreads 1` before `/run/initialize`.
 
 ```bash
 ./bbrsimTestWorld reflectance.mac         # OFHC_Cu (RRR=100), 10 000 events at z=10 mm
@@ -206,13 +219,14 @@ printed every 1000 events.
 ./bbrsimTestWorld reflectance_HP_Cu.mac   # HP_Cu   (RRR=6),   2 000 events at z=5 mm
 ```
 
-The output line format is:
+The tally line format (here from a single-threaded run) is:
 
 ```
-[BBR] reflectance mat=Cu_RRR100_T4K N=10000 A_obs=... R_theory=0.999951
+G4WT0 > [BBR] reflectance mat=Cu_RRR100_T4K N=10000 A_obs=... R_theory=0.999951
 ```
 
-- `A_obs` = fraction of photons absorbed (1 − R_obs)
+- `N` = Cu hits on that thread so far
+- `A_obs` = fraction of those photons absorbed (1 − R_obs)
 - `R_theory` = full complex Drude reflectance at the gun frequency
 
 With the full complex Drude model, OFHC Cu at 4 K sits on the relaxation
@@ -240,8 +254,7 @@ Plot reflectance curves for all three grades:
 
 ```bash
 conda run -n bbrsim python tools/plot_cu_reflectance.py --out output/cu_reflectance_plots.png
-# output/ is gitignored; without --out the plot goes to cu_reflectance_plots.png
-# in the CWD, which .gitignore does not cover at the repository root
+# without --out the plot goes to cu_reflectance_plots.png in the CWD (gitignored)
 ```
 
 ---
@@ -390,7 +403,7 @@ example's build directory for the commands in this guide, or
 |---|---|---|
 | `output/bbr.root` | `TestWorldRunAction` / `TestWorldSteppingAction` (via `G4AnalysisManager`; the light pipe has its own copies) | Two ntuples. **`crossings`** — one row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volume/material/status/event-type codes, per-track crossing count, and `hfss_freq_GHz` (the HFSS grid frequency selected for a crack entry, `-1` on every other row). **`abspoints`** — one row per photon termination (`fStopAndKill`): position, energy, final momentum, n_reflect, terminating volume + status codes. `term_status` is `WorldExit` for a photon that left the world, `BulkAbsorption` for a `G4OpAbsorption` kill, otherwise the boundary status of the killing step (e.g. `BBRAbsorb`). Categorical fields are integer codes; runs are multithreaded and the per-thread ntuples are merged into this one file. |
 | `output/bbr_legend.json` | `TestWorldRunAction` (master thread) | `{category: {code: name}}` dictionary decoding the integer code columns (status / event_type / volume / material). Consumed by `tools/python/bbrsim/io.py`. |
-| `bbrsim stdout` | redirect from stdout | `[BBR] reflectance` and `[BBR] diffraction` running tallies |
+| `bbrsim stdout` | redirect from stdout | `[BBR] reflectance` and `[BBR] diffraction` running tallies (per worker thread) |
 | `cu_reflectance_plots.png` (CWD, or `--out`) | `plot_cu_reflectance.py` | 3-panel reflectance / absorptance / temperature-dependence plot |
 
 Read the ROOT output in Python via the shared loader: source the env script
@@ -425,7 +438,7 @@ mirroring the C++ implementation and self-tested by `check_physics.py`.
 | `check_physics.py` | Self-test of `bbrsim.physics` against C++ anchors | — |
 | `check_reflectance.py` | Poisson test of absorbed count vs full-Drude theory (reflectance.mac) | `--root`, `--RRR`, `--T_K`, `--freq` |
 | `check_cu_absorptance.py` | Compare A_obs from decoded crossings to Planck-weighted Drude theory; PASS/FAIL | positional path, `--rrr`, `--temp` |
-| `check_cu_serov.py` | Full-Drude D for the OF_Cu / HP_Cu RRR aliases vs Serov (2016) measured points (±10%). HP_Cu = RRR 6 is currently 13% low — an open decision | — |
+| `check_cu_serov.py` | Full-Drude D for the OF_Cu / HP_Cu RRR aliases vs Serov (2016) measured points (±10%). HP_Cu = RRR 6 is currently 13% low — an open decision, see validation/README.md (PASS criteria) | — |
 | `check_crack_wall_reflection.py` | Validation_CrackWall.mac: crack→Cu wall reflections flip pz, keep px/py | positional path |
 | `check_no_photons_in_metal.py` | Invariant: no crossing starts inside a Cu / perfect-metal material | positional path |
 | `check_term_status.py` | Invariant: no `unknown`; world exits are `WorldExit`; absorptions have a volume; BBRAbsorb counts match | positional path |
@@ -452,18 +465,21 @@ passes on its designated 10k-event `planck.mac` workload but over-rejects on a
 
 ## Troubleshooting
 
-**`[BBR] setCuMaterial: unknown alias`**
+**`[BBR] det/setCuMaterial: unknown alias`**
 Only `OFHC_Cu`, `OF_Cu`, and `HP_Cu` are valid aliases. Use `/bbr/det/setCuRRR <N>`
 for any other grade.
 
-**`[BBR] setCuRRR: RRR must be >= 1`**
+**`[BBR] det/setCuRRR: RRR must be >= 1`**
 RRR must be a positive integer. RRR < 1 has no physical meaning.
 
 **No `[BBR] reflectance` lines in output**
-The reflectance tally prints every 1000 Cu hits. Check that the gun position
-and direction point at the Cu face (x = 0 plane) away from the cracks
-(`/bbr/gun/mode true`, `/bbr/gun/posZ 10.0`), or that enough Planck-mode
-events have run.
+Expected in a multithreaded run: the tally is per worker thread and prints
+every 1000 Cu hits on that thread, so the shipped reflectance macros
+(10 000 or 2 000 events) usually print none. Read the result from
+`output/bbr.root` with `check_reflectance.py`, or add `/run/numberOfThreads 1`
+before `/run/initialize` for a running tally. If that single-threaded run
+still prints nothing, check that the gun points at the Cu face (x = 0 plane)
+away from the cracks (`/bbr/gun/mode true`, `/bbr/gun/posZ 10.0`).
 
 **`RESULT: FAIL` from `check_cu_absorptance.py`**
 A_obs/A_theory outside [0.3, 3.0]. Common causes: too few events (< 1000 give

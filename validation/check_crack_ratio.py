@@ -3,10 +3,13 @@ check_crack_ratio.py
 Compare crack2/crack1 event-rate ratio to the expected geometric aperture ratio.
 The check counts crack ENTRIES (independent of the HFSS transmittance), so the
 rate ratio should equal the opening-area ratio. PASS if within 3 sigma_Poisson
-of expected.
+of expected. Both cracks need entries: use a Planck run of at least ~1M events
+(planck_10K.mac gives ~70 / ~180); planck.mac gives too few, and a fixed-gun
+run at one crack has no ratio to test.
 
 Usage:
-    conda run -n bbrsim python validation/check_crack_ratio.py [path/to/bbr.root]
+    cd examples/testworld/build && ./bbrsimTestWorld planck_10K.mac
+    conda run -n bbrsim python <repo>/validation/check_crack_ratio.py [output/bbr.root]
 """
 
 import sys
@@ -35,12 +38,13 @@ print(f"aperture A1   : {A1:.4f} mm^2")
 print(f"aperture A2   : {A2:.4f} mm^2")
 print(f"expected ratio (A2/A1) : {expected_ratio:.3f}")
 
-if N1 == 0:
-    print("ERROR: no crack1 events - cannot compute ratio")
+if N1 == 0 or N2 == 0:
+    print(f"ERROR: no {'crack1' if N1 == 0 else 'crack2'} events - cannot compute "
+          "ratio (needs a Planck run of at least ~1M events, e.g. planck_10K.mac)")
     sys.exit(1)
 
 obs_ratio = N2 / N1
-sigma_ratio = obs_ratio * np.sqrt(1 / N2 + 1 / N1) if N2 > 0 else float("inf")
+sigma_ratio = obs_ratio * np.sqrt(1 / N2 + 1 / N1)
 n_sigma = abs(obs_ratio - expected_ratio) / sigma_ratio
 passed = n_sigma < 3.0
 

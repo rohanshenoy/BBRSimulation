@@ -6,8 +6,9 @@ cmake_minimum_required(VERSION 3.16...3.27)
 project(bbrsimTestWorld LANGUAGES C CXX)
 
 # BBRSIMINSTALL is <prefix>/share/BBRsim after sourcing an installed env script.
+# Prepended, so the sourced prefix wins over the preset's ../../install.
 if(DEFINED ENV{BBRSIMINSTALL} AND EXISTS "$ENV{BBRSIMINSTALL}/../../lib/cmake/BBRsim")
-  list(APPEND CMAKE_PREFIX_PATH "$ENV{BBRSIMINSTALL}/../..")
+  list(PREPEND CMAKE_PREFIX_PATH "$ENV{BBRSIMINSTALL}/../..")
 endif()
 find_package(BBRsim REQUIRED)   # brings Geant4 through find_dependency
 

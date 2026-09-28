@@ -31,14 +31,19 @@ if(BUILD_BBRSIM_TOOLS)
   add_subdirectory(tools)
 endif()
 
-# Version stamp (G4CMP CMakeLists.txt:83-95). git -C also works in a worktree,
-# where .git is a file; describe needs an annotated tag to report one.
+# Version stamp (G4CMP CMakeLists.txt:83-95). git describe runs only when the
+# source dir is itself the top of a work tree (a clone, a worktree, where .git
+# is a file, or a submodule): a copy vendored inside another repository gets
+# BBRSIM_VERSION, not that repository's hash. describe needs an annotated tag
+# to report one. The paths reach sh as positional parameters, which VERBATIM
+# quotes, so spaces in them are safe.
 find_program(SH sh HINTS /bin)
 add_custom_target(version ALL
   COMMENT "Building version identification file"
   VERBATIM
-  COMMAND ${CMAKE_COMMAND} -E env ${SH} -c
-    "(git -C ${PROJECT_SOURCE_DIR} describe --always --dirty 2>/dev/null || echo ${BBRSIM_VERSION}) > ${PROJECT_BINARY_DIR}/.bbrsim-version")
+  COMMAND ${SH} -c
+    "(cd \"\$1\" && [ \"\$(git rev-parse --show-toplevel 2>/dev/null)\" = \"\$(pwd -P)\" ] && git describe --always --dirty 2>/dev/null || echo \"\$2\") > \"\$3\""
+    sh ${PROJECT_SOURCE_DIR} ${BBRSIM_VERSION} ${PROJECT_BINARY_DIR}/.bbrsim-version)
 install(FILES ${PROJECT_BINARY_DIR}/.bbrsim-version DESTINATION share/BBRsim)
 
 # Package config for find_package(BBRsim).

@@ -188,9 +188,10 @@ default. The regression runner builds and runs it on every pass.
   parameters or imported from an ASCII `.STL`.
 
 Each example is a standalone CMake project built against the installed
-library, with its own `CMakePresets.json` (`clang-release`: build dir `build/`,
-library search path `../../install`). The macros in `G4Macros/` are copied
-beside the binary, so it runs from its build directory:
+library, with its own `CMakePresets.json` (`clang-release`: build dir `build/`;
+library search path: the prefix of a sourced env script, else `../../install`).
+The macros in `G4Macros/` are copied beside the binary, so it runs from its
+build directory:
 
 ```bash
 . install/share/BBRsim/bbrsim_env.sh
@@ -217,9 +218,11 @@ fixtures in parallel (each in `BUILD_DIR/regression/<case>/`), scans their logs
 for `GeomNav`, `G4Exception`, `BBR0xx` and `LP002` messages, and then runs the
 validators on their output. It prints one PASS/FAIL line per check; the exit
 code is the number of unexpected failures, and a compiler warning counts as a
-failure. Overrides: `BBR_PREFIX`, `BBR_PYTHON`, `BBR_JOBS`, `BBR_XFAIL`. A
-green run ends with the line `pass=41  fail=0  xfail=1  xpass=0` (two spaces
-between fields, then the output directory).
+failure (the builds are incremental, so only files compiled in that run are
+seen: use a fresh `BUILD_DIR` for a full warnings audit). Overrides:
+`BBR_PREFIX`, `BBR_PYTHON`, `BBR_JOBS`, `BBR_XFAIL`. A green run ends with the
+line `pass=41  fail=0  xfail=1  xpass=0` (two spaces between fields, then the
+output directory).
 
 | Fixture (`validation/G4Macros/`) | Executable | Validators | Passes when |
 |---|---|---|---|
@@ -268,12 +271,16 @@ conda run -n bbrsim pip install -e tools/python     # bbrsim + uproot, the ROOT 
 Both steps are needed: `bbrsim.io` imports uproot, which only the editable
 install brings in. Sourcing either env script also puts `bbrsim` on
 `PYTHONPATH`; the editable install makes it importable without the env script
-(a Jupyter kernel, say).
+(a Jupyter kernel, say). The editable install points the shared `bbrsim` env at
+this checkout: for another clone or an install, source that tree's env script
+(`PYTHONPATH` takes precedence) or rerun `pip install -e` there.
 
 Run every script as `conda run -n bbrsim python <script>`, not `python3`.
 `bbrsim.paths.data_dir()` is the Python twin of the C++ data default:
 `$BBRSIMDATA`, else the nearest `data/` holding `waveguides/` above the package,
-else `<sys.prefix>/share/BBRsim/data`.
+else `<sys.prefix>/share/BBRsim/data`. One difference: an empty `BBRSIMDATA`
+counts as unset in Python, while the C++ side takes it as given and stops with
+`BBR011`.
 
 ```python
 from bbrsim.io import load
@@ -295,8 +302,10 @@ model end to end against the same package (a kernel needs
 ## Versioning
 
 Every build writes `git describe --always --dirty` to `.bbrsim-version`, which
-is installed as `<prefix>/share/BBRsim/.bbrsim-version` (outside a git checkout
-the `BBRSIM_VERSION` cache variable, default the project version, is used).
+is installed as `<prefix>/share/BBRsim/.bbrsim-version`. When the source
+directory is not the top of its own git work tree (an unpacked tarball, or a
+copy vendored inside another repository), the `BBRSIM_VERSION` cache variable,
+default the project version, is used instead.
 Release tags are annotated, because `git describe` ignores lightweight tags,
 and have the form `bbrsim-VXX-YY-ZZ`; each gets a line in
 [ChangeHistory](ChangeHistory).
@@ -310,7 +319,7 @@ reflectance model, the Planck thermal emitter, and the ROOT output/analysis
 layer are implemented and tested. The loss-tangent dielectrics (Cirlex, Si, Ge)
 are implemented but not yet placed in any geometry.
 
-As of 2026-08-12 the `fix/core-hardening` and `light-pipe-example` branches are
+As of 2026-08-26 the `fix/core-hardening` and `light-pipe-example` branches are
 **merged into `main`**, so everything below ships from a single branch: the core
 simulation, the navigator/cache hardening, and the light-pipe example with CAD
 (`.STL`) import. In September 2026 the repository was reorganized into the
@@ -468,7 +477,11 @@ the Palik / Serov / Geant4-IR copper comparison sets).
 ./bbrsimTestWorld reflectance_HP_Cu.mac    # HP_Cu   (RRR=6),   500 GHz, 2 000 events
 ```
 
-Output: `[BBR] reflectance mat=... N=... A_obs=... R_theory=...` printed to stdout.
+Output: `output/bbr.root`, checked by `check_reflectance.py` below. Each worker
+thread also keeps a running tally, printed as `G4WTn > [BBR] reflectance
+mat=... N=... A_obs=... R_theory=...` every 1000 Cu hits on that thread, so a
+10 000-event run spread over many threads may print none; add
+`/run/numberOfThreads 1` before `/run/initialize` for a running tally.
 At 4 K OFHC Cu sits on the relaxation plateau (D ≈ 4.9×10⁻⁵ at 500 GHz).
 Compare against Drude theory:
 
