@@ -1,0 +1,17 @@
+# BBRsim package configuration: find_package(BBRsim) -> imported target BBRsim::BBRsim.
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+# The Geant4 this library was built against, unless the consumer chose one.
+if(NOT Geant4_DIR)
+  set(Geant4_DIR "@Geant4_DIR@")
+endif()
+set(_bbrsim_g4_components @BBRSIM_GEANT4_COMPONENTS@)
+if(_bbrsim_g4_components)
+  find_dependency(Geant4 COMPONENTS ${_bbrsim_g4_components})
+else()
+  find_dependency(Geant4)
+endif()
+unset(_bbrsim_g4_components)
+include("${CMAKE_CURRENT_LIST_DIR}/BBRsimTargets.cmake")
+set_and_check(BBRsim_DATA_DIR "@PACKAGE_BBRSIM_DATA_INSTALL_DIR@")
+check_required_components(BBRsim)

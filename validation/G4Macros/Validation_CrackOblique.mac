@@ -1,0 +1,124 @@
+# Validation_CrackOblique.mac — oblique-incidence validation of the HFSS azimuth
+# fold/unfold. 16 fixed-gun runs at 45 deg off normal (IWaveTheta = 135 deg)
+# into crack1, every photon aimed at the crack face centre (0,0,0):
+#   runs 0-7  : random polarization, all eight azimuths (+-y, +-z, four
+#               diagonals), 8000 photons each;
+#   runs 8-15 : fixed polarization (E across the gap = TEM, or E in the plane
+#               of incidence), 3000 photons each.
+# Each run writes its own file, output/bbr_oblique_rNN.root, because the run
+# action reopens (and would overwrite) the output file at every /run/beamOn.
+# The run ORDER is what validation/check_crack_oblique.py expects; keep in sync.
+#
+# Validate:
+#   conda run -n bbrsim python <repo>/validation/check_crack_oblique.py output
+#   for f in output/bbr_oblique_r*.root; do
+#     conda run -n bbrsim python <repo>/validation/check_no_photons_in_metal.py $f
+#     conda run -n bbrsim python <repo>/validation/check_term_status.py $f
+#   done
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/random/setSeeds 3141 59
+/run/initialize
+/bbr/gun/mode true
+/bbr/gun/posX -20.0
+/bbr/gun/pol 0 0 0
+
+# ---- run 0: +y tilt, random polarization ----------------------------------
+/bbr/gun/dirX 0.70710678
+/bbr/gun/dirY 0.70710678
+/bbr/gun/dirZ 0.0
+/bbr/gun/posY -20.0
+/bbr/gun/posZ 0.0
+/analysis/setFileName output/bbr_oblique_r00
+/run/beamOn 8000
+
+# ---- run 1: -y tilt ---------------------------------------------------------
+/bbr/gun/dirY -0.70710678
+/bbr/gun/posY 20.0
+/analysis/setFileName output/bbr_oblique_r01
+/run/beamOn 8000
+
+# ---- run 2: +z tilt ---------------------------------------------------------
+/bbr/gun/dirY 0.0
+/bbr/gun/dirZ 0.70710678
+/bbr/gun/posY 0.0
+/bbr/gun/posZ -20.0
+/analysis/setFileName output/bbr_oblique_r02
+/run/beamOn 8000
+
+# ---- run 3: -z tilt ---------------------------------------------------------
+/bbr/gun/dirZ -0.70710678
+/bbr/gun/posZ 20.0
+/analysis/setFileName output/bbr_oblique_r03
+/run/beamOn 8000
+
+# ---- run 4: +y+z diagonal ---------------------------------------------------
+/bbr/gun/dirY 0.5
+/bbr/gun/dirZ 0.5
+/bbr/gun/posY -14.14213562
+/bbr/gun/posZ -14.14213562
+/analysis/setFileName output/bbr_oblique_r04
+/run/beamOn 8000
+
+# ---- run 5: +y-z diagonal ---------------------------------------------------
+/bbr/gun/dirZ -0.5
+/bbr/gun/posZ 14.14213562
+/analysis/setFileName output/bbr_oblique_r05
+/run/beamOn 8000
+
+# ---- run 6: -y+z diagonal ---------------------------------------------------
+/bbr/gun/dirY -0.5
+/bbr/gun/dirZ 0.5
+/bbr/gun/posY 14.14213562
+/bbr/gun/posZ -14.14213562
+/analysis/setFileName output/bbr_oblique_r06
+/run/beamOn 8000
+
+# ---- run 7: -y-z diagonal ---------------------------------------------------
+/bbr/gun/dirZ -0.5
+/bbr/gun/posZ 14.14213562
+/analysis/setFileName output/bbr_oblique_r07
+/run/beamOn 8000
+
+# ---- runs 8-11: +-y tilt, fixed polarization ---------------------------------
+/bbr/gun/dirY 0.70710678
+/bbr/gun/dirZ 0.0
+/bbr/gun/posY -20.0
+/bbr/gun/posZ 0.0
+/bbr/gun/pol 0 0 1
+/analysis/setFileName output/bbr_oblique_r08
+/run/beamOn 3000
+/bbr/gun/pol 0 1 0
+/analysis/setFileName output/bbr_oblique_r09
+/run/beamOn 3000
+
+/bbr/gun/dirY -0.70710678
+/bbr/gun/posY 20.0
+/bbr/gun/pol 0 0 1
+/analysis/setFileName output/bbr_oblique_r10
+/run/beamOn 3000
+/bbr/gun/pol 0 1 0
+/analysis/setFileName output/bbr_oblique_r11
+/run/beamOn 3000
+
+# ---- runs 12-15: +-z tilt, fixed polarization --------------------------------
+/bbr/gun/dirY 0.0
+/bbr/gun/dirZ 0.70710678
+/bbr/gun/posY 0.0
+/bbr/gun/posZ -20.0
+/bbr/gun/pol 0 1 0
+/analysis/setFileName output/bbr_oblique_r12
+/run/beamOn 3000
+/bbr/gun/pol 0 0 1
+/analysis/setFileName output/bbr_oblique_r13
+/run/beamOn 3000
+
+/bbr/gun/dirZ -0.70710678
+/bbr/gun/posZ 20.0
+/bbr/gun/pol 0 1 0
+/analysis/setFileName output/bbr_oblique_r14
+/run/beamOn 3000
+/bbr/gun/pol 0 0 1
+/analysis/setFileName output/bbr_oblique_r15
+/run/beamOn 3000

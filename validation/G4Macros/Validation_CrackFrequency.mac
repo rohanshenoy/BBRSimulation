@@ -1,0 +1,104 @@
+# Validation_CrackFrequency.mac — validation of the frequency-keyed HFSS lookup against a
+# MOCK five-frequency data tree (50 / 150 / 500 / 1500 / 5000 GHz) built from
+# the single real 500 GHz dataset by validation/Scripts/make_mock_hfss_frequencies.py.
+# Each mock frequency carries two signatures so the dataset actually sampled is
+# observable: a scaled transmittance, and (for 150 and 1500 GHz) a far field
+# truncated to Theta <= 90 deg, i.e. exits with k_z >= 0 only.
+#
+# /bbr/dataDir names the data ROOT (it must contain waveguides/) and is
+# PreInit-only, so it precedes /run/initialize. ../mock_hfss is resolved from
+# the run directory: validation/Scripts/run_regression.sh links
+# <build>/regression/mock_hfss there.
+#
+# Runs 0-4 sit on (or, at the two grid edges, 0.1 % inside) the grid; runs 5-12
+# straddle the four log-space midpoints by +-1 %, which is where a linear or
+# ratio nearest-neighbour rule would pick the other side; runs 13-14 fall off
+# the grid and must clamp with one BBR008 warning per side; run 15 is broadband
+# Planck at 20 K, whose photons span all five bins. One output file per run:
+# every /run/beamOn reopens the analysis file, so without /analysis/setFileName
+# each run would overwrite the last.
+#
+# By hand, from an empty run dir D:
+#   conda run -n bbrsim python <repo>/validation/Scripts/make_mock_hfss_frequencies.py \
+#       --src <repo>/data/waveguides --dst D/../mock_hfss \
+#       --ids InfParallelPlate_crack1Rohan InfParallelPlate_crack2
+#   cd D && <repo>/examples/testworld/build/bbrsimTestWorld \
+#       <repo>/validation/G4Macros/Validation_CrackFrequency.mac 2>&1 | tee frequency.log
+#   conda run -n bbrsim python <repo>/validation/check_crack_frequency.py output
+#   grep -c 'BBR008 dataset=InfParallelPlate_crack1Rohan side=low'  frequency.log  # 1
+#   grep -c 'BBR008 dataset=InfParallelPlate_crack1Rohan side=high' frequency.log  # 1
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/random/setSeeds 2718 28
+/bbr/dataDir ../mock_hfss
+/bbr/config/print
+/run/initialize
+/bbr/gun/mode true
+/bbr/gun/pol 0 0 0
+
+# ---- runs 0-4: on the grid (edges nudged 0.1 % inward) ---------------------
+# 50.05 GHz, not exactly 50: h*50 GHz at 7 significant figures reads back as
+# 49.9992 GHz and would clamp. The exact-edge rule is unit-tested in
+# validation/check_physics.py instead.
+/bbr/gun/energy_eV 2.069902e-04
+/analysis/setFileName output/bbr_freq_r00
+/run/beamOn 4000
+/bbr/gun/energy_eV 6.203502e-04
+/analysis/setFileName output/bbr_freq_r01
+/run/beamOn 4000
+/bbr/gun/energy_eV 2.067834e-03
+/analysis/setFileName output/bbr_freq_r02
+/run/beamOn 4000
+/bbr/gun/energy_eV 6.203502e-03
+/analysis/setFileName output/bbr_freq_r03
+/run/beamOn 4000
+# 4995 GHz, just inside the top of the grid (see the note above).
+/bbr/gun/energy_eV 2.065766e-02
+/analysis/setFileName output/bbr_freq_r04
+/run/beamOn 4000
+
+# ---- runs 5-12: log-midpoints 86.60 / 273.86 / 866.03 / 2738.61 GHz +-1 % --
+/bbr/gun/energy_eV 3.545777e-04
+/analysis/setFileName output/bbr_freq_r05
+/run/beamOn 4000
+/bbr/gun/energy_eV 3.617409e-04
+/analysis/setFileName output/bbr_freq_r06
+/run/beamOn 4000
+/bbr/gun/energy_eV 1.121273e-03
+/analysis/setFileName output/bbr_freq_r07
+/run/beamOn 4000
+/bbr/gun/energy_eV 1.143925e-03
+/analysis/setFileName output/bbr_freq_r08
+/run/beamOn 4000
+/bbr/gun/energy_eV 3.545777e-03
+/analysis/setFileName output/bbr_freq_r09
+/run/beamOn 4000
+/bbr/gun/energy_eV 3.617409e-03
+/analysis/setFileName output/bbr_freq_r10
+/run/beamOn 4000
+/bbr/gun/energy_eV 1.121273e-02
+/analysis/setFileName output/bbr_freq_r11
+/run/beamOn 4000
+/bbr/gun/energy_eV 1.143925e-02
+/analysis/setFileName output/bbr_freq_r12
+/run/beamOn 4000
+
+# ---- runs 13-14: off the grid, must clamp to the edges ---------------------
+/bbr/gun/energy_eV 8.271335e-05
+/analysis/setFileName output/bbr_freq_r13
+/run/beamOn 4000
+/bbr/gun/energy_eV 4.135668e-02
+/analysis/setFileName output/bbr_freq_r14
+/run/beamOn 4000
+
+# ---- run 15: broadband Planck at 20 K -------------------------------------
+# A thin slab just off the Cu face (x in [-0.04, -0.02] mm, no overlap with the
+# slab at x = 0): its two large faces are the +-x ones, so most photons head
+# straight at the crack aperture and ~24 % enter it.
+/bbr/gun/mode false
+/bbr/thermal/setT 20.0
+/bbr/thermal/emitterCenter -0.03 0 0 mm
+/bbr/thermal/emitterSize 0.02 8 0.04 mm
+/analysis/setFileName output/bbr_freq_r15
+/run/beamOn 100000

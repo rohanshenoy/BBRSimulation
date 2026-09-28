@@ -1,0 +1,21 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "clang-release",
+      "displayName": "bbrsimLightPipe: Apple Clang, Release, against ../../install",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/../../install",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/../../install"
+      }
+    }
+  ],
+  "buildPresets": [ { "name": "clang-release", "configurePreset": "clang-release", "jobs": 8 } ]
+}

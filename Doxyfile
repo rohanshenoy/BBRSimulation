@@ -1,0 +1,8 @@
+PROJECT_NAME     = BBRsim
+INPUT            = library examples
+RECURSIVE        = YES
+FILE_PATTERNS    = *.hh *.cc
+EXCLUDE_PATTERNS = */build/*
+OUTPUT_DIRECTORY = doxygen
+GENERATE_HTML    = YES
+GENERATE_LATEX   = NO

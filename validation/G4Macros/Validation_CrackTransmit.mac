@@ -1,0 +1,16 @@
+# Validation_CrackTransmit.mac — 40 000 photons at normal incidence into crack1
+# (500 GHz, gun default (-20,0,0) mm along +x). A sub-cutoff parallel plate
+# transmits the TEM polarization and cuts off the other, so the unpolarized
+# transmittance is exactly 50%. Seeds fixed so the run is reproducible.
+#
+# Validate:
+#   conda run -n bbrsim python <repo>/validation/check_crack_transmittance.py output/bbr.root
+#   conda run -n bbrsim python <repo>/validation/check_no_photons_in_metal.py  output/bbr.root
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/random/setSeeds 2024 7
+/run/initialize
+/bbr/gun/mode true
+/bbr/gun/posZ 0.0
+/run/beamOn 40000
