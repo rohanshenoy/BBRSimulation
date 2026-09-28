@@ -1,3 +1,4 @@
+2026-09-28  bbrsim-V00-01-00  First tagged release: G4CMP-style layout (library/examples/validation/tools).
 2026-09-27  reorg : Mirror G4CMP directory layout; standalone examples; validation/ fixtures; tools/python package; executables BBRSim/BBRLightPipe renamed bbrsimTestWorld/bbrsimLightPipe.
 2026-09-24  notebook : Copper reflectance notebook (full Drude model vs Serov 2016).
 2026-09-24  frequency : Frequency-keyed HFSS lookup (nearest in log nu); /bbr/dataDir; hfss_freq_GHz column.
