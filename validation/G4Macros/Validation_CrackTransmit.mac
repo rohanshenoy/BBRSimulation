@@ -1,11 +1,18 @@
-# Validation_CrackTransmit.mac — 40 000 photons at normal incidence into crack1
-# (500 GHz, gun default (-20,0,0) mm along +x). A sub-cutoff parallel plate
-# transmits the TEM polarization and cuts off the other, so the unpolarized
-# transmittance is exactly 50%. Seeds fixed so the run is reproducible.
+# Validation_CrackTransmit.mac — two runs into the test world's cracks.
+# Run 1: 40 000 photons at normal incidence into crack1 (500 GHz, gun default
+# (-20,0,0) mm along +x). A sub-cutoff parallel plate transmits the TEM
+# polarization and cuts off the other, so the unpolarized transmittance is
+# exactly 50%. Writes output/bbr.root.
+# Run 2: 200 000 Planck photons at 4 K from a thin slab just off the Cu face,
+# over both cracks, for the crack2/crack1 entry ratio. Writes
+# output/bbr_ratio.root: every /run/beamOn reopens the analysis file, so
+# without /analysis/setFileName it would overwrite run 1's output.
+# Seeds fixed so both runs are reproducible.
 #
 # Validate:
 #   conda run -n bbrsim python <repo>/validation/check_crack_transmittance.py output/bbr.root
-#   conda run -n bbrsim python <repo>/validation/check_no_photons_in_metal.py  output/bbr.root
+#   conda run -n bbrsim python <repo>/validation/check_invariants.py          output/bbr.root
+#   conda run -n bbrsim python <repo>/validation/check_crack_ratio.py         output/bbr_ratio.root
 /run/verbose 0
 /event/verbose 0
 /tracking/verbose 0
@@ -14,3 +21,17 @@
 /bbr/gun/mode true
 /bbr/gun/posZ 0.0
 /run/beamOn 40000
+
+# ---- run 2: crack2/crack1 entry ratio, Planck at 4 K -----------------------
+# The emitter is a slab x in [-0.04, -0.02] mm (no overlap with the Cu slab at
+# x = 0), 8 mm in y and z around (y, z) = (0, 1.5) mm. In z, crack1 (z = 0) and
+# crack2 (z = 3 mm) lie 2.5 mm inside its edges; in y it spans the middle 8 mm
+# of both 10.2 mm crack mouths, leaving 1.1 mm at each end. The two cracks sit
+# symmetrically about the slab centre, so they see the same illumination and
+# their entry counts scale with the gap widths, 102/52.
+/bbr/gun/mode false
+/bbr/thermal/setT 4.0
+/bbr/thermal/emitterCenter -0.03 0 1.5 mm
+/bbr/thermal/emitterSize 0.02 8 8 mm
+/analysis/setFileName output/bbr_ratio
+/run/beamOn 200000

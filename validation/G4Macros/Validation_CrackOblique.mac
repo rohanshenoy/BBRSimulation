@@ -12,8 +12,7 @@
 # Validate:
 #   conda run -n bbrsim python <repo>/validation/check_crack_oblique.py output
 #   for f in output/bbr_oblique_r*.root; do
-#     conda run -n bbrsim python <repo>/validation/check_no_photons_in_metal.py $f
-#     conda run -n bbrsim python <repo>/validation/check_term_status.py $f
+#     conda run -n bbrsim python <repo>/validation/check_invariants.py $f
 #   done
 /run/verbose 0
 /event/verbose 0

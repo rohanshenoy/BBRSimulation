@@ -73,13 +73,15 @@ If you `cmake --install` the example into the library's prefix, a shell that has
 
 ## Testing
 
-The regression fixtures that run this executable live in
-`validation/G4Macros/` (`Validation_Reflectance`, `Validation_Planck`,
-`Validation_CrackWall`, `Validation_WorldExit`, `Validation_CrackTransmit`,
-`Validation_CrackOblique`, `Validation_CrackFrequency`). `Validation_Reflectance`
-and `Validation_Planck` are frozen copies of `reflectance.mac` and `planck.mac`:
-a change to a macro here does not change them. The others exist only in
-`validation/`. Run them all with
+The regression runner runs this executable on two of the macros here,
+`reflectance.mac` and `planck.mac`, and on five fixtures that exist only in
+`validation/G4Macros/` (`Validation_CrackWall`, `Validation_WorldExit`,
+`Validation_CrackTransmit`, `Validation_CrackOblique`,
+`Validation_CrackFrequency`). `reflectance.mac` and `planck.mac` are therefore
+regression inputs: the drift guard `regression macros pinned` fails when one
+of their command lines changes (only full-line comment and blank-line edits
+pass), so change them only together with their validators and then update the
+pin in `validation/Scripts/drift_guards.sh`. Run everything with
 `validation/Scripts/run_regression.sh`; see
 [validation/README.md](../../validation/README.md).
 
