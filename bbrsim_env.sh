@@ -2,11 +2,9 @@
 #
 # Usage: . /path/to/bbrsim_env.sh      (repository root, or <prefix>/share/BBRsim)
 #
-# Pattern: G4CMP g4cmp_env.sh, with two differences:
-#  - zsh (the macOS default shell) is supported: the script finds itself through
-#    ${(%):-%x}. G4CMP only reads bash's BASH_ARGV and fails under zsh.
-#  - BBRSIMINSTALL is recomputed on every source, so sourcing a second tree
-#    switches to it instead of silently keeping the first.
+# The script finds itself through BASH_SOURCE (bash) or ${(%):-%x} (zsh, the
+# macOS default shell). BBRSIMINSTALL is recomputed on every source, so
+# sourcing a second tree switches to it instead of keeping the first.
 # Other sh-family shells (dash, ksh) cannot tell a sourced script its own path.
 # There, cd to the script's directory first and source ./bbrsim_env.sh; the script
 # prints the directory it used. Nothing is exported until the tree is recognised,

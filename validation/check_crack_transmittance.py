@@ -51,7 +51,7 @@ print(f"T_obs                      : {T_obs:.5f} +/- {sigma:.5f}")
 print(f"T_ideal                    : {T_IDEAL:.2f}   (z = {z:+.2f} sigma, threshold 3)")
 print(f"tangential exits |px|<1e-6 : {n_tangential}   (must be 0)")
 
-# Frequency-keyed lookup (2026-09-22): each crack entry records the grid
+# Frequency-keyed lookup: each crack entry records the grid
 # frequency the wrapper selected. The real data hold only 500 GHz, so every
 # entry must read 500 and every other crossing the -1 sentinel.
 has_col = "hfss_freq_GHz" in df.columns

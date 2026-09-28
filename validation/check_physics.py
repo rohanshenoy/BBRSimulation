@@ -46,7 +46,7 @@ u = np.linspace(0.05, 8.0, 4000)
 pdf = physics.planck_photon_number_pdf(u * physics.K_EV * T, T)
 check("peak u", float(u[int(np.argmax(pdf))]), physics.PLANCK_PEAK_U, 0.02)
 
-print("HFSS frequency selection rule (spec 2026-09-22 section 1.3):")
+print("HFSS frequency selection rule (nearest in log frequency):")
 # The C++ (BBRCrackLibrary::Lookup) cannot be exercised for ties or edges from a
 # macro, so this is where the rule itself is pinned; the mock-data validator
 # then checks that the C++ agrees photon by photon.

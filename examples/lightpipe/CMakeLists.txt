@@ -16,7 +16,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# RPATH, as in G4CMP examples/charge/CMakeLists.txt:45-52.
+# RPATH: installed binaries find their libraries without DYLD_LIBRARY_PATH.
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" is_SYSTEM_DIR)
 if("${is_SYSTEM_DIR}" STREQUAL "-1")

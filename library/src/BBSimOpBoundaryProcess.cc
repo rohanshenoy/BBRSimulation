@@ -255,9 +255,9 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
   // the entered volume is the MOTHER of the exited one (a photon inside a
   // vacuum_wg crack striking the crack's side wall and entering the Cu slab),
   // the hit point is interior to the slab box and G4Box::SurfaceNormal
-  // silently returns the nearest slab face (x) instead of the wall normal (z).
-  // The photon was then reflected about the wrong axis and continued through
-  // solid copper. The entered solid's normal is kept only as a fallback for
+  // silently returns the nearest slab face (x) instead of the wall normal (z),
+  // which reflects the photon about the wrong axis and sends it through solid
+  // copper. The entered solid's normal is kept only as a fallback for
   // the rare case where the navigator cannot provide one; that fallback is
   // correct whenever the entered solid's surface IS the boundary (the usual
   // vacuum -> metal hit), so it is reported as a warning, not a fatal error.

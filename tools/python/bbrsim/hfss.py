@@ -243,11 +243,10 @@ def binned_expectation(values, weights, edges):
 # Frequency grid: discovery and selection
 #
 # Mirrors BBRCrackLibrary::Discover and the selection block of
-# BBRCrackLibrary::Lookup (spec docs/specs/
-# 2026-09-22-frequency-keyed-hfss-design.md, sections 1.1 and 1.3). Keep the
-# two implementations in lock-step: the validators compare the C++ choice,
-# recorded per photon in the crossings column hfss_freq_GHz, against
-# select_frequency() evaluated on the same directory tree.
+# BBRCrackLibrary::Lookup. Keep the two implementations in lock-step: the
+# validators compare the C++ choice, recorded per photon in the crossings
+# column hfss_freq_GHz, against select_frequency() evaluated on the same
+# directory tree.
 # ---------------------------------------------------------------------------
 
 H_EV_S = 4.135667696e-15   # Planck constant in eV s (CODATA 2018 = CLHEP's value)

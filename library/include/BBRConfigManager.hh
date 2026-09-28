@@ -3,11 +3,11 @@
 
 // Centralized, thread-local run configuration for BBRsim.
 //
-// Pattern mirrors G4CMP's G4CMPConfigManager: Instance() returns a per-thread
-// object. The master/sequential thread constructs the real instance (compiled
-// defaults); each worker thread copy-constructs from the master and owns its
-// own BBRConfigMessenger, so broadcast commands reach every worker's copy.
-// This replaces the shared-mutable static config the primary generator used to hold.
+// Instance() returns a per-thread object. The master/sequential thread
+// constructs the real instance (compiled defaults); each worker thread
+// copy-constructs from the master and owns its own BBRConfigMessenger, so
+// broadcast commands reach every worker's copy. No mutable state is shared
+// between threads.
 //
 // All tunables are reached through static Get*/Set* that route via Instance(),
 // so callers automatically read/write their own thread's copy.

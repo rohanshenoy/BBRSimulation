@@ -1,133 +1,36 @@
 # BBRsim User Guide
 
-This guide covers everything needed to build BBRsim, run its existing test
-cases, interpret the output, and configure material properties.
+How to run the test world, what every `/bbr/` command does, what the output
+contains, and which script checks what. Building, installing and the Python
+setup are in the [README](README.md); this guide assumes you have done its
+[Quick start](README.md#quick-start).
 
----
+## Running the test world
 
-## Prerequisites
-
-| Requirement | Version | Notes |
-|---|---|---|
-| Geant4 | 11.x | Must be built with optical physics (`-DGEANT4_USE_OPENGL_X11=ON` optional) |
-| CMake | ≥ 3.21 | The presets need 3.21; a manual configure needs 3.16 |
-| C++ compiler | C++17 | Clang or GCC |
-| Python | 3.x via conda | `bbrsim` environment — see below |
-
-**Python environment setup** (one-time, from the repository root):
+`bbrsimTestWorld` runs from its build directory, `examples/testworld/build/`,
+in a shell that has sourced the env script. The macros sit beside the binary
+there, and output goes to `output/` under the directory you run from.
 
 ```bash
-conda create -n bbrsim python=3.11 numpy scipy matplotlib pandas
-conda run -n bbrsim pip install -e tools/python     # bbrsim + uproot, the ROOT reader
+./bbrsimTestWorld                 # interactive: opens the UI and runs vis.mac
+./bbrsimTestWorld <macro.mac>     # batch
 ```
 
-Both steps are needed: `bbrsim.io` imports uproot, which only the editable
-install brings in. The install also makes `bbrsim` importable without sourcing
-the env script. The editable install points the shared `bbrsim` env at this
-checkout: for another clone or an install, source that tree's env script
-(`PYTHONPATH` takes precedence) or rerun `pip install -e` there.
+The geometry: a 50 cm vacuum world, a 4 mm Cu slab with its front face at
+x = 0, and two `vacuum_wg` crack volumes in the slab (crack1: 52 µm gap at
+z = 0; crack2: 102 µm gap at z = 3 mm).
 
-All Python scripts must be run as `conda run -n bbrsim python <script>` — not
-`python3` directly, even if packages appear installed in the base environment.
-
----
-
-## Build
-
-The build has two stages. The top-level project builds and installs the BBRsim
-library, its data and the environment scripts:
-
-```bash
-cd BBRSimulation
-cmake --preset clang-release          # Apple Clang, Release, build/ -> install/
-cmake --build --preset clang-release
-cmake --install build                 # required: the data default is the install prefix
-```
-
-The two examples are standalone CMake projects built against that install,
-each with its own `clang-release` preset (build directory `build/` inside the
-example):
-
-```bash
-. install/share/BBRsim/bbrsim_env.sh          # csh/tcsh: source install/share/BBRsim/bbrsim_env.csh
-cd examples/testworld && cmake --preset clang-release && cmake --build --preset clang-release
-cd ../lightpipe && cmake --preset clang-release && cmake --build --preset clang-release
-```
-
-The install prefix is `install/` by default. The data default and the RPATH are
-baked in when the library is configured, so a different prefix needs a
-reconfigure (`-DCMAKE_INSTALL_PREFIX=<prefix>`), not only `cmake --install
---prefix`.
-
-`CMakePresets.json` pins `/usr/bin/clang`/`clang++` and `Release`; IDE CMake
-integrations (VSCode CMake Tools) pick the preset up automatically instead of
-offering their own compiler kits. The manual equivalent is
-`cmake -S . -B build -DCMAKE_C_COMPILER=/usr/bin/clang
--DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Release
--DCMAKE_INSTALL_PREFIX=install`; a `clang-debug` preset builds into
-`build-debug/` and installs into `install-debug/`.
-
-On macOS, always configure with Apple Clang explicitly. A bare `cmake ..` can
-select Homebrew GCC (libstdc++); it compiles, then fails at link against an
-Apple-Clang (libc++) Geant4 install with undefined symbols on every API taking
-`std::` types. That is a compiler/ABI mismatch, not a code bug — check
-`CMAKE_CXX_COMPILER` in `build/CMakeCache.txt`.
-
-Batch-only build (no UI or visualization — faster, no display required):
-
-```bash
-cmake --preset clang-release -DWITH_GEANT4_UIVIS=OFF
-cmake --build --preset clang-release
-cmake --install build
-```
-
-Each example's CMake copies its `G4Macros/*.mac` into the example's build
-directory, beside the executable.
-
----
-
-## Running BBRsim
-
-The test-world executable is `bbrsimTestWorld` (the light pipe's is
-`bbrsimLightPipe`). Run it from its build directory, `examples/testworld/build/`,
-in a shell that has sourced the env script; the macros sit beside it there, and
-the output is written to `output/` under the directory you run from.
-
-**Interactive** (requires UI + visualization in your Geant4 build):
-
-```bash
-./bbrsimTestWorld
-```
-
-**Batch** (pass a macro file):
-
-```bash
-./bbrsimTestWorld <macro.mac>
-```
-
----
+In the commands below, `./bbrsimTestWorld` runs in `examples/testworld/build/`
+and the `conda run` commands run from the repository root. The light-pipe
+example has its own [README](examples/lightpipe/README.md).
 
 ## Test cases
 
-All test cases run in the consolidated test world
-(`TestWorldDetectorConstruction`): a 50 cm vacuum world, a 4 mm Cu slab with
-its front face at x = 0, and two `vacuum_wg` crack daughters (crack1: 52 µm
-gap at z = 0; crack2: 102 µm gap at z = 3 mm). Every optical-photon boundary
-crossing is logged to the `crossings` ntuple in `output/bbr.root` (see
-*Output files*).
-
-In the commands below, `./bbrsimTestWorld` runs in `examples/testworld/build/`,
-and the `conda run` commands run from the repository root and read that run's
-`examples/testworld/build/output/bbr.root`. The validation fixtures
-(`validation/G4Macros/Validation_*.mac`) are run the same way, each from its own
-empty run directory, so that every fixture writes its own `output/`; see
-[validation/README.md](validation/README.md).
-
 ### 1. Planck thermal emitter
 
-The default mode (`/bbr/gun/mode false`): a 1×20×20 mm box surface at
-x = −50 mm emits photons with energies drawn from the Planck photon-number
-spectrum (10 GHz–20 THz) toward the Cu slab and cracks.
+The default mode. A 1×20×20 mm box at x = −50 mm emits photons with energies
+drawn from the Planck photon-number spectrum (10 GHz–20 THz) toward the slab
+and the cracks.
 
 ```bash
 ./bbrsimTestWorld planck.mac         # 10 000 events at 4 K
@@ -135,14 +38,14 @@ spectrum (10 GHz–20 THz) toward the Cu slab and cracks.
 ./bbrsimTestWorld planck_10K.mac     # 1 000 000 events at 10 K
 ```
 
-Validate the emitted spectrum:
+Check the emitted spectrum:
 
 ```bash
 conda run -n bbrsim python validation/check_planck_spectrum.py examples/testworld/build/output/bbr.root --temp 4
 ```
 
-Compare the crack2/crack1 entry ratio with the aperture ratio. Both cracks need
-entries, so run it on at least ~1M Planck events (`planck.mac` gives too few):
+The crack2/crack1 entry ratio should match the ratio of their apertures. Both
+cracks need entries, so use at least ~1M events:
 
 ```bash
 ./bbrsimTestWorld planck_10K.mac
@@ -151,352 +54,253 @@ conda run -n bbrsim python validation/check_crack_ratio.py examples/testworld/bu
 
 ### 2. HFSS crack diffraction
 
-Photons entering a `vacuum_wg` crack volume are routed through the HFSS
-S-parameter lookup. The `[BBR] diffraction` stdout line reports the running
-observed transmittance (per worker thread, every 100 crack entries on it). At
-500 GHz normal incidence:
+A photon entering a crack volume is handled by the HFSS lookup, which decides
+whether it transmits and samples its exit direction and position. At 500 GHz
+and normal incidence:
 
-| Crack | Gap | Observed T |
+| Crack | Gap | Observed T (40 000 photons) |
 |---|---|---|
-| crack1 | 52 µm | 50.0 ± 0.25% |
-| crack2 | 102 µm | 50.3 ± 0.25% |
+| crack1 | 52 µm | 50.0 ± 0.25 % |
+| crack2 | 102 µm | 50.3 ± 0.25 % |
 
-The benchmark is **50%**: a parallel-plate gap thinner than λ/2 is a perfect
-polarization filter — only the cutoff-free TEM mode transmits — so an
-unpolarized beam transmits exactly half. Both observations (40k photons each;
-`Validation_CrackTransmit.mac` + `check_crack_transmittance.py`) are consistent
-with that ideal. Raw HFSS power ratios above 1 — a port-normalization artefact, 1.0545
-for crack1 — are capped at 1 when the tables load (a `[BBR] HFSS ... capped to
-1` line is printed). Before that cap the observed values were 51.9% / 50.5%,
-and an older "52.7%" figure in archived plans carried the same artefact; do not
-quote either.
-
-> **Scope limit — one HFSS frequency of data.** The lookup itself is keyed by
-> frequency: `BBRCrackLibrary` reads the grid from the dataset directory names
-> (`<id>_<freq>GHz_Ephi=N` under `<dataDir>/waveguides`) and gives each photon
-> the grid point nearest in log frequency, recording it in `hfss_freq_GHz`.
-> Only 500 GHz exists, so Planck-mode runs spanning 10 GHz–20 THz still apply
-> the 500 GHz transmittance and angular PDFs to every photon, and broadband
-> crack results remain indicative rather than quantitative. Adding real exports
-> is a matter of adding directories; there is no interpolation between grid
-> points, and a photon beyond the grid uses the nearest edge (one `BBR008`
-> warning per crack and side; a one-point grid never warns). The
-> quarter-symmetry azimuth fold/unfold is validated at normal incidence and at
-> 45° off normal (`Validation_CrackOblique.mac`), the only oblique row in the
-> HFSS data.
+The expected value is exactly 50 %. A parallel-plate gap narrower than λ/2 is
+a perfect polarization filter: only the TEM mode, which has no cutoff,
+transmits, so unpolarized light transmits half. The raw HFSS power ratios come
+out slightly above 1 (1.0545 for crack1, a port-normalization artefact), so
+they are capped at 1 when the tables load; a `[BBR] HFSS ... capped to 1` line
+reports it.
 
 To aim the fixed gun at a crack:
 
 ```mac
 /run/initialize
 /bbr/gun/mode true
-/bbr/gun/posZ 0.0        # crack1 (use 3.0 for crack2)
+/bbr/gun/posZ 0.0        # crack1 (3.0 for crack2)
 /run/beamOn 10000
 ```
 
-Crack analyses read the `crossings` ntuple from `output/bbr.root`:
+Plot the exit angles against the HFSS far field:
 
 ```bash
 conda run -n bbrsim python tools/plot_crack_angular.py examples/testworld/build/output/bbr.root --iwt 180 --iwp 0
 ```
 
-Crack entries are selected as `mat_post == "vacuum_wg"` and split by `vol_post`.
-Every crossing is logged World-side, so `mat_pre`/`vol_pre` are always
-`G4_Galactic`/`World`; a `mat_pre == "vacuum_wg"` filter matches zero rows.
+**One frequency of data.** The lookup gives each photon the HFSS dataset
+nearest its frequency (in log frequency) and records the choice in the
+`hfss_freq_GHz` column. Only a 500 GHz dataset exists, so every photon of a
+broadband Planck run gets the 500 GHz tables, and broadband crack results are
+indicative, not quantitative. Adding real data means adding
+`<id>_<freq>GHz_Ephi=N` directories under `waveguides/`. There is no
+interpolation between frequencies; a photon beyond the grid uses the nearest
+edge, with one `BBR008` warning per crack and side.
 
 ### 3. Copper reflectance
 
-Fires 500 GHz photons at the solid Cu wall (away from the cracks) and
-measures the fraction absorbed. Each worker thread keeps a running
-`[BBR] reflectance` tally and prints it every 1000 Cu hits on that thread, so
-with many threads a 10 000-event run may print no line at all. The result is
-in `output/bbr.root` (see `check_reflectance.py` below); for a running tally,
-add `/run/numberOfThreads 1` before `/run/initialize`.
+A fixed gun fires 500 GHz photons at the solid Cu face, away from the cracks,
+and counts the fraction absorbed.
 
 ```bash
-./bbrsimTestWorld reflectance.mac         # OFHC_Cu (RRR=100), 10 000 events at z=10 mm
-./bbrsimTestWorld reflectance_OF_Cu.mac   # OF_Cu   (RRR=3),   2 000 events at z=5 mm
-./bbrsimTestWorld reflectance_HP_Cu.mac   # HP_Cu   (RRR=6),   2 000 events at z=5 mm
+./bbrsimTestWorld reflectance.mac         # OFHC_Cu (RRR 100), 10 000 events
+./bbrsimTestWorld reflectance_OF_Cu.mac   # OF_Cu   (RRR 3),    2 000 events
+./bbrsimTestWorld reflectance_HP_Cu.mac   # HP_Cu   (RRR 6),    2 000 events
 ```
 
-The tally line format (here from a single-threaded run) is:
-
-```
-G4WT0 > [BBR] reflectance mat=Cu_RRR100_T4K N=10000 A_obs=... R_theory=0.999951
-```
-
-- `N` = Cu hits on that thread so far
-- `A_obs` = fraction of those photons absorbed (1 − R_obs)
-- `R_theory` = full complex Drude reflectance at the gun frequency
-
-With the full complex Drude model, OFHC Cu at 4 K sits on the relaxation
-plateau: D ≈ 4.9×10⁻⁵ at 500 GHz, i.e. only ~0–2 absorptions per 10 000
-events. Lower grades absorb more (OF_Cu RRR=3: D ≈ 1.0×10⁻³; HP_Cu RRR=6:
-D ≈ 6.3×10⁻⁴). Statistical check (Poisson test on the absorbed count):
+Expected absorptance at 500 GHz and 4 K: 4.9×10⁻⁵ for RRR 100 (the Drude
+relaxation plateau, so only 0–2 absorptions in 10 000 events), 1.0×10⁻³ for
+RRR 3, 6.3×10⁻⁴ for RRR 6. Check the absorbed count against the model
+(Poisson test):
 
 ```bash
-./bbrsimTestWorld reflectance.mac
 conda run -n bbrsim python validation/check_reflectance.py --root examples/testworld/build/output/bbr.root
 ```
 
-For Planck-mode runs, compare the aggregate absorptance against the
-Planck-weighted Drude integral. The script reads the ROOT file and computes
-absorptance from decoded crossings; it defaults to `output/bbr.root` and
-infers RRR and temperature from the run, so `--rrr` / `--temp` are overrides
-only:
+For a Planck run, compare the absorptance over the whole spectrum with the
+Planck-weighted Drude value. The script reads RRR and temperature from the
+material name; `--rrr` and `--temp` only override them:
 
 ```bash
 ./bbrsimTestWorld planck_5M.mac
 conda run -n bbrsim python validation/check_cu_absorptance.py examples/testworld/build/output/bbr.root
 ```
 
-Plot reflectance curves for all three grades:
+Plot the reflectance curves for the three grades:
 
 ```bash
 conda run -n bbrsim python tools/plot_cu_reflectance.py --out output/cu_reflectance_plots.png
-# without --out the plot goes to cu_reflectance_plots.png in the CWD (gitignored)
 ```
 
----
+Each worker thread also prints a running tally,
+`[BBR] reflectance mat=... N=... A_obs=... R_theory=...`, every 1000 Cu hits
+on that thread. In a multithreaded run a thread may never reach 1000 hits, so
+the line can be missing; add `/run/numberOfThreads 1` before
+`/run/initialize` to see it.
 
-## Configuring the Cu wall material
+## Command reference
 
-The Cu material is set by messenger commands, all issued **before**
-`/run/initialize`. There are three ways to specify it.
+All `/bbr/` commands exist from the first macro line. They differ in when they
+are allowed and whether they reach the worker threads:
 
-### Option A — Named alias
+| Commands | Allowed | Broadcast to workers | Notes |
+|---|---|---|---|
+| `/bbr/dataDir` | before `/run/initialize` | no | runtime data root |
+| `/bbr/det/` | before `/run/initialize` | no | geometry is built once, on the master |
+| `/bbr/thermal/` | any time | yes | emitter rebuilt at the next event |
+| `/bbr/gun/` | any time | yes | read every event |
+| `/bbr/config/print` | any time | — | prints every current setting |
+
+There is no runtime geometry change: after `/run/initialize`, changing a
+`/bbr/det/` value requires a new session. `config_mt.mac` runs twice in one
+session (4 K, then 10 K) to show that settings reach every worker between runs.
+
+### `/bbr/dataDir`
+
+| Command | Argument | Default |
+|---|---|---|
+| `/bbr/dataDir` | path | `$BBRSIMDATA`, else `<install prefix>/share/BBRsim/data` |
+
+The directory must contain `waveguides/` with the HFSS datasets. Quote a path
+that contains spaces.
+
+### `/bbr/det/`: the Cu wall
+
+Three ways to set the copper, all before `/run/initialize`:
 
 ```mac
-/bbr/det/setCuMaterial OFHC_Cu    # RRR=100, 4 K
-/bbr/det/setCuMaterial OF_Cu      # RRR=3,   4 K
-/bbr/det/setCuMaterial HP_Cu      # RRR=6,   4 K
-/run/initialize
+/bbr/det/setCuMaterial OFHC_Cu    # named grade: OFHC_Cu (RRR 100), OF_Cu (RRR 3), HP_Cu (RRR 6); resets T to 4 K
+/bbr/det/setCuRRR 250             # any integer RRR >= 1, when you have a measured value
+/bbr/det/setCuStageT 40 K         # temperature stage, for warm shield layers
 ```
 
-### Option B — Direct RRR (recommended when you have a measured spec)
-
-```mac
-/bbr/det/setCuRRR 250             # any integer >= 1
-/run/initialize
-```
-
-### Option C — RRR + temperature stage (warm shield layers)
-
-```mac
-/bbr/det/setCuStageT 40 K         # set temperature first
-/bbr/det/setCuRRR 50
-/run/initialize
-```
-
-The simulation confirms the resolved material at startup:
+For a warm layer, set the temperature, then the RRR. The run confirms the
+material at startup:
 
 ```
 [BBR] Cu wall material: Cu_RRR50_T40K  (RRR=50, T=40 K)
 ```
 
-### Physics of the RRR → σ mapping
+RRR is the only property you supply. The room-temperature conductivity,
+5.96×10⁷ S/m, is the same for every copper grade; at 4 K the conductivity is
+RRR times that. Above about 50 K a phonon term is added (Matthiessen's rule).
+The Drude model then gives the reflectance, tabulated from 10 GHz to 20 THz.
+The [copper notebook](notebooks/copper_reflectance.ipynb) derives it and
+compares it with Serov (2016).
 
-σ_RT = 5.96×10⁷ S/m is universal for all copper grades (you never set this).
-At 4 K the impurity term dominates and σ_DC = RRR × σ_RT is an excellent
-approximation. At higher temperatures, Matthiessen's rule adds a phonon
-contribution. The full complex Drude model (σ(ω) = σ_DC/(1−iωτ) inserted into
-ε̃ = 1 + iσ/(ε₀ω)) then gives R(ω), tabulated over 10 GHz–20 THz to match the
-Planck emitter range. The notebook
-[notebooks/copper_reflectance.ipynb](notebooks/copper_reflectance.ipynb) walks
-through the derivation and the validation against Serov 2016.
+### `/bbr/thermal/`: the Planck emitter
 
----
+| Command | Argument | Default |
+|---|---|---|
+| `/bbr/thermal/setT` | temperature in K | 4.0 |
+| `/bbr/thermal/emitterCenter` | x y z + unit | `-50 0 0 mm` |
+| `/bbr/thermal/emitterSize` | full extents Wx Wy Wz + unit | `1 20 20 mm` |
 
-## Command availability (PreInit vs Idle)
+The emitter is a box radiating outward from all six faces. The default suits
+the test world; other geometries need their own. The light pipe uses
+`-51 0 0 mm` / `1 7 7 mm` to keep the emitter inside its 5 mm bore.
 
-All `/bbr/...` commands are owned by `BBRConfigMessenger`, which
-`BBRConfigManager` registers at startup, so every command exists from the first
-macro line. What differs is *when* each is allowed and whether it reaches worker
-threads:
+Energies follow the Planck photon-number spectrum, ∝ ν²/(e^{hν/kT} − 1), the
+right weighting when each event is one photon. It peaks at hν ≈ 1.59 kT
+(133 GHz at 4 K), not at the energy-spectrum peak of 2.82 kT (235 GHz).
+Directions are uniform in θ over the outward hemisphere, following Chang's
+convention; the approximation washes out after a few reflections.
 
-| Directory | Valid states | Broadcast to workers? | Notes |
-|---|---|---|---|
-| `/bbr/dataDir` | `PreInit` **only** | No | Root of the runtime data tree (must contain `waveguides/`); default `$BBRSIMDATA`, else the compiled-in `<install prefix>/share/BBRsim/data` |
-| `/bbr/det/` | `PreInit` **only** | No | Geometry is built on the master in `Construct()`; issue before `/run/initialize` |
-| `/bbr/gun/` | `PreInit` and `Idle` | Yes | Read fresh each event |
-| `/bbr/thermal/` | `PreInit` and `Idle` | Yes | Planck CDF / emitter box rebuilt on the next event |
-| `/bbr/config/print` | `PreInit` and `Idle` | — | Dumps all current settings |
-
-`BBRConfigManager::Instance()` is a thread-local clone: the master builds from
-compiled defaults and each worker copy-constructs from the master, so broadcast
-settings propagate without shared mutable state. `config_mt.mac`
-exercises this with two runs (4 K then 10 K) in one session.
-
-There is **no runtime geometry reinitialization**. `/run/reinitializeGeometry`
-is not supported by any BBRsim detector construction; changing a `/bbr/det/`
-value after `/run/initialize` requires a new session.
-
----
-
-## Planck emitter configuration
+### `/bbr/gun/`: the photon gun
 
 ```mac
-/bbr/thermal/setT 10.0                    # emitter temperature [K], default 4.0
-/bbr/thermal/emitterCenter -50 0 0 mm     # emitter box centre, world frame (default)
-/bbr/thermal/emitterSize   1 20 20 mm     # emitter box FULL extents Wx Wy Wz (default)
-/run/initialize
-/run/beamOn 10000
-```
-
-The emitter is a box radiating outward from all six faces; its centre and
-extents are read from `BBRConfigManager` and the box is rebuilt on the next
-event when either changes. The defaults suit the testworld example (a patch
-50 mm in front of the Cu slab). Other geometries must size it themselves — the
-light pipe uses `-51 0 0 mm` / `1 7 7 mm` so the emitting face sits 0.5 mm
-upstream of the aperture with its corners inside the 5 mm bore (see
-`lightpipe.mac`); the default box would put the emitting face inside the tube
-wall.
-
-Photon energies are drawn from the Planck **photon-number** spectrum
-∝ ν²/(e^{hν/kT}−1) over a fixed 10 GHz–20 THz range — the correct weighting for
-an unweighted photon Monte Carlo, where each event is one photon. Note this
-peaks at u = hν/kT ≈ 1.5936 (≈133 GHz at 4 K), *not* at the familiar
-energy-spectrum peak hν = 2.82 kT (≈235 GHz at 4 K).
-
-Direction is sampled uniformly over the outward hemisphere (θ uniform in
-[0°, 90°], φ uniform in [0°, 360°]). This is Chang's original convention and is
-intentional — a known approximation whose effect washes out after multiple
-reflections inside a cavity.
-
----
-
-## Gun configuration
-
-The particle gun is a 500 GHz optical photon. Gun commands are read fresh each
-event and are valid both before and after `/run/initialize`.
-
-```mac
-/run/initialize
-
-/bbr/gun/mode true         # true  = fixed particle gun
-                           # false = Planck thermal emitter (default)
-
-/bbr/gun/posX -20.0        # gun X position [mm]
+/bbr/gun/mode true         # true = fixed gun; false = Planck emitter (default)
+/bbr/gun/posX -20.0        # position in mm; defaults -20 0 0
 /bbr/gun/posY   0.0
-/bbr/gun/posZ   0.0        # z=0 → crack1, z=3 → crack2, z>~5 → solid Cu
-
-/bbr/gun/dirX 1.0          # momentum direction (normalized internally)
+/bbr/gun/posZ   0.0        # z = 0: crack1; z = 3: crack2; z > ~5: solid Cu
+/bbr/gun/dirX 1.0          # direction, normalized internally; default 1 0 0
 /bbr/gun/dirY 0.0
 /bbr/gun/dirZ 0.0
-
-/bbr/gun/energy_eV 2.07e-3 # photon energy in eV (500 GHz = 2.07e-3 eV)
-/bbr/gun/pol 0 0 0         # polarization: 0 0 0 = random (default); any other
+/bbr/gun/energy_eV 2.07e-3 # photon energy (2.07e-3 eV = 500 GHz)
+/bbr/gun/pol 0 0 0         # 0 0 0 = random polarization (default); any other
                            # vector is projected perpendicular to the direction
-
-/run/beamOn 1000
 ```
-
----
 
 ## Output files
 
-`output/` is relative to the current working directory of the run: the
-example's build directory for the commands in this guide, or
-`BUILD_DIR/regression/<case>/` for the regression runner.
+`output/` is relative to the directory the run starts in.
 
-| File | Written by | Contents |
-|---|---|---|
-| `output/bbr.root` | `TestWorldRunAction` / `TestWorldSteppingAction` (via `G4AnalysisManager`; the light pipe has its own copies) | Two ntuples. **`crossings`** — one row per optical-photon boundary crossing: run_id, event_id, position, energy, pre/post momentum, incidence angles, volume/material/status/event-type codes, per-track crossing count, and `hfss_freq_GHz` (the HFSS grid frequency selected for a crack entry, `-1` on every other row). **`abspoints`** — one row per photon termination (`fStopAndKill`): position, energy, final momentum, n_reflect, terminating volume + status codes. `term_status` is `WorldExit` for a photon that left the world, `BulkAbsorption` for a `G4OpAbsorption` kill, otherwise the boundary status of the killing step (e.g. `BBRAbsorb`). Categorical fields are integer codes; runs are multithreaded and the per-thread ntuples are merged into this one file. |
-| `output/bbr_legend.json` | `TestWorldRunAction` (master thread) | `{category: {code: name}}` dictionary decoding the integer code columns (status / event_type / volume / material). Consumed by `tools/python/bbrsim/io.py`. |
-| `bbrsim stdout` | redirect from stdout | `[BBR] reflectance` and `[BBR] diffraction` running tallies (per worker thread) |
-| `cu_reflectance_plots.png` (CWD, or `--out`) | `plot_cu_reflectance.py` | 3-panel reflectance / absorptance / temperature-dependence plot |
+| File | Contents |
+|---|---|
+| `output/bbr.root` | Two ntuples. **`crossings`**: one row per optical-photon boundary crossing (run and event IDs, position, energy, momentum before and after, incidence angles, volume, material, status and event-type codes, crossing count, and `hfss_freq_GHz`: the HFSS frequency chosen at a crack entry, −1 on every other row). **`abspoints`**: one row per photon death (position, energy, final momentum, reflection count, final volume and status). |
+| `output/bbr_legend.json` | Maps the integer code columns (status, event type, volume, material) back to names. |
 
-Read the ROOT output in Python via the shared loader: source the env script
-(or `pip install -e tools/python`), then `from bbrsim import io`:
+`abspoints.term_status` is `WorldExit` for a photon that left the world,
+`BulkAbsorption` for absorption inside a material, and otherwise the boundary
+status that killed it (for example `BBRAbsorb`).
+
+Read the output with the `bbrsim` package, which decodes the codes:
 
 ```python
 from bbrsim import io
-crossings, abspoints = io.load("examples/testworld/build/output/bbr.root")   # decoded DataFrames
+crossings, abspoints = io.load("examples/testworld/build/output/bbr.root")
 ```
 
----
+**Selecting crack entries.** Every crossing is logged from the world side:
+`mat_pre` and `vol_pre` are always `G4_Galactic` and `World`, and the entered
+material and volume are `mat_post` and `vol_post`. So a crack entry is
+`mat_post == "vacuum_wg"`, split by `vol_post`, and a first copper hit is a
+`mat_post` starting with `Cu_RRR`.
 
-## Analysis scripts
+## Scripts
 
-Validators live in `validation/` (`check_*.py`, plus `validation/Scripts/`) and
-plot scripts in `tools/` (`plot_*.py`); after sourcing the env script, run them
-as `conda run -n bbrsim python validation/<name>.py` or
-`conda run -n bbrsim python tools/<name>.py`. Every one of them reads BBRsim
-output (default `output/bbr.root` in the CWD) through the `bbrsim` loader in
-`tools/python/bbrsim` — none read a BBRsim-produced CSV.
-(`plot_crack_angular.py` and `plot_cu_reflectance.py` additionally load
-external reference CSVs: the HFSS far-field tables and the Palik / Serov /
-Geant4-IR copper comparison sets.)
+Run every script as `conda run -n bbrsim python <script>`. Each reads BBRsim
+output (default `output/bbr.root` in the current directory) through the
+`bbrsim` package.
 
-Physics formulas are not duplicated per script:
-`tools/python/bbrsim/physics.py` is the single source of truth for the
-complex-Drude reflectance, the Planck photon-number spectrum, and Hagen-Rubens,
-mirroring the C++ implementation and self-tested by `check_physics.py`.
+**Validators** (`validation/`), run by the regression runner:
 
-| Script | Purpose | Key flags |
-|---|---|---|
-| `check_physics.py` | Self-test of `bbrsim.physics` against C++ anchors | — |
-| `check_reflectance.py` | Poisson test of absorbed count vs full-Drude theory (reflectance.mac) | `--root`, `--RRR`, `--T_K`, `--freq` |
-| `check_cu_absorptance.py` | Compare A_obs from decoded crossings to Planck-weighted Drude theory; PASS/FAIL | positional path, `--rrr`, `--temp` |
-| `check_cu_serov.py` | Full-Drude D for the OF_Cu / HP_Cu RRR aliases vs Serov (2016) measured points (±10%). HP_Cu = RRR 6 is currently 13% low — an open decision, see validation/README.md (PASS criteria) | — |
-| `check_crack_wall_reflection.py` | Validation_CrackWall.mac: crack→Cu wall reflections flip pz, keep px/py | positional path |
-| `check_no_photons_in_metal.py` | Invariant: no crossing starts inside a Cu / perfect-metal material | positional path |
-| `check_term_status.py` | Invariant: no `unknown`; world exits are `WorldExit`; absorptions have a volume; BBRAbsorb counts match | positional path |
-| `check_crack_transmittance.py` | Validation_CrackTransmit.mac: T_obs = 0.50 ± 3σ, no tangential exits | positional path |
-| `check_crack_oblique.py` | Validation_CrackOblique.mac: 16 runs at 45° off normal — k_y-sign conservation, T vs table, exit marginals vs the `bbrsim.hfss` mirror, ±y/±z mirror KS, specular reflection (138 checks) | positional output dir (default `output`) |
-| `check_crack_frequency.py` | Validation_CrackFrequency.mac against the mock five-frequency tree: per-photon selection vs the `bbrsim.hfss` mirror, T_obs vs the selected dataset, far-field signature, clamping, Planck bin coverage (89 checks) | positional output dir, `--data-dir MOCK_ROOT` |
-| `notebooks/copper_reflectance.ipynb` | Narrative walkthrough of the copper Drude model: bounce counts, the corner frequency, Hagen-Rubens breakdown, the relaxation plateau, the 24-point Geant4 table, and validation against Serov 2016. Needs `pip install ipykernel` in the `bbrsim` env, and `bbrsim` importable (env script or `pip install -e tools/python`) | open in VS Code / Jupyter |
-| `plot_crack_frequency.py` | Four-panel overview of the frequency-keyed lookup: selection staircase, observed vs predicted transmittance, the Planck spectrum coloured by dataset, and the far-field exit signature | positional output dir, `--data-dir MOCK_ROOT`, `--out PATH` |
-| `make_mock_hfss_frequencies.py` | Build the mock multi-frequency HFSS tree from the real 500 GHz data (scaled transmittance + truncated far field per frequency); refuses to write inside `data/` | `--src --dst --ids [--freqs --scales]` |
-| `run_regression.sh` | Build and install the library, build both examples against it, drift guards + consumer smoke test, the eight `Validation_*.mac` fixtures (parallel, under `<build>/regression/`) + every validator, one PASS/FAIL line each; exit code = unexpected failures, known reds reported as XFAIL | positional build dir (default `build`); `BBR_PREFIX` (default `install`) |
-| `check_planck_spectrum.py` | Validate emitted spectrum against Planck photon-number peak | positional path, `--temp <K>` |
-| `check_nreflect.py` | Per-track reflection-count distribution sanity checks | — |
-| `check_angle_distribution.py` | KS test of Cu incidence angles | — |
-| `check_crack_ratio.py` | crack2/crack1 rate ratio vs aperture ratio | positional path |
-| `plot_cu_reflectance.py` | Reflectance/absorptance curves vs frequency, temperature panel | `--out <path>` |
-| `plot_crack_angular.py` | Outgoing crack angular distributions vs HFSS far-field theory | `--iwt`, `--iwp` |
-| `plot_test_output.py` | Overview plots of the boundary-crossing output | `--temp <K>` |
+| Script | Checks |
+|---|---|
+| `check_physics.py` | the `bbrsim` formulas against reference values (no input) |
+| `check_reflectance.py` | absorbed count vs the Drude model (`--root`, `--RRR`, `--T_K`, `--freq`) |
+| `check_cu_serov.py` | Drude loss for `OF_Cu` / `HP_Cu` vs Serov (2016) within ±10 %; `HP_Cu` is the known expected failure |
+| `check_planck_spectrum.py` | the emitted spectrum's peak (`--temp`) |
+| `check_nreflect.py` | the per-photon reflection-count distribution |
+| `check_angle_distribution.py` | incidence angles at the copper vs uniform-in-θ emission (KS test, sized for the 10 000-event Planck run) |
+| `check_crack_transmittance.py` | T = 0.50 at normal incidence, no exits along the crack face |
+| `check_crack_wall_reflection.py` | reflection off a crack's side wall flips only p_z |
+| `check_crack_oblique.py` | 45° incidence: 138 checks against the HFSS tables and the Python model |
+| `check_crack_frequency.py` | dataset choice per photon on the mock five-frequency tree: 89 checks (`--data-dir`) |
+| `check_no_photons_in_metal.py` | no photon ever travels inside a metal |
+| `check_term_status.py` | every photon death is labelled correctly |
 
-`check_angle_distribution.py` is a KS test and is therefore N-sensitive: it
-passes on its designated 10k-event `planck.mac` workload but over-rejects on a
-5M-event run. That is a property of the test, not a regression.
+**Validators run by hand**, because they need a large run:
+`check_crack_ratio.py` (a Planck run of ≥ 1M events) and
+`check_cu_absorptance.py` (`planck_5M.mac`), both shown above.
 
----
+**Plot scripts** (`tools/`): `plot_cu_reflectance.py` (writes to the current
+directory, or `--out`), `plot_crack_angular.py` (`--iwt`, `--iwp`; writes
+next to its input), `plot_crack_frequency.py` (writes into its output
+directory, or `--out`), `plot_test_output.py` (overview of one output file;
+writes next to its input).
+
+The fixtures these run on, and the runner, are described in
+[validation/README.md](validation/README.md).
 
 ## Troubleshooting
 
-**`[BBR] det/setCuMaterial: unknown alias`**
-Only `OFHC_Cu`, `OF_Cu`, and `HP_Cu` are valid aliases. Use `/bbr/det/setCuRRR <N>`
-for any other grade.
+**`[BBR] det/setCuMaterial: unknown alias`**: only `OFHC_Cu`, `OF_Cu` and
+`HP_Cu` exist. Use `/bbr/det/setCuRRR <N>` for any other grade.
 
-**`[BBR] det/setCuRRR: RRR must be >= 1`**
-RRR must be a positive integer. RRR < 1 has no physical meaning.
+**`[BBR] det/setCuRRR: RRR must be >= 1`**: RRR is a positive integer.
 
-**No `[BBR] reflectance` lines in output**
-Expected in a multithreaded run: the tally is per worker thread and prints
-every 1000 Cu hits on that thread, so the shipped reflectance macros print
-few or none: the 2 000-event OF_Cu/HP_Cu macros print none, and the
-10 000-event `reflectance.mac` prints a line only for the threads that reach
-1000 hits. Read the result from
-`output/bbr.root` with `check_reflectance.py`, or add `/run/numberOfThreads 1`
-before `/run/initialize` for a running tally. If that single-threaded run
-still prints nothing, check that the gun points at the Cu face (x = 0 plane)
-away from the cracks (`/bbr/gun/mode true`, `/bbr/gun/posZ 10.0`).
+**A crack macro aborts with `BBR011`**: the HFSS data were not found. Run
+`cmake --install build` in the repository, or point `/bbr/dataDir` or
+`$BBRSIMDATA` at a directory containing `waveguides/`. The message names the
+path it tried.
 
-**`RESULT: FAIL` from `check_cu_absorptance.py`**
-A_obs/A_theory outside [0.3, 3.0]. Common causes: too few events (< 1000 give
-high statistical noise — at RRR=100 the absorptance is ~4.9×10⁻⁵, so a 10k run
-yields ~0–2 absorptions), or an `--rrr`/`--temp` override that contradicts the
-Cu material actually used in the run. Without overrides the script parses RRR
-and T from the material name, so a mismatch is usually a stale override.
+**No `[BBR] reflectance` lines**: expected with many threads; see
+[Copper reflectance](#3-copper-reflectance).
 
-**`check_cu_absorptance.py` reports "no Cu boundary crossings found"**
-You passed the wrong file, or the run never reached the Cu slab. The script
-takes a **ROOT path** (positional, default `output/bbr.root`). The old
-`check_cu_absorptance.py out.txt --rrr 100` stdout-parsing form no longer
-exists.
+**`check_cu_absorptance.py` fails** (A_obs / A_theory outside [0.3, 3]): too
+few events (at RRR 100 a 10 000-event run gives 0–2 absorptions), or an
+`--rrr` / `--temp` override that does not match the run. It takes the path to
+a ROOT file.
 
-**Python scripts crash with `ModuleNotFoundError`**
-Run as `conda run -n bbrsim python validation/<name>.py` (or `tools/<name>.py`), not `python3 ...`.
-The `bbrsim` package must also be importable: source the env script, or install
-it once with `conda run -n bbrsim pip install -e tools/python`.
+**`ModuleNotFoundError` in a Python script**: run it with
+`conda run -n bbrsim python`, not `python3`, and make `bbrsim` importable:
+source the env script, or run `conda run -n bbrsim pip install -e tools/python`
+once.

@@ -72,8 +72,8 @@ inline G4Material* BuildDrudeMaterial(const G4String& name,
   const G4double tau = sigma_DC * m_e_kg / (n_e * e_C * e_C);
 
   // Build 24 log-spaced reflectivity points from 10 GHz to 20 THz.
-  // Lower bound matches the Planck-emitter CDF (10 GHz) so sub-50-GHz
-  // photons are no longer clamped to the table edge.
+  // Lower bound matches the Planck-emitter CDF (10 GHz) so low-frequency
+  // photons are not clamped to the table edge.
   const int      N     = 24;
   const G4double Emin  = 4.14e-5*eV;   // 10 GHz
   const G4double Emax  = 8.27e-2*eV;   // 20 THz

@@ -52,8 +52,8 @@ def drude_reflectance(freq_Hz, RRR, T_K=4.0):
 
     sigma(w) = sigma_DC/(1 - i w tau) kept complex; eps = 1 + i sigma/(eps0 w);
     n = sqrt(eps); R = |(n-1)/(n+1)|^2. The real-sigma closed form is NOT used:
-    it drops the plasma term in Re(eps) and overestimates D ~30x at 500 GHz
-    (the bug fixed 2026-06-09). Vectorized over freq_Hz.
+    it drops the plasma term in Re(eps) and overestimates D ~30x at 500 GHz.
+    Vectorized over freq_Hz.
     """
     freq_Hz = np.asarray(freq_Hz, dtype=float)
     sdc   = sigma_dc(RRR, T_K)

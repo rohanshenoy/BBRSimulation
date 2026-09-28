@@ -6,8 +6,7 @@ observed reflectance R_obs against the Drude model prediction R_theory.
 Usage:
     conda run -n bbrsim python validation/check_reflectance.py [--root path]
 
-`--csv` is accepted as a deprecated alias for `--root` (the input has been a
-ROOT file since the Phase-A output migration; the flag name is historical).
+`--csv` is accepted as an older name for `--root`.
 """
 
 import argparse

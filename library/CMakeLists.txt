@@ -1,6 +1,6 @@
 #----------------------------------------------------------------------------
 # BBRsim library: target BBRsim -> libBBRsim, exported as BBRsim::BBRsim.
-# Sources and headers are listed explicitly (G4CMP style); the regression
+# Sources and headers are listed explicitly (no globs); the regression
 # runner's drift guard checks that every file under include/ and src/ is here.
 
 set(BBRsim_SOURCES
@@ -30,7 +30,7 @@ set(BBRsim_HEADERS
   ${CMAKE_CURRENT_SOURCE_DIR}/include/ThermalSurface.hh
   )
 
-# RPATH, as in G4CMP library/CMakeLists.txt:48-55 and 375-378.
+# RPATH: installed binaries find libBBRsim and Geant4 without DYLD_LIBRARY_PATH.
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" is_SYSTEM_DIR)
 if("${is_SYSTEM_DIR}" STREQUAL "-1")

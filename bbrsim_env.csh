@@ -4,7 +4,7 @@
 #        cd /path/to; source bbrsim_env.csh          (inside a script)
 #        source /path/to/bbrsim_env.csh /path/to     (tcsh, inside a script)
 #
-# Pattern: G4CMP g4cmp_env.csh. BBRSIMINSTALL is recomputed on every source.
+# BBRSIMINSTALL is recomputed on every source.
 # The script looks for itself in the interactive command line ($_), then in the
 # directory argument, then in the current directory. $_ is split at blanks, so for
 # a path that contains blanks, pass the directory argument (quoted) or cd there.

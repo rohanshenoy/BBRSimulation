@@ -1,7 +1,7 @@
 """
 make_mock_hfss_frequencies.py
 Fabricate a multi-frequency HFSS data tree from the single real 500 GHz
-dataset, to exercise the frequency-keyed lookup (spec 2026-09-22 section 4).
+dataset, to exercise the frequency-keyed lookup.
 
 For each id, frequency f (position i in --freqs) and Ephi in {0,1}, copies
   <src>/<id>_<source-freq>GHz_Ephi=<n>/{far_field,waveguide}.csv

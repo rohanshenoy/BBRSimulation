@@ -9,8 +9,8 @@ class G4UIdirectory;
 class G4UIcmdWithADoubleAndUnit;
 class G4UIcmdWithAString;
 
-// Owns the /bbr/lightpipe/ geometry commands (G4CMP per-construction messenger
-// pattern; NOT folded into BBRConfigManager). All PreInit + non-broadcast:
+// Owns the /bbr/lightpipe/ geometry commands (one messenger per detector
+// construction, not folded into BBRConfigManager). All PreInit + non-broadcast:
 // geometry is built on the master in Construct().
 class LightPipeMessenger : public G4UImessenger {
 public:

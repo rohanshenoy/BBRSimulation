@@ -1,6 +1,6 @@
 #----------------------------------------------------------------------------
 # BBRsim — top-level project: builds and installs the BBRsim library.
-# Layout mirrors G4CMP (library/, examples/, validation/, tools/); the examples
+# Layout: library/, examples/, validation/, tools/. The examples
 # and the validation smoke test are standalone projects built against the
 # installed library (source bbrsim_env.sh or pass CMAKE_PREFIX_PATH).
 cmake_minimum_required(VERSION 3.16...3.27)
@@ -31,7 +31,7 @@ if(BUILD_BBRSIM_TOOLS)
   add_subdirectory(tools)
 endif()
 
-# Version stamp (G4CMP CMakeLists.txt:83-95). git describe runs only when the
+# Version stamp written to .bbrsim-version. git describe runs only when the
 # source dir is itself the top of a work tree (a clone, a worktree, where .git
 # is a file, or a submodule): a copy vendored inside another repository gets
 # BBRSIM_VERSION, not that repository's hash. describe needs an annotated tag

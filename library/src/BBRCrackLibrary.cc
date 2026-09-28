@@ -70,7 +70,7 @@ BBRCrackLibrary::FrequencySet& BBRCrackLibrary::Discover(const G4String& dataset
       ed << "Dataset directory " << AbsPath(entry.path())
          << " carries no frequency. Rename it to " << prefix << "<freq>" << suffix
          << " (e.g. " << prefix << "500" << suffix << "); the lookup is keyed by "
-         << "frequency since 2026-09-22.";
+         << "frequency.";
       G4Exception("BBRCrackLibrary::Discover", "BBR011", FatalException, ed);
     }
     if (name.size() <= prefix.size() + suffix.size()) continue;
@@ -130,8 +130,9 @@ const BBRHFSSData& BBRCrackLibrary::Lookup(const G4String& datasetId, G4double n
   FrequencySet& set = Discover(datasetId);
   auto& E = set.entries;
 
-  // Selection rule — spec 2026-09-22 section 1.3. Keep in lock-step with
-  // bbrsim.hfss.select_frequency, which the validators compare against.
+  // Selection rule: nearest grid point in log frequency, ties to the lower,
+  // clamped at the edges. Keep in lock-step with bbrsim.hfss.select_frequency,
+  // which the validators compare against.
   std::size_t k = 0;
   G4int clamped = 0;
   if (E.size() == 1) {
