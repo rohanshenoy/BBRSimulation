@@ -16,12 +16,13 @@
 #    the installed copy and that it matches tools/python/bbrsim, then builds
 #    and runs validation/Scripts/consumer_smoke against the installed library.
 # 2. Builds the mock HFSS tree when needed, checks that the real
-#    data/waveguides holds only 500 GHz (leak guard), runs the
-#    validation/G4Macros fixtures in parallel, each in
-#    BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the installed env
-#    script), scans every log for GeomNav / G4Exception / BBR0xx / LP002
-#    messages, and checks that the frequency case's BBR008 clamp warning fires
-#    once per side.
+#    data/waveguides holds only 500 GHz (leak guard), runs the eight cases in
+#    parallel, each in BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the
+#    installed env script): the five validation/G4Macros fixtures and three
+#    example macros (reflectance.mac, planck.mac, lightpipe.mac; their command
+#    lines are pinned by drift_guards.sh). Scans every log for GeomNav /
+#    G4Exception / BBR0xx / LP002 messages, and checks that the frequency
+#    case's BBR008 clamp warning fires once per side.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
 #    one PASS/FAIL line per check.
 #
@@ -207,14 +208,16 @@ scan_log() {  # case-dir [tolerated-code]
   fi
   echo $(( n_geom + n_lp + (n_start - n_tol) + n_bbr ))
 }
-run_macro refl      "$TESTWORLD" "$VM/Validation_Reflectance.mac"     &
-run_macro planck    "$TESTWORLD" "$VM/Validation_Planck.mac"          &
+# refl, planck and lp run the example macros themselves, pinned by the drift
+# guard "regression macros pinned"; the other five are validation-only fixtures.
+run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
+run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
 run_macro wall      "$TESTWORLD" "$VM/Validation_CrackWall.mac"       &
 run_macro exit      "$TESTWORLD" "$VM/Validation_WorldExit.mac"       &
 run_macro transmit  "$TESTWORLD" "$VM/Validation_CrackTransmit.mac"   &
 run_macro oblique   "$TESTWORLD" "$VM/Validation_CrackOblique.mac"    &
 run_macro frequency "$TESTWORLD" "$VM/Validation_CrackFrequency.mac"  &
-run_macro lp        "$LIGHTPIPE" "$VM/Validation_LightPipe.mac"       &
+run_macro lp        "$LIGHTPIPE" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac"   &
 wait
 for d in refl planck wall exit transmit oblique frequency lp; do
   code=$(cat "$REG/$d/exit.code")
@@ -248,11 +251,13 @@ xfail_matches() {  # output signature-ERE (empty: the RESULT line alone)
   rows=$(printf '%s\n' "$1" | grep -E 'FAIL|OUT OF TOLERANCE' | grep -vE '^ *RESULT')
   [ -n "$rows" ] && ! printf '%s\n' "$rows" | grep -qvE "$2"
 }
-check() {  # macro-dir script [extra args...]; macro-dir "-" = no ROOT input
+check() {  # case[/file] script [extra args...]; "-" = no ROOT input
+  # The input is the case's output/bbr.root, or output/<file> when one is named.
   local d="$1" script="$2"; shift 2
-  local out res
+  local out res f="bbr.root"
+  case "$d" in */*) f="${d#*/}" ;; esac
   if [ "$d" = "-" ]; then out=$($PY "$VAL/$script" "$@" 2>&1)
-  else                    out=$($PY "$VAL/$script" "$REG/$d/output/bbr.root" "$@" 2>&1); fi
+  else                    out=$($PY "$VAL/$script" "$REG/${d%%/*}/output/$f" "$@" 2>&1); fi
   local rc=$?
   res=$(echo "$out" | grep -E "RESULT|PASS|FAIL" | tail -1 | sed 's/^ *//')
   local entry reason sig
@@ -273,25 +278,24 @@ cd "$REG" || exit 2   # validators write plots into the CWD; keep them out of th
 out=$($PY "$VAL/check_reflectance.py" --root "$REG/refl/output/bbr.root" 2>&1); rc=$?
 res=$(echo "$out" | grep -E "PASS|FAIL" | tail -1 | sed 's/^ *//')
 if [ $rc -eq 0 ]; then line PASS check_reflectance.py "[refl] $res"; pass=$((pass+1)); else line FAIL check_reflectance.py "[refl] $res"; fail=$((fail+1)); fi
-check refl     check_term_status.py
-check refl     check_no_photons_in_metal.py
+check refl     check_invariants.py
 check planck   check_planck_spectrum.py --temp 4
 check planck   check_nreflect.py
 check planck   check_angle_distribution.py
-check planck   check_term_status.py
-check planck   check_no_photons_in_metal.py
+check planck   check_invariants.py
 check wall     check_crack_wall_reflection.py
-check wall     check_no_photons_in_metal.py
-check wall     check_term_status.py
-check exit     check_term_status.py
+check wall     check_invariants.py
+# the world-exit fixture crosses no boundary by design, so its file holds no
+# crossings; the flag waives only that requirement of the metal invariant.
+check exit     check_invariants.py --allow-no-crossings
 check transmit check_crack_transmittance.py
-check transmit check_no_photons_in_metal.py
-check transmit check_term_status.py
-check lp       check_no_photons_in_metal.py
-check lp       check_term_status.py
+check transmit check_invariants.py
+# the transmit fixture's second run (Planck, both cracks) has its own file.
+check transmit/bbr_ratio.root check_crack_ratio.py
+check lp       check_invariants.py
 # the oblique fixture writes one file per run (output/bbr_oblique_rNN.root);
-# check_crack_oblique reads the whole directory, the two invariant checks run
-# on every per-run file.
+# check_crack_oblique reads the whole directory, check_invariants runs on every
+# per-run file.
 out=$($PY "$VAL/check_crack_oblique.py" "$REG/oblique/output" 2>&1); rc=$?
 res=$(echo "$out" | grep -E "^RESULT" | tail -1)
 if [ $rc -eq 0 ]; then line PASS check_crack_oblique.py "[oblique] $res"; pass=$((pass+1))
@@ -300,11 +304,9 @@ obl_bad=0; obl_n=0
 for f in "$REG"/oblique/output/bbr_oblique_r*.root; do
   [ -f "$f" ] || continue
   obl_n=$((obl_n+1))
-  for s in check_no_photons_in_metal.py check_term_status.py; do
-    out=$($PY "$VAL/$s" "$f" 2>&1) || { obl_bad=$((obl_bad+1)); line FAIL "$s" "[oblique/$(basename "$f")] $(echo "$out" | grep -E "^RESULT" | tail -1)"; }
-  done
+  out=$($PY "$VAL/check_invariants.py" "$f" 2>&1) || { obl_bad=$((obl_bad+1)); line FAIL check_invariants.py "[oblique/$(basename "$f")] $(echo "$out" | grep -E "^RESULT" | tail -1)"; }
 done
-if [ "$obl_n" -gt 0 ] && [ "$obl_bad" -eq 0 ]; then line PASS "oblique invariants" "[oblique] no_photons_in_metal + term_status on $obl_n per-run files"; pass=$((pass+1))
+if [ "$obl_n" -gt 0 ] && [ "$obl_bad" -eq 0 ]; then line PASS "oblique invariants" "[oblique] check_invariants on $obl_n per-run files"; pass=$((pass+1))
 else fail=$((fail+obl_bad)); [ "$obl_n" -eq 0 ] && { line FAIL "oblique invariants" "[oblique] no per-run files found"; fail=$((fail+1)); }; fi
 out=$($PY "$VAL/check_crack_frequency.py" "$REG/frequency/output" --data-dir "$REG/mock_hfss" 2>&1); rc=$?
 res=$(echo "$out" | grep -E "^RESULT" | tail -1)
@@ -314,11 +316,9 @@ frq_bad=0; frq_n=0
 for f in "$REG"/frequency/output/bbr_freq_r*.root; do
   [ -f "$f" ] || continue
   frq_n=$((frq_n+1))
-  for s in check_no_photons_in_metal.py check_term_status.py; do
-    out=$($PY "$VAL/$s" "$f" 2>&1) || { frq_bad=$((frq_bad+1)); line FAIL "$s" "[frequency/$(basename "$f")] $(echo "$out" | grep -E "^RESULT" | tail -1)"; }
-  done
+  out=$($PY "$VAL/check_invariants.py" "$f" 2>&1) || { frq_bad=$((frq_bad+1)); line FAIL check_invariants.py "[frequency/$(basename "$f")] $(echo "$out" | grep -E "^RESULT" | tail -1)"; }
 done
-if [ "$frq_n" -gt 0 ] && [ "$frq_bad" -eq 0 ]; then line PASS "frequency invariants" "[frequency] no_photons_in_metal + term_status on $frq_n per-run files"; pass=$((pass+1))
+if [ "$frq_n" -gt 0 ] && [ "$frq_bad" -eq 0 ]; then line PASS "frequency invariants" "[frequency] check_invariants on $frq_n per-run files"; pass=$((pass+1))
 else fail=$((fail+frq_bad)); [ "$frq_n" -eq 0 ] && { line FAIL "frequency invariants" "[frequency] no per-run files found"; fail=$((fail+1)); }; fi
 check -        check_physics.py
 check -        check_cu_serov.py

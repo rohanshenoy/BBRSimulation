@@ -9,8 +9,11 @@
 # r = 4.95 mm, inside the bore.
 #
 # Validate:
-#   conda run -n bbrsim python <repo>/validation/check_no_photons_in_metal.py output/bbr.root
-#   conda run -n bbrsim python <repo>/validation/check_term_status.py         output/bbr.root
+#   conda run -n bbrsim python <repo>/validation/check_invariants.py output/bbr.root
+#
+# Regression input: validation/Scripts/run_regression.sh runs this macro as
+# case lp, and validation/Scripts/drift_guards.sh pins its command lines. Change
+# them only together with the validators, then update the pin.
 /run/verbose 0
 /event/verbose 0
 /tracking/verbose 0

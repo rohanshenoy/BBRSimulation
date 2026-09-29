@@ -1,69 +1,31 @@
-#
-# Visualization setup, run by the example main when no macro argument is given.
-#
-# Sets some default verbose
-# and initializes the graphic.
-#
+# vis.mac — interactive view of the test world, run by bbrsimTestWorld when it
+# is started with no macro argument.
 /control/verbose 2
 /run/verbose 2
-#
 /run/initialize
-#
-# Open a viewer
 /vis/open
-# This opens the default viewer - see examples/basic/B1/vis.mac for a
-# more comprehensive overview of options. Also the documentation.
-#
-# Disable auto refresh and quieten vis messages whilst scene and
-# trajectories are established:
 /vis/viewer/set/autoRefresh false
 /vis/verbose errors
 #
-# Draw geometry:
+# Geometry: hide the 50 cm world box; draw the Cu slab translucent and the two
+# HFSS crack volumes in colour (crack1 blue, crack2 purple).
 /vis/drawVolume
+/vis/geometry/set/visibility logic-World 0 false
+/vis/geometry/set/colour logic-CuSlab 0 0.85 0.45 0.2 0.35
+/vis/geometry/set/colour InfParallelPlate_crack1Rohan 0 0 0.4 1 1
+/vis/geometry/set/colour InfParallelPlate_crack2 0 0.8 0 0.8 1
+/vis/viewer/set/style surface
+/vis/viewer/set/background white
+/vis/viewer/set/viewpointThetaPhi 65 30 deg
+/vis/viewer/set/targetPoint -25 0 0 mm
+/vis/viewer/zoomTo 3.2
 #
-# Specify view angle:
-#/vis/viewer/set/viewpointThetaPhi 90. 0.
-#
-# Specify zoom value:
-/vis/viewer/zoom 1.5
-#
-# Specify style (surface or wireframe):
-#/vis/viewer/set/style wireframe
-#
-# Draw coordinate axes:
-#/vis/scene/add/axes 0 0 0 1 m
-#
-# Draw smooth trajectories at end of event, showing trajectory points
-# as markers 2 pixels wide:
+# Photon tracks in red, accumulated over all the events of a run.
 /vis/scene/add/trajectories smooth
 /vis/modeling/trajectories/create/drawByCharge
+/vis/modeling/trajectories/drawByCharge-0/set 0 red
 /vis/modeling/trajectories/drawByCharge-0/default/setDrawStepPts true
 /vis/modeling/trajectories/drawByCharge-0/default/setStepPtsSize 2
-# (if too many tracks cause core dump => /tracking/storeTrajectory 0)
-#
-# Draw hits at end of event:
-#/vis/scene/add/hits
-#
-# To draw only gammas:
-#/vis/filtering/trajectories/create/particleFilter
-#/vis/filtering/trajectories/particleFilter-0/add gamma
-#
-# To invert the above, drawing all particles except gammas,
-# keep the above two lines but also add:
-#/vis/filtering/trajectories/particleFilter-0/invert true
-#
-# Many other options are available with /vis/modeling and /vis/filtering.
-# For example, to select colour by particle ID:
-#/vis/modeling/trajectories/create/drawByParticleID
-#/vis/modeling/trajectories/drawByParticleID-0/set e- blue
-#
-# To superimpose all of the events from a given run:
 /vis/scene/endOfEventAction accumulate
-#
-# Re-establish auto refreshing and verbosity:
 /vis/viewer/set/autoRefresh true
 /vis/verbose warnings
-#
-# For file-based drivers, use this to create an empty detector view:
-#/vis/viewer/flush

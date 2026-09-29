@@ -3,8 +3,8 @@
 # Regression for abspoints.term_status: every row must read WorldExit
 # (never "unknown" or a stale boundary status).
 #
-# Validate:
-#   conda run -n bbrsim python <repo>/validation/check_term_status.py output/bbr.root
+# Validate (no crossings by design, which the flag allows):
+#   conda run -n bbrsim python <repo>/validation/check_invariants.py output/bbr.root --allow-no-crossings
 /run/verbose 0
 /event/verbose 0
 /tracking/verbose 0

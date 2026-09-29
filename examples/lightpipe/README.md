@@ -78,9 +78,12 @@ If you `cmake --install` the example into the library's prefix, a shell that has
 
 ## Testing
 
-`validation/G4Macros/Validation_LightPipe.mac` is a frozen copy of
-`lightpipe.mac`; the regression runner checks its output with
-`check_no_photons_in_metal.py` and `check_term_status.py`. See
+The regression runner runs `lightpipe.mac` itself (case `lp`) and checks its
+output with `check_invariants.py`. It is therefore a regression input: the
+drift guard `regression macros pinned` fails when one of its command lines
+changes (only full-line comment and blank-line edits pass), so change them only
+together with the validators and then update the pin in
+`validation/Scripts/drift_guards.sh`. See
 [validation/README.md](../../validation/README.md).
 
 ## History

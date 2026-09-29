@@ -45,12 +45,16 @@ conda run -n bbrsim python validation/check_planck_spectrum.py examples/testworl
 ```
 
 The crack2/crack1 entry ratio should match the ratio of their apertures. Both
-cracks need entries, so use at least ~1M events:
+cracks need entries, so use at least ~1M events from the default emitter:
 
 ```bash
 ./bbrsimTestWorld planck_10K.mac
 conda run -n bbrsim python validation/check_crack_ratio.py examples/testworld/build/output/bbr.root
 ```
+
+The regression runner checks the same ratio on the second run of
+`validation/G4Macros/Validation_CrackTransmit.mac`, whose emitter sits just off
+the copper face over both cracks, so 200 000 events are enough.
 
 ### 2. HFSS crack diffraction
 
@@ -261,15 +265,14 @@ output (default `output/bbr.root` in the current directory) through the
 | `check_nreflect.py` | the per-photon reflection-count distribution |
 | `check_angle_distribution.py` | incidence angles at the copper vs uniform-in-θ emission (KS test, sized for the 10 000-event Planck run) |
 | `check_crack_transmittance.py` | T = 0.50 at normal incidence, no exits along the crack face |
+| `check_crack_ratio.py` | crack2/crack1 entry ratio vs the aperture ratio, within 3 σ |
 | `check_crack_wall_reflection.py` | reflection off a crack's side wall flips only p_z |
 | `check_crack_oblique.py` | 45° incidence: 138 checks against the HFSS tables and the Python model |
 | `check_crack_frequency.py` | dataset choice per photon on the mock five-frequency tree: 89 checks (`--data-dir`) |
-| `check_no_photons_in_metal.py` | no photon ever travels inside a metal |
-| `check_term_status.py` | every photon death is labelled correctly |
+| `check_invariants.py` | no photon ever travels inside a metal, and every photon death is labelled correctly (`--allow-no-crossings` for a run that crosses no boundary) |
 
-**Validators run by hand**, because they need a large run:
-`check_crack_ratio.py` (a Planck run of ≥ 1M events) and
-`check_cu_absorptance.py` (`planck_5M.mac`), both shown above.
+**Validator run by hand**, because it needs a large run:
+`check_cu_absorptance.py` (`planck_5M.mac`), shown above.
 
 **Plot scripts** (`tools/`): `plot_cu_reflectance.py` (writes to the current
 directory, or `--out`), `plot_crack_angular.py` (`--iwt`, `--iwp`; writes

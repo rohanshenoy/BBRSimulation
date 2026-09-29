@@ -200,10 +200,11 @@ validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 ```
 
 The runner builds and installs the library, builds both examples against it,
-runs eight fixed-seed fixtures in parallel, scans their logs for warnings, and
-runs the PASS/FAIL validators on their output. Compiler warnings count as
-failures. The exit code is the number of unexpected failures; a green run ends
-with `pass=41  fail=0  xfail=1  xpass=0`.
+runs eight fixed-seed cases in parallel (five validation fixtures and three
+example macros), scans their logs for warnings, and runs the PASS/FAIL
+validators on their output. Compiler warnings count as failures. The exit code
+is the number of unexpected failures; a green run ends with
+`pass=38  fail=0  xfail=1  xpass=0`.
 
 The one expected failure (`check_cu_serov.py`) is an open decision: the `HP_Cu`
 alias (RRR 6) gives a loss 13 % below Serov's measurement. The fixtures, what
