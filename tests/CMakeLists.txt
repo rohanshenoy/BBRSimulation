@@ -66,3 +66,10 @@ bbrsim_add_test_program(testSupport LABEL unit
         check_fails unexpected_exception
   WILL_FAIL check_fails unexpected_exception)
 bbrsim_add_abort_test(testSupport.abort_stock testSupport abort_stock BBRT03)
+
+bbrsim_add_test_program(testHFSSData LABEL unit
+  CASES parse_frequency mini_loads transmittance_mixing load_cap_first_row nearest_key
+        direction_cdf zero_weight_rows coherent_cross_term_in_direction exit_position
+        err_missing_files err_no_keys err_key_mismatch err_freq_column err_ephi1_row_mismatch
+        err_bad_number real_data_smoke
+  ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")

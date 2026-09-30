@@ -12,13 +12,17 @@
 #include <complex>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
 
-std::vector<std::string> SplitCSV(const std::string& line)
+std::vector<std::string> SplitCSV(std::string line)
 {
+  // The shipped CSVs have CRLF line ends and std::getline keeps the '\r';
+  // drop it so the last field parses in full (Num rejects trailing bytes).
+  if (!line.empty() && line.back() == '\r') line.pop_back();
   std::vector<std::string> v;
   std::stringstream ss(line);
   std::string tok;
@@ -39,6 +43,33 @@ constexpr G4double kMinNormalComponent = 1e-6;
 std::pair<G4double, G4double> MakeKey(G4double phi, G4double theta)
 {
   return {RoundDeg(phi), RoundDeg(theta)};
+}
+
+// std::stod that turns a bad or non-finite field into BBR013 instead of a
+// C++ exception (which would terminate a worker thread).
+G4double Num(const std::string& s, const G4String& path, const char* what)
+{
+  try {
+    std::size_t used = 0;
+    const G4double v = std::stod(s, &used);
+    if (used != s.size() || !std::isfinite(v)) throw std::invalid_argument(s);
+    return v;
+  } catch (const std::exception&) {
+    G4Exception("BBRHFSSData::Load", "BBR013", FatalException,
+                ("Bad numeric field " + std::string(what) + " = '" + s + "' in " + path).c_str());
+    return 0.;
+  }
+}
+
+// A non-empty row must have exactly n fields: a short row used to be skipped
+// silently (BBR013, as the Python mirror reports it).
+bool FieldCountOK(const std::vector<std::string>& v, std::size_t n, const G4String& path)
+{
+  if (v.size() == n) return true;
+  G4ExceptionDescription ed;
+  ed << "Row with " << v.size() << " fields, expected " << n << ", in " << path;
+  G4Exception("BBRHFSSData::Load", "BBR013", FatalException, ed);
+  return false;
 }
 
 } // namespace
@@ -136,25 +167,24 @@ void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag)
   std::string line;
   std::getline(f, line); // skip header
 
-  // Row counter per key, used to match ephi=1 rows to the ephi=0 FarFieldPoints
-  // by insertion order (both CSVs have the same angular sweep order).
+  // Row counter per key: the Ephi=1 rows of a key are paired with its Ephi=0
+  // FarFieldPoints by position, and each pair must share (Phi, Theta) (BBR012).
   std::map<std::pair<G4double,G4double>, std::size_t> rowIdx;
-  G4bool freqChecked = false;
 
   while (std::getline(f, line)) {
-    if (line.empty()) continue;
     auto v = SplitCSV(line);
-    if (v.size() < 10) continue;
-    if (!freqChecked) { CheckFrequencyColumn(path, v[0]); freqChecked = true; }
+    if (v.empty()) continue;                    // a blank line (also a bare CRLF)
+    if (!FieldCountOK(v, 10, path)) continue;
+    CheckFrequencyColumn(path, v[0]);
 
-    G4double iwPhi = std::stod(v[2]);
-    G4double iwThe = std::stod(v[3]);
-    G4double phi   = std::stod(v[4]);
-    G4double theta = std::stod(v[5]);
-    G4double Epr   = std::stod(v[6]);
-    G4double Epi   = std::stod(v[7]);
-    G4double Etr   = std::stod(v[8]);
-    G4double Eti   = std::stod(v[9]);
+    G4double iwPhi = Num(v[2], path, "IWavePhi");
+    G4double iwThe = Num(v[3], path, "IWaveTheta");
+    G4double phi   = Num(v[4], path, "Phi");
+    G4double theta = Num(v[5], path, "Theta");
+    G4double Epr   = Num(v[6], path, "rEphi_real");
+    G4double Epi   = Num(v[7], path, "rEphi_imag");
+    G4double Etr   = Num(v[8], path, "rEtheta_real");
+    G4double Eti   = Num(v[9], path, "rEtheta_imag");
 
     auto key = MakeKey(iwPhi, iwThe);
     auto& ds = fData[key];
@@ -167,10 +197,36 @@ void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag)
       ds.farField.push_back(fp);
     } else {
       auto& idx = rowIdx[key];
-      if (idx < ds.farField.size()) {
-        auto& fp = ds.farField[idx++];
-        fp.rEphi_re_1 = Epr; fp.rEphi_im_1 = Epi;
-        fp.rEtheta_re_1 = Etr; fp.rEtheta_im_1 = Eti;
+      if (idx >= ds.farField.size()) {
+        G4ExceptionDescription ed;
+        ed << "More Ephi=1 than Ephi=0 far-field rows for key (" << iwPhi << ", "
+           << iwThe << "): " << path;
+        G4Exception("BBRHFSSData::LoadFarField", "BBR012", FatalException, ed);
+        return;
+      }
+      auto& fp = ds.farField[idx++];
+      if (std::abs(fp.phi_deg - phi) > 1e-9 || std::abs(fp.theta_deg - theta) > 1e-9) {
+        G4ExceptionDescription ed;
+        ed << "Ephi=1 far-field row " << (idx - 1) << " of key (" << iwPhi << ", " << iwThe
+           << ") is at (Phi, Theta) = (" << phi << ", " << theta
+           << ") but the Ephi=0 row is at (" << fp.phi_deg << ", " << fp.theta_deg
+           << "): " << path;
+        G4Exception("BBRHFSSData::LoadFarField", "BBR012", FatalException, ed);
+      }
+      fp.rEphi_re_1 = Epr; fp.rEphi_im_1 = Epi;
+      fp.rEtheta_re_1 = Etr; fp.rEtheta_im_1 = Eti;
+    }
+  }
+
+  if (ephi_flag == 1) {
+    for (const auto& [key, ds] : fData) {
+      const auto it = rowIdx.find(key);
+      const std::size_t n1 = (it == rowIdx.end()) ? 0 : it->second;
+      if (n1 < ds.farField.size()) {
+        G4ExceptionDescription ed;
+        ed << "Key (" << key.first << ", " << key.second << ") has " << ds.farField.size()
+           << " Ephi=0 but " << n1 << " Ephi=1 far-field rows: " << path;
+        G4Exception("BBRHFSSData::LoadFarField", "BBR012", FatalException, ed);
       }
     }
   }
@@ -189,29 +245,30 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag)
   std::string line;
   std::getline(f, line); // skip header
 
+  // Ephi=1 exit points are paired with the Ephi=0 ones by position and must
+  // sit at the same (X, Y, Z) (BBR012), as for the far field.
   std::map<std::pair<G4double,G4double>, std::size_t> rowIdx;
-  G4bool freqChecked = false;
   std::map<std::pair<G4double,G4double>, bool>         tSet;
 
   while (std::getline(f, line)) {
-    if (line.empty()) continue;
     auto v = SplitCSV(line);
-    if (v.size() < 15) continue;
-    if (!freqChecked) { CheckFrequencyColumn(path, v[0]); freqChecked = true; }
+    if (v.empty()) continue;                    // a blank line (also a bare CRLF)
+    if (!FieldCountOK(v, 15, path)) continue;
+    CheckFrequencyColumn(path, v[0]);
 
-    G4double iwPhi  = std::stod(v[2]);
-    G4double iwThe  = std::stod(v[3]);
-    G4double outPow = std::stod(v[4]);
-    G4double inPow  = std::stod(v[5]);
-    G4double x      = std::stod(v[6]);
-    G4double y      = std::stod(v[7]);
-    G4double z      = std::stod(v[8]);
-    G4double Ex_re  = std::stod(v[9]);
-    G4double Ey_re  = std::stod(v[10]);
-    G4double Ez_re  = std::stod(v[11]);
-    G4double Ex_im  = std::stod(v[12]);
-    G4double Ey_im  = std::stod(v[13]);
-    G4double Ez_im  = std::stod(v[14]);
+    G4double iwPhi  = Num(v[2], path, "IWavePhi");
+    G4double iwThe  = Num(v[3], path, "IWaveTheta");
+    G4double outPow = Num(v[4], path, "OutgoingPower");
+    G4double inPow  = Num(v[5], path, "IngoingPower");
+    G4double x      = Num(v[6], path, "X");
+    G4double y      = Num(v[7], path, "Y");
+    G4double z      = Num(v[8], path, "Z");
+    G4double Ex_re  = Num(v[9], path, "Ex_real");
+    G4double Ey_re  = Num(v[10], path, "Ey_real");
+    G4double Ez_re  = Num(v[11], path, "Ez_real");
+    G4double Ex_im  = Num(v[12], path, "Ex_imag");
+    G4double Ey_im  = Num(v[13], path, "Ey_imag");
+    G4double Ez_im  = Num(v[14], path, "Ez_imag");
 
     auto key = MakeKey(iwPhi, iwThe);
     auto& ds = fData[key];
@@ -245,11 +302,36 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag)
       ds.exitPoints.push_back(ep);
     } else {
       auto& idx = rowIdx[key];
-      if (idx < ds.exitPoints.size()) {
-        auto& ep = ds.exitPoints[idx++];
-        ep.Ex_re_1 = Ex_re; ep.Ex_im_1 = Ex_im;
-        ep.Ey_re_1 = Ey_re; ep.Ey_im_1 = Ey_im;
-        ep.Ez_re_1 = Ez_re; ep.Ez_im_1 = Ez_im;
+      if (idx >= ds.exitPoints.size()) {
+        G4ExceptionDescription ed;
+        ed << "More Ephi=1 than Ephi=0 exit points for key (" << iwPhi << ", "
+           << iwThe << "): " << path;
+        G4Exception("BBRHFSSData::LoadWaveguide", "BBR012", FatalException, ed);
+        return;
+      }
+      auto& ep = ds.exitPoints[idx++];
+      if (std::abs(ep.x - x) > 1e-12 || std::abs(ep.y - y) > 1e-12 || std::abs(ep.z - z) > 1e-12) {
+        G4ExceptionDescription ed;
+        ed << "Ephi=1 exit point " << (idx - 1) << " of key (" << iwPhi << ", " << iwThe
+           << ") is at (" << x << ", " << y << ", " << z << ") but the Ephi=0 point is at ("
+           << ep.x << ", " << ep.y << ", " << ep.z << "): " << path;
+        G4Exception("BBRHFSSData::LoadWaveguide", "BBR012", FatalException, ed);
+      }
+      ep.Ex_re_1 = Ex_re; ep.Ex_im_1 = Ex_im;
+      ep.Ey_re_1 = Ey_re; ep.Ey_im_1 = Ey_im;
+      ep.Ez_re_1 = Ez_re; ep.Ez_im_1 = Ez_im;
+    }
+  }
+
+  if (ephi_flag == 1) {
+    for (const auto& [key, ds] : fData) {
+      const auto it = rowIdx.find(key);
+      const std::size_t n1 = (it == rowIdx.end()) ? 0 : it->second;
+      if (n1 < ds.exitPoints.size()) {
+        G4ExceptionDescription ed;
+        ed << "Key (" << key.first << ", " << key.second << ") has " << ds.exitPoints.size()
+           << " Ephi=0 but " << n1 << " Ephi=1 exit points: " << path;
+        G4Exception("BBRHFSSData::LoadWaveguide", "BBR012", FatalException, ed);
       }
     }
   }
@@ -270,9 +352,8 @@ const BBRHFSSData::AngleDataset& BBRHFSSData::FindDataset(
     G4double d2 = dp*dp + dt*dt;
     if (d2 < bestDist2) { bestDist2 = d2; best = &ds; }
   }
-  if (!best)
-    G4Exception("BBRHFSSData::FindDataset", "BBR003", FatalException, "fData is empty");
-  return *best;
+  // fData is non-empty by construction (BBR000); best is null only for NaN angles.
+  return best ? *best : fData.begin()->second;
 }
 
 G4double BBRHFSSData::GetTransmittance(G4double E_theta, G4double E_phi,

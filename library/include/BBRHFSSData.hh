@@ -20,6 +20,18 @@
 //
 // CDFs are built at runtime (not precomputed) so the E_theta×E_phi cross term
 // in |E_theta·F₀ + E_phi·F₁|² is handled exactly.
+//
+// Fatal G4Exception codes raised while loading:
+//   BBR000  no incidence key in either CSV
+//   BBR001  far_field.csv cannot be opened
+//   BBR002  waveguide.csv cannot be opened
+//   BBR007  far_field.csv and waveguide.csv have different incidence keys
+//   BBR009  a row's Freq disagrees with the directory frequency (every row)
+//   BBR012  an Ephi=1 row does not match the Ephi=0 row at the same index
+//           (X/Y/Z of an exit point, Phi/Theta of a far-field row), or the
+//           two files have different row counts for a key
+//   BBR013  a numeric field is not a number or not finite, or a non-empty
+//           row has the wrong number of fields
 class BBRHFSSData
 {
  public:
