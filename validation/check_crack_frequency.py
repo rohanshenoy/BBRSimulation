@@ -20,7 +20,7 @@ What makes a wrong implementation fail here:
 
 Clamping (runs 13-14) changes only the warning, never the selected dataset, so
 it is checked by the runner counting BBR008 lines, not here. The tie rule is
-unobservable from a macro; validation/check_physics.py unit-tests it instead.
+unobservable from a macro; tools/python/tests/test_hfss.py unit-tests it instead.
 
 Usage:
     conda run -n bbrsim python validation/check_crack_frequency.py [output_dir] [--data-dir MOCK_ROOT]

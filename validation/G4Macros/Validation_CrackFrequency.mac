@@ -40,7 +40,7 @@
 # ---- runs 0-4: on the grid (edges nudged 0.1 % inward) ---------------------
 # 50.05 GHz, not exactly 50: h*50 GHz at 7 significant figures reads back as
 # 49.9992 GHz and would clamp. The exact-edge rule is unit-tested in
-# validation/check_physics.py instead.
+# tools/python/tests/test_hfss.py instead.
 /bbr/gun/energy_eV 2.069902e-04
 /analysis/setFileName output/bbr_freq_r00
 /run/beamOn 4000

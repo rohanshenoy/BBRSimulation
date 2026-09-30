@@ -9,6 +9,9 @@ description = "BBRsim analysis package: ROOT loader, physics reference formulas,
 requires-python = ">=3.10"
 dependencies = ["numpy", "pandas", "uproot", "scipy", "matplotlib"]
 
+[project.optional-dependencies]
+test = ["pytest"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["bbrsim*"]

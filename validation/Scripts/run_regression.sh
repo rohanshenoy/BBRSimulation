@@ -334,7 +334,6 @@ for f in "$REG"/frequency/output/bbr_freq_r*.root; do
 done
 if [ "$frq_n" -gt 0 ] && [ "$frq_bad" -eq 0 ]; then line PASS "frequency invariants" "[frequency] check_invariants on $frq_n per-run files"; pass=$((pass+1))
 else fail=$((fail+frq_bad)); [ "$frq_n" -eq 0 ] && { line FAIL "frequency invariants" "[frequency] no per-run files found"; fail=$((fail+1)); }; fi
-check -        check_physics.py
 check -        check_cu_serov.py
 
 echo "=== summary ==="

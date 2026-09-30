@@ -263,7 +263,6 @@ output (default `output/bbr.root` in the current directory) through the
 
 | Script | Checks |
 |---|---|
-| `check_physics.py` | the `bbrsim` formulas against reference values (no input) |
 | `check_reflectance.py` | absorbed count vs the Drude model (`--root`, `--RRR`, `--T_K`, `--freq`) |
 | `check_cu_serov.py` | Drude loss for `OF_Cu` / `HP_Cu` vs Serov (2016) within ±10 %; `HP_Cu` is the known expected failure |
 | `check_planck_spectrum.py` | the emitted spectrum at `--temp`: its peak, and a KS test against the Planck photon-number CDF truncated to the emitter band |
@@ -278,6 +277,12 @@ output (default `output/bbr.root` in the current directory) through the
 
 **Validator run by hand**, because it needs a large run:
 `check_cu_absorptance.py` (`planck_5M.mac`), shown above.
+
+**Python tests** (`tools/python/tests/`, pytest): the `bbrsim` formulas against
+analytic limits and reference values, the HFSS mirror, the ROOT loader, and the
+validators on synthetic bad outputs. Run
+`conda run -n bbrsim python -m pytest -q -p no:cacheprovider tools/python/tests`
+from the repository root (pytest comes with `pip install -e "tools/python[test]"`).
 
 **Plot scripts** (`tools/`): `plot_cu_reflectance.py` (writes to the current
 directory, or `--out`), `plot_crack_angular.py` (`--iwt`, `--iwp`; writes

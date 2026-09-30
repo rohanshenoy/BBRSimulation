@@ -4,7 +4,7 @@ Fixed-seed fixtures and PASS/FAIL validators that gate every change to BBRsim.
 
 ```
 G4Macros/Validation_*.mac   the six validation-only fixtures
-check_*.py                  the 13 validators
+check_*.py                  the 12 validators
 Scripts/run_regression.sh   build + fixtures + validators, one command
 Scripts/drift_guards.sh     source-tree consistency checks (run by the runner, or alone)
 Scripts/make_mock_hfss_frequencies.py   the mock HFSS tree for Validation_CrackFrequency
@@ -25,7 +25,7 @@ in `BUILD_DIR/regression/<case>/`, and runs the validators on their output.
 Six cases run the fixtures here; four run example macros directly (see
 [Regression inputs](#regression-inputs)). The exit code is the number of
 unexpected failures; a green run ends with the line
-`pass=45  fail=0  xfail=1  xpass=0` (two spaces between fields, then the output
+`pass=44  fail=0  xfail=1  xpass=0` (two spaces between fields, then the output
 directory).
 
 | Case | Macro | Executable | Validators |
@@ -40,7 +40,7 @@ directory).
 | `frequency` | `Validation_CrackFrequency.mac` | `bbrsimTestWorld` | `check_crack_frequency.py --data-dir mock_hfss` on `output/`; `check_invariants.py` on each of the 16 `bbr_freq_rNN.root` |
 | `lp` | `examples/lightpipe/G4Macros/lightpipe.mac` | `bbrsimLightPipe` | `check_invariants.py` |
 | `lp_cad` | `Validation_LightPipeCAD.mac` | `bbrsimLightPipe` | `check_invariants.py` (cad mode, the bundled `box_sample.stl` through `BBRSIMDATA`) |
-| — | (no ROOT input) | — | `check_physics.py`, `check_cu_serov.py` (XFAIL) |
+| — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL) |
 
 A case passes when the binary exits 0, writes its ROOT output, and its log
 holds no `GeomNav`, `G4Exception`, `BBR0xx` or `LP002` line (the frequency case
@@ -57,7 +57,6 @@ tolerates its `BBR008` clamp warnings, and exactly one per side is required).
 - `check_crack_ratio.py` — the crack2/crack1 entry ratio is within 3 σ (Poisson) of the aperture ratio A2/A1 = 1.962.
 - `check_crack_oblique.py`, `check_crack_frequency.py` — all 138 and 89 checks respectively.
 - `check_invariants.py` — both invariants, each printed in its own section: no photons in metal (no crossing starts inside a `Cu_RRR*` or `BBR_Perfect*` material, and the file holds at least one crossing; `--allow-no-crossings` waives only the latter, for the world-exit fixture), and termination labels (the file holds at least one `abspoints` row, no `unknown` label, every world exit is `WorldExit`, every absorption has a volume, and the `BBRAbsorb` counts agree between the two ntuples). A code with no legend entry fails the section that reads that column (`legend lacks code(s) …`), so a legend gap cannot make a check pass vacuously.
-- `check_physics.py` — the `bbrsim` formulas (Drude absorptance, Hagen-Rubens, the Planck peak, the HFSS frequency-selection rule, `paths.data_dir`) match documented reference values.
 - `check_cu_serov.py` — full-Drude loss for the `OF_Cu` (RRR 3) and `HP_Cu` (RRR 6) aliases within ±10 % of Serov et al. (2016). **XFAIL:** `HP_Cu` comes out 13 % low at 230 GHz, because RRR 6 was derived with Hagen-Rubens. Whether to move `HP_Cu` to RRR 5 or accept a wider tolerance is an open decision; the runner reports the check as XFAIL, and as XPASS (a failure) if it starts passing.
 
 One validator needs an output the fixtures do not produce, so it is run by

@@ -30,16 +30,18 @@ def hz_to_ev(freq_Hz):
 
 
 def sigma_dc(RRR, T_K=4.0):
-    """DC conductivity [S/m] via Matthiessen's rule.
+    """DC conductivity [S/m] via Matthiessen's rule; vectorised in T_K.
 
     Below 50 K phonons are frozen: sigma = RRR * SIGMA_RT (impurity term).
     At/above 50 K add the linear-in-1/T phonon term sigma_ph = SIGMA_RT*273/T.
+    A scalar T_K returns a float, an array an array of the same shape.
     """
     sigma_imp = RRR * SIGMA_RT
-    if T_K >= 50.0:
-        sigma_ph = SIGMA_RT * 273.0 / T_K
-        return 1.0 / (1.0 / sigma_imp + 1.0 / sigma_ph)
-    return sigma_imp
+    T = np.asarray(T_K, dtype=float)
+    warm = T >= 50.0
+    sigma_ph = SIGMA_RT * 273.0 / np.where(warm, T, 1.0)   # the 1.0 is never used
+    s = np.where(warm, 1.0 / (1.0 / sigma_imp + 1.0 / sigma_ph), sigma_imp)
+    return float(s) if s.ndim == 0 else s
 
 
 def drude_tau(RRR, T_K=4.0):

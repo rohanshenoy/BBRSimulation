@@ -207,7 +207,7 @@ runs ten fixed-seed cases in parallel (six validation fixtures and four
 example macros), scans their logs for warnings, and runs the PASS/FAIL
 validators on their output. Compiler warnings count as failures. The exit code
 is the number of unexpected failures; a green run ends with
-`pass=45  fail=0  xfail=1  xpass=0`.
+`pass=44  fail=0  xfail=1  xpass=0`.
 
 The one expected failure (`check_cu_serov.py`) is an open decision: the `HP_Cu`
 alias (RRR 6) gives a loss 13 % below Serov's measurement. The fixtures, what
@@ -224,12 +224,15 @@ One-time setup, from the repository root:
 
 ```bash
 conda create -n bbrsim python=3.11 numpy scipy matplotlib pandas
-conda run -n bbrsim pip install -e tools/python     # the bbrsim package and uproot
+conda run -n bbrsim pip install -e "tools/python[test]"     # the bbrsim package, uproot and pytest
 ```
 
 Run every script as `conda run -n bbrsim python <script>`, not `python3`. The
 editable install ties the `bbrsim` environment to this checkout; for another
-checkout, source its env script or rerun `pip install -e` there.
+checkout, source its env script or rerun `pip install -e` there. The package's
+tests are `conda run -n bbrsim python -m pytest -q -p no:cacheprovider tools/python/tests`,
+run from the repository root (not from `tools/python`, where the source package
+would shadow the one on `PYTHONPATH`).
 
 ```python
 from bbrsim.io import load
