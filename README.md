@@ -33,7 +33,7 @@ event-by-event footing.
 - Planck thermal emitter.
 - ROOT output and a Python analysis package.
 
-**Implemented, not yet exercised:** loss-tangent dielectrics (Cirlex, Si, Ge).
+**Implemented, unit-tested, not yet placed in a geometry:** loss-tangent dielectrics (Cirlex, Si, Ge).
 
 **Not yet implemented:** PCB material; leakage-current analysis; calibration
 geometry (BB source, mesh-TES detector); anomalous-skin-effect correction; the

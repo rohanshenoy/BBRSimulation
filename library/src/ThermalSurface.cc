@@ -44,6 +44,7 @@ void ThermalSurface::ClearSurfaces()
 
 BBEvt ThermalSurface::GenEvt()
 {
+  if (BBSpecCDF.cdf.size() < 2) G4Exception("ThermalSurface::GenEvt", "BBR018", FatalException, "Planck CDF not initialized: call BBSpecCDF.initialize first");
   G4ThreeVector X(1, 0, 0), Y(0, 1, 0), Z(0, 0, 1);
   BBEvt thisEvt;
 
@@ -71,7 +72,7 @@ BBEvt ThermalSurface::GenEvt()
   // Photon emission per surface scales as ε·A·T⁴ (shared T here), so a gray
   // surface must be selected — and emit — in proportion to ε·A, not A.
   if (surfaces.empty()) {
-    G4Exception("ThermalSurface::GenEvt", "BBR001", FatalException,
+    G4Exception("ThermalSurface::GenEvt", "BBR019", FatalException,
                 "No surfaces added. Call AddBoxSurface before GenEvt.");
   }
   G4double totalEffArea = 0.;

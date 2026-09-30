@@ -126,3 +126,10 @@ foreach(t stock wrapped stock2 mutant identical repeatable mutant_differs wls_st
   set_tests_properties(passthrough.${t} PROPERTIES LABELS regression TIMEOUT 120 WORKING_DIRECTORY ${_pt_wd}
     ENVIRONMENT_MODIFICATION "${mod}")
 endforeach()
+
+bbrsim_add_test_program(testMaterials LABEL unit
+  CASES cu_table_shape cu_drude_grid cu_limits cu_serov_of cu_offgrid_interp cu_cache cu_invalid_input
+        dielectrics dielectric_name_collision flag_materials
+  ENV "G4LEDATA=/nonexistent;G4LEVELGAMMADATA=/nonexistent;G4NEUTRONHPDATA=/nonexistent;G4RADIOACTIVEDATA=/nonexistent;G4PARTICLEXSDATA=/nonexistent;G4PIIDATA=/nonexistent;G4REALSURFACEDATA=/nonexistent;G4SAIDXSDATA=/nonexistent;G4ABLADATA=/nonexistent;G4INCLDATA=/nonexistent;G4ENSDFSTATEDATA=/nonexistent;G4CHANNELINGDATA=/nonexistent")
+bbrsim_add_test_program(testEmission LABEL unit
+  CASES planck_cdf_shape planck_cdf_invalid planck_band_loss genevt_nonrandom_exact genevt_rotation genevt_statistics genevt_guards geometric_surface_area)
