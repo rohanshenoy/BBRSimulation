@@ -149,7 +149,9 @@ void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
   else if (cmd == fGunPolCmd)  { BBRConfigManager::SetGunPol(G4UIcmdWith3Vector::GetNew3VectorValue(value)); }
   else if (cmd == fDataDirCmd) {
     // Strip one pair of surrounding double or single quotes.
-    G4String v = value; if (v.size() >= 2 && ((v.front()=='"' && v.back()=='"') || (v.front()=='\'' && v.back()=='\''))) v = v.substr(1, v.size()-2); BBRConfigManager::SetDataDir(v);
+    G4String v = value;
+    if (v.size() >= 2 && ((v.front()=='"' && v.back()=='"') || (v.front()=='\'' && v.back()=='\''))) v = v.substr(1, v.size()-2);
+    BBRConfigManager::SetDataDir(v);
   }
   else if (cmd == fCuMatCmd)   { BBRConfigManager::SetCuMaterial(value); }
   else if (cmd == fCuRRRCmd)   { BBRConfigManager::SetCuRRR(G4UIcmdWithAnInteger::GetNewIntValue(value)); }
