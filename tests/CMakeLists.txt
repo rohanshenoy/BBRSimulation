@@ -83,7 +83,8 @@ bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
         reflectance_decision reflectance_specular reflectance_crack_wall reflectance_table_interp)
 
 bbrsim_add_test_program(testPhysicsList LABEL regression NEEDS_ENSDF
-  CASES wrapped_once_at_stock_index registered_twice_is_fatal wrong_order_is_fatal)
+  CASES wrapped_once_at_stock_index registered_twice_is_fatal wrong_order_is_fatal event_loop_fatal
+  ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 
 # testPassthrough: stock vs wrapped boundary optics, byte for byte. The program
 # takes <mode> <nEvents> <outfile>, so it is registered by hand: four producer
@@ -129,7 +130,7 @@ endforeach()
 
 bbrsim_add_test_program(testMaterials LABEL unit
   CASES cu_table_shape cu_drude_grid cu_limits cu_serov_of cu_offgrid_interp cu_cache cu_invalid_input
-        dielectrics dielectric_name_collision flag_materials
+        dielectrics dielectric_offgrid_interp dielectric_name_collision flag_materials
   ENV "G4LEDATA=/nonexistent;G4LEVELGAMMADATA=/nonexistent;G4NEUTRONHPDATA=/nonexistent;G4RADIOACTIVEDATA=/nonexistent;G4PARTICLEXSDATA=/nonexistent;G4PIIDATA=/nonexistent;G4REALSURFACEDATA=/nonexistent;G4SAIDXSDATA=/nonexistent;G4ABLADATA=/nonexistent;G4INCLDATA=/nonexistent;G4ENSDFSTATEDATA=/nonexistent;G4CHANNELINGDATA=/nonexistent")
 bbrsim_add_test_program(testEmission LABEL unit
   CASES planck_cdf_shape planck_cdf_invalid planck_band_loss genevt_nonrandom_exact genevt_rotation genevt_statistics genevt_guards geometric_surface_area)
@@ -139,3 +140,9 @@ bbrsim_add_test_program(testConfig LABEL unit
   ENVMOD "BBRSIMDATA=unset:")
 target_compile_definitions(testConfig PRIVATE "BBRSIM_TEST_PREFIX=\"${CMAKE_INSTALL_PREFIX}\"")
 set_tests_properties(testConfig.datadir_env testConfig.datadir_env_late PROPERTIES ENVIRONMENT_MODIFICATION "${BBRSIM_TEST_HERMETIC};BBRSIMDATA=set:/env/data")
+
+# The event-loop fatal on a worker thread aborts the process; ExpectAbort.cmake
+# checks the abort and the code. Same environment as the testPhysicsList cases.
+bbrsim_add_abort_test(testPhysicsList.event_loop_fatal_mt testPhysicsList event_loop_fatal_mt BBR011)
+set_tests_properties(testPhysicsList.event_loop_fatal_mt PROPERTIES LABELS regression
+  ENVIRONMENT "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data;G4ENSDFSTATEDATA=${Geant4_DATASET_G4ENSDFSTATE_PATH}")

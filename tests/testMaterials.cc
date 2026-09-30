@@ -2,7 +2,8 @@
 // complex Drude formula (re-implemented here with the header's constants, so
 // it catches drift) and against physics anchors that do not share the code
 // (the relaxation plateau, Hagen-Rubens, Serov 2016); the dielectric
-// ABSLENGTH tables; the flag materials; the input guards BBR015 / BBR016.
+// ABSLENGTH tables, on and between the grid points; the flag materials; the
+// input guards BBR015 / BBR016.
 #include "BBRTestSupport.hh"
 
 #include "BBRMaterials.hh"
@@ -15,6 +16,7 @@
 
 #include <cmath>
 #include <complex>
+#include <iterator>
 #include <vector>
 
 namespace {
@@ -58,6 +60,20 @@ struct Dielectric {
   const char* base;
   double grid0_mm;
 };
+
+// The three loss-tangent dielectrics as BBRMaterials.hh builds them, with the
+// NIST base and the ABSLENGTH at grid point 0.
+const Dielectric kDielectrics[] = {
+  {"Si", BBRMaterials::GetSiliconCrystal, 3.39, 1.0e-4, "G4_Si", 1.4060389658e4},
+  {"Ge", BBRMaterials::GetGermaniumCrystal, 4.0, 6.0e-5, "G4_Ge", 1.9860300392e4},
+  {"Cirlex", BBRMaterials::GetCirlex, 1.95, 0.015, "G4_KAPTON", 162.95631091},
+};
+
+// ABSLENGTH = c / (2 pi nu n tan delta) in mm at photon energy E, with the
+// header's c = 2.998e8 m/s.
+double AbsLen_mm(const Dielectric& d, double E) {
+  return 2.998e8 / (2. * kPi * Nu(E) * d.n * d.tand) * 1e3;
+}
 
 }  // namespace
 
@@ -153,12 +169,7 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR015", [] { BBRMaterials::GetCopper(100, std::nan("")); }, "BuildDrudeMaterial");
     }},
     {"dielectrics", [] {
-      const Dielectric ds[] = {
-        {"Si", BBRMaterials::GetSiliconCrystal, 3.39, 1.0e-4, "G4_Si", 1.4060389658e4},
-        {"Ge", BBRMaterials::GetGermaniumCrystal, 4.0, 6.0e-5, "G4_Ge", 1.9860300392e4},
-        {"Cirlex", BBRMaterials::GetCirlex, 1.95, 0.015, "G4_KAPTON", 162.95631091},
-      };
-      for (const auto& d : ds) {
+      for (const auto& d : kDielectrics) {
         G4Material* m = d.get();
         CHECK(m->GetName() == d.name);
         auto* mpt = m->GetMaterialPropertiesTable();
@@ -167,7 +178,7 @@ int main(int argc, char** argv) {
         CHECK(A && A->GetVectorLength() == 24);
         double worst = 0.;
         for (std::size_t i = 0; i < A->GetVectorLength(); ++i) {
-          const double ref = 2.998e8 / (2. * kPi * Nu(A->Energy(i)) * d.n * d.tand) * 1e3;  // mm
+          const double ref = AbsLen_mm(d, A->Energy(i));
           worst = std::max(worst, std::abs((*A)[i] / mm - ref) / ref);
         }
         CHECK_NEAR(worst, 0., 1e-12);
@@ -176,6 +187,58 @@ int main(int argc, char** argv) {
         CHECK(mpt->GetProperty("REFLECTIVITY") == nullptr);
         CHECK_REL(m->GetDensity(),
                   G4NistManager::Instance()->FindOrBuildMaterial(d.base)->GetDensity(), 1e-12);
+      }
+    }},
+    {"dielectric_offgrid_interp", [] {
+      // Geant4 interpolates ABSLENGTH linearly in energy, and c/(2 pi nu n tand)
+      // is convex in E, so between grid points E_i and r E_i the table lies above
+      // the formula, by at most (r + 1)^2 / (4 r) - 1 = 2.754 % at the arithmetic
+      // midpoint (2.736 % at the log midpoint). RINDEX is flat, so it is exact.
+      const double r = 1.391554514868290, bound = (r + 1.) * (r + 1.) / (4. * r) - 1.;
+      CHECK_REL(bound, 2.75438e-2, 1e-5);
+      // The formula and the table at 500 GHz [mm], in kDielectrics order.
+      struct At500 { double formula_mm, table_mm; };
+      const At500 at500[] = {{281.50237, 286.21944}, {397.62210, 404.28497}, {3.2625403, 3.3172100}};
+      static_assert(std::size(at500) == std::size(kDielectrics));
+      for (std::size_t k = 0; k < std::size(kDielectrics); ++k) {
+        const Dielectric& c = kDielectrics[k];
+        auto* mpt = c.get()->GetMaterialPropertiesTable();
+        auto* A = mpt->GetProperty("ABSLENGTH");
+        auto* n = mpt->GetProperty("RINDEX");
+        auto L = [&](double E) { return AbsLen_mm(c, E); };
+        // Arithmetic midpoint of every interval: exactly (r_i + 1)^2 / (4 r_i).
+        double worstMid = 0.;
+        for (std::size_t i = 0; i + 1 < A->GetVectorLength(); ++i) {
+          const double E0 = A->Energy(i), E1 = A->Energy(i + 1), ri = E1 / E0, Em = 0.5 * (E0 + E1);
+          worstMid = std::max(worstMid, std::abs(A->Value(Em) / mm / L(Em) / ((ri + 1.) * (ri + 1.) / (4. * ri)) - 1.));
+        }
+        CHECK_NEAR(worstMid, 0., 1e-12);
+        // 1000 log-spaced energies inside the grid: never below the formula,
+        // never more than the bound above it, and within 1e-4 of the bound at worst.
+        const double l0 = std::log(A->Energy(0)), l1 = std::log(A->Energy(23));
+        double lo = 1., hi = -1.;
+        bool flatN = true;
+        for (int i = 0; i < 1000; ++i) {
+          const double E = std::exp(l0 + (l1 - l0) * (i + 0.5) / 1000.);
+          const double x = A->Value(E) / mm / L(E) - 1.;
+          lo = std::min(lo, x);
+          hi = std::max(hi, x);
+          flatN = flatN && n->Value(E) == c.n;
+        }
+        std::printf("%s: off-grid ABSLENGTH / formula - 1 in [%.3e, %.5e]\n", c.name, lo, hi);
+        CHECK(lo >= -1e-12);
+        CHECK(hi <= bound + 1e-12);
+        CHECK(hi >= bound - 1e-4);
+        CHECK(flatN);
+        // 500 GHz lies between grid points 11 and 12: +1.676 % for each of them.
+        const double E500 = E_of(500e9);
+        CHECK_REL(L(E500), at500[k].formula_mm, 1e-7);
+        CHECK_REL(A->Value(E500) / mm, at500[k].table_mm, 1e-7);
+        CHECK_REL(A->Value(E500) / mm / L(E500) - 1., 1.67568e-2, 1e-4);
+        // Outside the grid: the edge values.
+        CHECK(A->Value(A->Energy(0) / 2.) == (*A)[0]);
+        CHECK(A->Value(A->Energy(23) * 2.) == (*A)[23]);
+        CHECK(n->Value(A->Energy(0) / 2.) == c.n && n->Value(A->Energy(23) * 2.) == c.n);
       }
     }},
     {"dielectric_name_collision", [] {  // D7: a user-made "Si" without optics
