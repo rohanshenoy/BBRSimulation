@@ -192,12 +192,13 @@ class Stepping : public G4UserSteppingAction {
     const G4ThreeVector& k = post->GetMomentumDirection();
     const G4ThreeVector& p = post->GetPolarization();
     const auto* pv = post->GetPhysicalVolume();
-    std::fprintf(fOut, "%d %d %d %s %d %s %d %d %a %a %a %a %a %a %a %a %a %a\n",
+    std::fprintf(fOut, "%d %d %d %s %d %s %d %d %a %a %a %a %a %a %a %a %a %a %a %a\n",
                  G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID(),
                  trk->GetTrackID(), trk->GetCurrentStepNumber(),
                  pv ? pv->GetName().c_str() : "OutOfWorld", int(post->GetStepStatus()),
                  Canon(post->GetProcessDefinedStep()), st, int(trk->GetTrackStatus()),
-                 x.x(), x.y(), x.z(), k.x(), k.y(), k.z(), p.x(), p.y(), p.z(), trk->GetGlobalTime());
+                 x.x(), x.y(), x.z(), k.x(), k.y(), k.z(), p.x(), p.y(), p.z(), trk->GetGlobalTime(),
+                 trk->GetKineticEnergy(), trk->GetWeight());
   }
 
  private:
