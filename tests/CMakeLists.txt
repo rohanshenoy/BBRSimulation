@@ -79,4 +79,8 @@ bbrsim_add_test_program(testCrackLibrary LABEL unit
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
   CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget snap_and_rotation
-        fatal_bbr004_bbr005 mirror_equivariance side_face_entry_documented)
+        fatal_bbr004_bbr005 mirror_equivariance side_face_entry_documented
+        reflectance_decision reflectance_specular reflectance_crack_wall reflectance_table_interp)
+
+bbrsim_add_test_program(testPhysicsList LABEL regression NEEDS_ENSDF
+  CASES wrapped_once_at_stock_index registered_twice_is_fatal wrong_order_is_fatal)

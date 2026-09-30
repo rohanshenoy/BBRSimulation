@@ -10,6 +10,8 @@
 
 #include "BBRConfigManager.hh"
 #include "G4GeometryTolerance.hh"
+#include "G4Material.hh"
+#include "G4MaterialPropertiesTable.hh"
 #include "CLHEP/Random/MixMaxRng.h"
 
 #include <cmath>
@@ -41,6 +43,18 @@ void Script(ScriptedEngine& e, std::initializer_list<double> u) {
 
 // Polarization in the plane of incidence (the x-k plane), perpendicular to k.
 G4ThreeVector InPlane(const G4ThreeVector& k) { return (X - X.dot(k.unit()) * k.unit()).unit(); }
+
+// A slab material carrying a material REFLECTIVITY table (what BBRMaterials::GetCopper builds).
+G4Material* Mirror(const char* name, const std::vector<G4double>& e, const std::vector<G4double>& r) {
+  auto* m = new G4Material(name, 29., 63.546 * g / mole, 8.96 * g / cm3);
+  auto* mpt = new G4MaterialPropertiesTable();
+  mpt->AddProperty("REFLECTIVITY", e, r);
+  m->SetMaterialPropertiesTable(mpt);
+  return m;
+}
+G4Material* Flat30() { return Mirror("R30", {1e-6 * eV, 1 * eV}, {0.3, 0.3}); }
+const G4ThreeVector k30(std::cos(30 * deg), std::sin(30 * deg), 0);
+const G4ThreeVector kSlabStart(-10 * mm, -15 * mm, 0);   // k30 from here hits the slab face x = -2 mm at y = -10.4 mm
 
 // Direction of far-field row (Phi, Theta) in the folded frame: sinT cosP n + sinT sinP tf + cosT pf.
 G4ThreeVector FFDir(double P, double T, const G4ThreeVector& n, const G4ThreeVector& tf, const G4ThreeVector& pf) {
@@ -227,6 +241,52 @@ int main(int argc, char** argv) {
         const double sgn = kx > 0 ? 1. : -1.;                     // normal flipped along k
         CHECK_VEC(r.pos, G4ThreeVector(sgn * (2 * mm - Inset()), 1 * mm, 0.01 * mm), 1e-9);
       }
+    }},
+    {"reflectance_decision", [] {
+      // Flat R = 0.3: U <= R reflects, U > R absorbs (energy deposited, track killed); one uniform.
+      World w({2 * mm, 5 * mm, 0.026 * mm}, {}, Flat30()); ScriptedEngine eng;
+      const G4double E = 2.07e-3;
+      Script(eng, {0.3});
+      auto r = w.Shoot(kSlabStart, k30, Z, E, eng);
+      CHECK(r.status == S::kBBRReflect && r.uniformsUsed == 1 && r.trackStatus == fAlive);
+      Script(eng, {0.3000001});
+      r = w.Shoot(kSlabStart, k30, Z, E, eng);
+      CHECK(r.status == S::kBBRAbsorb && r.uniformsUsed == 1 && r.trackStatus == fStopAndKill);
+      CHECK_REL(r.edep, E * eV, 1e-15);
+      CHECK(Handler().CountWarnings("BBR006") == 0);   // the navigator gave a valid normal
+    }},
+    {"reflectance_specular", [] {
+      World w({2 * mm, 5 * mm, 0.026 * mm}, {}, Flat30()); ScriptedEngine eng;
+      const double c30 = std::cos(30 * deg), s30 = std::sin(30 * deg);
+      Script(eng, {0.1});
+      auto r = w.Shoot(kSlabStart, k30, Z, 2.07e-3, eng);            // s-polarization
+      CHECK(r.status == S::kBBRReflect);
+      CHECK_VEC(r.dir, G4ThreeVector(-c30, s30, 0), 1e-9);
+      CHECK_VEC(r.pol, Z, 1e-12);
+      Script(eng, {0.1});
+      r = w.Shoot(kSlabStart, k30, G4ThreeVector(-s30, c30, 0), 2.07e-3, eng);   // p-polarization
+      CHECK_AXIS(r.pol, G4ThreeVector(s30, c30, 0));
+    }},
+    {"reflectance_crack_wall", [] {
+      // A photon inside the crack heading +z strikes the crack's +z wall and enters the slab
+      // (its mother). It must reflect about the wall normal z, not about the slab face x
+      // (the 2026-09-16 bug; caught only because Shoot drives a real navigated step).
+      World w({2 * mm, 5 * mm, 0.026 * mm}, {}, Flat30()); ScriptedEngine eng;
+      Script(eng, {0.1});
+      const auto r = w.Shoot({0, 0, 0}, Z, X, 2.07e-3, eng);
+      CHECK_NEAR(r.hit.z(), 0.026 * mm, 1e-9);
+      CHECK(r.status == S::kBBRReflect);
+      CHECK_VEC(r.dir, -Z, 1e-9);
+      CHECK(Handler().CountWarnings("BBR006") == 0);
+    }},
+    {"reflectance_table_interp", [] {
+      // Two-point table R(1e-3 eV) = 0, R(3e-3 eV) = 1: R(2e-3 eV) = 0.5 (linear in E).
+      World w({2 * mm, 5 * mm, 0.026 * mm}, {}, Mirror("Rlin", {1e-3 * eV, 3e-3 * eV}, {0., 1.}));
+      ScriptedEngine eng;
+      Script(eng, {0.49});
+      CHECK(w.Shoot(kSlabStart, k30, Z, 2e-3, eng).status == S::kBBRReflect);
+      Script(eng, {0.51});
+      CHECK(w.Shoot(kSlabStart, k30, Z, 2e-3, eng).status == S::kBBRAbsorb);
     }},
   });
 }
