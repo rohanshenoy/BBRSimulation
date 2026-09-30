@@ -9,7 +9,8 @@ Scripts/run_regression.sh   build + fixtures + validators, one command
 Scripts/drift_guards.sh     source-tree consistency checks (run by the runner, or alone)
 Scripts/make_mock_hfss_frequencies.py   the mock HFSS tree for Validation_CrackFrequency
 Scripts/consumer_smoke/     external find_package(BBRsim) + link smoke test
-Scripts/tests/              helpers for the validator negative tests (make_bad_output.py)
+Scripts/tests/              make_bad_output.py (synthetic outputs for the validator negative tests),
+                            test_env.sh (the env scripts in bash, zsh, tcsh, dash), check_links.sh
 ```
 
 ## Running
@@ -25,7 +26,7 @@ in `BUILD_DIR/regression/<case>/`, and runs the validators on their output.
 Six cases run the fixtures here; four run example macros directly (see
 [Regression inputs](#regression-inputs)). The exit code is the number of
 unexpected failures; a green run ends with the line
-`pass=44  fail=0  xfail=1  xpass=0` (two spaces between fields, then the output
+`pass=47  fail=0  xfail=1  xpass=0` (two spaces between fields, then the output
 directory).
 
 | Case | Macro | Executable | Validators |
@@ -45,6 +46,27 @@ directory).
 A case passes when the binary exits 0, writes its ROOT output, and its log
 holds no `GeomNav`, `G4Exception`, `BBR0xx` or `LP002` line (the frequency case
 tolerates its `BBR008` clamp warnings, and exactly one per side is required).
+
+## Drift guards
+
+`Scripts/drift_guards.sh` prints one PASS/FAIL row per guard and exits with the
+FAIL count; the runner adds its rows to the summary.
+
+- `library file lists`, `example file lists`, `tools file lists` — every library source and header, example source and macro, `bbrsim` module and plot script is named in its `CMakeLists.txt`.
+- `library names no example` — no library file names an example class.
+- `every fixture is run` — the runner calls every `G4Macros/Validation_*.mac`.
+- `regression macros pinned` — see [Regression inputs](#regression-inputs).
+- `notebooks without outputs` — tracked notebooks carry no outputs or execution counts.
+- `markdown links` — every relative link and in-page `#anchor` in the tracked `*.md` resolves (`Scripts/tests/check_links.sh`).
+- `banned names` — no tracked file (outside `ChangeHistory`, `data/` and the guard itself) edits the Python module search path, reads the HFSS data by a relative path instead of through `bbrsim.paths`, or names one of the executables, script paths, property keys or output files the reorganization retired. The list is in the guard; quoting it anywhere else trips it.
+- `action copies identical` — the four `TestWorld*` / `LightPipe*` action classes match once the prefix is normalised, so a fix to one copy reaches the other.
+
+In an installed copy of `validation/` (not the top of a git checkout, no
+`examples/`) the guards that need them report themselves skipped.
+
+`Scripts/tests/test_env.sh REPO PREFIX` sources the env scripts of the source
+tree and of the install in bash, zsh, tcsh and dash (22 cases; a shell that is
+not installed is skipped) and exits with its FAIL count.
 
 ## PASS criteria
 

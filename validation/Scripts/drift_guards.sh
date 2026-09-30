@@ -53,4 +53,34 @@ NB_PY='import json, sys; nb = json.load(open(sys.argv[1])); sys.exit(1 if any(c.
 report "notebooks without outputs" "$(git -C "$REPO" ls-files '*.ipynb' | while read -r nb; do
     $PY -c "$NB_PY" "$REPO/$nb" >/dev/null 2>&1 || echo "$nb"; done)"
 report "tools file lists" "$(unlisted "$REPO/tools/CMakeLists.txt" "$REPO"/tools/python/bbrsim/*.py "$REPO"/tools/plot_*.py)"
+# The next three need a git checkout with examples/; an installed copy of
+# validation/ has neither, so there they are skipped like the pin guard. The
+# links and banned-names guards need REPO to be the top of the checkout: the
+# default prefix install/ lies inside it, where git works but tracks nothing.
+if [ "$(git -C "$REPO" rev-parse --show-toplevel 2>/dev/null)" = "$REPO" ]; then
+  # Every relative link and in-page anchor in the tracked *.md resolves. The
+  # guard needs the script's closing LINKS OK line, so a check that cannot run
+  # fails instead of passing with no BAD lines.
+  report "markdown links" "$(out=$(bash "$REPO/validation/Scripts/tests/check_links.sh" "$REPO" 2>&1)
+    printf '%s\n' "$out" | grep -qx 'LINKS OK' ||
+      { printf '%s\n' "$out" | grep '^BAD' | sed 's/^BAD  *//'; echo "(check_links.sh: $(printf '%s\n' "$out" | tail -1))"; })"
+  # Names the reorg retired, and module-path hacks. ChangeHistory records them
+  # and this file lists them, so both are excluded.
+  report "banned names" "$(cd "$REPO" && git grep -nIE 'sys\.path\.(insert|append)|\.\./data/waveguides|\./OpNovice2|scripts/(check_|plot_)|analysis/bbrsim|BBR_REFLECTIVITY|test_output\.csv' -- . ':!ChangeHistory' ':!data' ':!validation/Scripts/drift_guards.sh' | head -5
+    git grep -nIwE 'BBRSim|BBRLightPipe' -- . ':!ChangeHistory' ':!data' ':!validation/Scripts/drift_guards.sh' | head -5)"
+else
+  printf '%-6s %-30s %s\n' PASS "markdown links" "skipped: not the top of a git checkout (installed copy)"
+  printf '%-6s %-30s %s\n' PASS "banned names" "skipped: not the top of a git checkout (installed copy)"
+fi
+if [ -d "$REPO/examples" ]; then
+  # The four example action classes are copies (TestWorld*, LightPipe*): a fix
+  # to one belongs in the other, so they must match once the prefix is normalised.
+  report "action copies identical" "$(for f in ActionInitialization PrimaryGeneratorAction SteppingAction RunAction; do for e in hh cc; do
+      d=$([ $e = hh ] && echo include || echo src)
+      a="$REPO/examples/testworld/$d/TestWorld$f.$e"; b="$REPO/examples/lightpipe/$d/LightPipe$f.$e"
+      { [ -f "$a" ] && [ -f "$b" ] && diff -q <(sed 's/TestWorld/X/g; s/LightPipe/X/g' "$a") <(sed 's/TestWorld/X/g; s/LightPipe/X/g' "$b") >/dev/null; } || echo "$f.$e"
+    done; done)"
+else
+  printf '%-6s %-30s %s\n' PASS "action copies identical" "skipped: no examples/ here (installed copy)"
+fi
 exit $nfail
