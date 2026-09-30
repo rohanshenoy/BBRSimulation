@@ -84,3 +84,45 @@ bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
 
 bbrsim_add_test_program(testPhysicsList LABEL regression NEEDS_ENSDF
   CASES wrapped_once_at_stock_index registered_twice_is_fatal wrong_order_is_fatal)
+
+# testPassthrough: stock vs wrapped boundary optics, byte for byte. The program
+# takes <mode> <nEvents> <outfile>, so it is registered by hand: four producer
+# runs (fixture setups) and compare_files steps that require them.
+add_executable(testPassthrough testPassthrough.cc BBRTestSupport.hh)
+target_link_libraries(testPassthrough PRIVATE BBRsim)
+target_compile_options(testPassthrough PRIVATE -Wall -Wextra)
+set(_pt_n 2000)
+set(_pt_wd ${CMAKE_CURRENT_BINARY_DIR}/work/passthrough)
+set(_pt_ensdf "G4ENSDFSTATEDATA=${Geant4_DATASET_G4ENSDFSTATE_PATH}")
+file(MAKE_DIRECTORY ${_pt_wd})
+foreach(m stock wrapped stock2 mutant)
+  set(mode ${m})
+  if(m STREQUAL stock2)
+    set(mode stock)
+  endif()
+  add_test(NAME passthrough.${m} COMMAND testPassthrough ${mode} ${_pt_n} pt_${m}.txt)
+  set_tests_properties(passthrough.${m} PROPERTIES FIXTURES_SETUP pt_${m} ENVIRONMENT "${_pt_ensdf}")
+endforeach()
+add_test(NAME passthrough.identical COMMAND ${CMAKE_COMMAND} -E compare_files pt_stock.txt pt_wrapped.txt)
+add_test(NAME passthrough.repeatable COMMAND ${CMAKE_COMMAND} -E compare_files pt_stock.txt pt_stock2.txt)
+add_test(NAME passthrough.mutant_differs COMMAND ${CMAKE_COMMAND} -E compare_files pt_stock.txt pt_mutant.txt)
+set_tests_properties(passthrough.identical PROPERTIES FIXTURES_REQUIRED "pt_stock;pt_wrapped")
+set_tests_properties(passthrough.repeatable PROPERTIES FIXTURES_REQUIRED "pt_stock;pt_stock2")
+set_tests_properties(passthrough.mutant_differs PROPERTIES FIXTURES_REQUIRED "pt_stock;pt_mutant" WILL_FAIL TRUE)
+# With WLS active in box B the wrapper must still be bit-identical (D1: the
+# wrapper keeps the stock process's place in the process list).
+foreach(m stock wrapped)
+  add_test(NAME passthrough.wls_${m} COMMAND testPassthrough ${m} ${_pt_n} wls_${m}.txt)
+  set_tests_properties(passthrough.wls_${m} PROPERTIES FIXTURES_SETUP wls_${m} ENVIRONMENT "PT_WLS=1;${_pt_ensdf}")
+endforeach()
+add_test(NAME passthrough.wls_identical COMMAND ${CMAKE_COMMAND} -E compare_files wls_stock.txt wls_wrapped.txt)
+set_tests_properties(passthrough.wls_identical PROPERTIES FIXTURES_REQUIRED "wls_stock;wls_wrapped")
+# Common properties; the runs without WLS also drop an inherited PT_WLS.
+foreach(t stock wrapped stock2 mutant identical repeatable mutant_differs wls_stock wls_wrapped wls_identical)
+  set(mod ${BBRSIM_TEST_HERMETIC})
+  if(NOT t MATCHES "^wls_")
+    list(APPEND mod "PT_WLS=unset:")
+  endif()
+  set_tests_properties(passthrough.${t} PROPERTIES LABELS regression TIMEOUT 120 WORKING_DIRECTORY ${_pt_wd}
+    ENVIRONMENT_MODIFICATION "${mod}")
+endforeach()
