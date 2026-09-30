@@ -59,8 +59,10 @@ the copper face over both cracks, so 200 000 events are enough.
 ### 2. HFSS crack diffraction
 
 A photon entering a crack volume is handled by the HFSS lookup, which decides
-whether it transmits and samples its exit direction and position. At 500 GHz
-and normal incidence:
+whether it transmits and samples its exit direction and position.
+Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x faces
+(the crack axis). Entry through a side face is not detected and is treated as
+an axial entry. At 500 GHz and normal incidence:
 
 | Crack | Gap | Observed T (40 000 photons) |
 |---|---|---|

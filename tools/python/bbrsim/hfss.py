@@ -45,14 +45,15 @@ def default_base_dir():
 class AngleDataset:
     """One (IWavePhi, IWaveTheta) incidence key of one crack dataset."""
     key: tuple                # (IWavePhi_deg, IWaveTheta_deg)
-    T0: float                 # transmittance, Ephi=0 (theta-polarised) input, capped at 1
-    T1: float                 # transmittance, Ephi=1 (phi-polarised) input, capped at 1
+    T0: float                 # transmittance, Ephi=0 (theta-polarised) input (normalized at load)
+    T1: float                 # transmittance, Ephi=1 (phi-polarised) input (normalized at load)
     theta_deg: np.ndarray     # far-field grid: outgoing Theta
     phi_deg: np.ndarray       # far-field grid: outgoing Phi
     F0_theta: np.ndarray      # complex rEtheta for Ephi=0 input
     F0_phi: np.ndarray        # complex rEphi   for Ephi=0 input
     F1_theta: np.ndarray      # complex rEtheta for Ephi=1 input
     F1_phi: np.ndarray        # complex rEphi   for Ephi=1 input
+    rho: complex = 0j         # normalized exit-field overlap <E0,E1> (polarization cross term)
 
 
 def load_dataset(dir_stem, base_dir=None):
@@ -64,7 +65,8 @@ def load_dataset(dir_stem, base_dir=None):
 
     Returns {(IWavePhi, IWaveTheta): AngleDataset}. Mirrors BBRHFSSData's
     constructor: the Ephi=1 far-field rows are matched to the Ephi=0 rows by
-    order within each incidence key, and raw power ratios above 1 are capped.
+    order within each incidence key, and a key whose largest transmittance over
+    linear polarizations exceeds 1 has T0 and T1 divided by it.
     """
     dataset_id = dir_stem   # local alias: the error messages below name the stem
     base = base_dir or default_base_dir()
@@ -82,11 +84,24 @@ def load_dataset(dir_stem, base_dir=None):
         b = ff[1][(ff[1].IWavePhi == phi_i) & (ff[1].IWaveTheta == theta_i)].reset_index(drop=True)
         if len(a) != len(b) or not (np.allclose(a.Phi, b.Phi) and np.allclose(a.Theta, b.Theta)):
             raise ValueError(f"{dataset_id} key {key}: Ephi=0 and Ephi=1 far-field grids differ")
-        T = {}
+        T, E = {}, {}
         for e in (0, 1):
-            r = wg[e][(wg[e].IWavePhi == phi_i) & (wg[e].IWaveTheta == theta_i)].iloc[0]
-            t = float(r.OutgoingPower) / float(r.IngoingPower) if r.IngoingPower > 0 else 0.0
-            T[e] = min(1.0, t)   # load-time cap (BBRHFSSData::LoadWaveguide)
+            rows = wg[e][(wg[e].IWavePhi == phi_i) & (wg[e].IWaveTheta == theta_i)]
+            r = rows.iloc[0]
+            T[e] = float(r.OutgoingPower) / float(r.IngoingPower) if r.IngoingPower > 0 else 0.0
+            E[e] = np.stack([rows[f"E{c}_real"].to_numpy(float) + 1j * rows[f"E{c}_imag"].to_numpy(float)
+                             for c in "xyz"])
+        # Normalized overlap of the two basis exit fields (BBRHFSSData constructor).
+        x = np.sum(E[0] * np.conj(E[1]))
+        p0, p1 = np.sum(np.abs(E[0]) ** 2), np.sum(np.abs(E[1]) ** 2)
+        rho = complex(x / np.sqrt(p0 * p1)) if p0 > 0 and p1 > 0 else 0j
+        # Load-time normalization (BBRHFSSData constructor): the largest T over linear
+        # polarizations, the top eigenvalue of [[T0, c], [c, T1]] with c = sqrt(T0 T1) Re rho,
+        # above 1 (the HFSS port-normalization artefact) divides both T0 and T1.
+        c = np.sqrt(T[0] * T[1]) * rho.real
+        lam = float(0.5 * (T[0] + T[1]) + np.hypot(0.5 * (T[0] - T[1]), c))
+        if lam > 1.0:
+            T = {e: T[e] / lam for e in (0, 1)}
         out[key] = AngleDataset(
             key, T[0], T[1],
             a.Theta.to_numpy(float), a.Phi.to_numpy(float),
@@ -94,6 +109,7 @@ def load_dataset(dir_stem, base_dir=None):
             a.rEphi_real.to_numpy(float) + 1j * a.rEphi_imag.to_numpy(float),
             b.rEtheta_real.to_numpy(float) + 1j * b.rEtheta_imag.to_numpy(float),
             b.rEphi_real.to_numpy(float) + 1j * b.rEphi_imag.to_numpy(float),
+            rho,
         )
     return out
 
@@ -169,8 +185,11 @@ def polarization_components(pol, inc):
 
 
 def transmittance(ds, E_theta, E_phi):
-    """Wang eq. 54 with the [0, 1] clamp (BBRHFSSData::GetTransmittance)."""
-    return min(1., max(0., E_theta ** 2 * ds.T0 + E_phi ** 2 * ds.T1))
+    """Wang eq. 58 applied to eq. 53 (BBRHFSSData::GetTransmittance): the transmitted power
+    of a mixed polarization includes the cross term 2 Et Ep sqrt(T0 T1) Re rho."""
+    T = (E_theta ** 2 * ds.T0 + E_phi ** 2 * ds.T1
+         + 2. * E_theta * E_phi * np.sqrt(ds.T0 * ds.T1) * ds.rho.real)
+    return min(1., max(0., T))
 
 
 def direction_weights(ds, E_theta, E_phi):

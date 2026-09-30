@@ -105,6 +105,35 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
       G4Exception("BBRHFSSData", "BBR007", FatalException, ed);
     }
   }
+
+  // Polarization cross term (Wang eq. 58 applied to eq. 53): the transmitted power of a
+  // mixed polarization is |Et E0 + Ep E1|^2 integrated over the exit face, which adds
+  // 2 Et Ep Re<E0,E1> to Et^2 T0 + Ep^2 T1. rho is that overlap, normalized.
+  //
+  // Load-time normalization: the largest transmittance over linear polarizations is
+  // the top eigenvalue of [[T0, c], [c, T1]], c = sqrt(T0 T1) Re rho. HFSS port
+  // normalization can put it above 1 (raw T0 = 1.0545 at (0,180) of the 52 um gap;
+  // T0 + T1 = 1.025 in phase at (45,180)). Such a key has T0 and T1 divided by it, so
+  // its maximum is 1 and T1/T0 is kept; a key at or below 1 is left as it is.
+  for (auto& [key, ds] : fData) {
+    std::complex<G4double> x(0, 0); G4double p0 = 0, p1 = 0;
+    for (const auto& e : ds.exitPoints) {
+      const std::complex<G4double> a[3] = {{e.Ex_re_0, e.Ex_im_0}, {e.Ey_re_0, e.Ey_im_0}, {e.Ez_re_0, e.Ez_im_0}};
+      const std::complex<G4double> b[3] = {{e.Ex_re_1, e.Ex_im_1}, {e.Ey_re_1, e.Ey_im_1}, {e.Ez_re_1, e.Ez_im_1}};
+      for (int i = 0; i < 3; ++i) { x += a[i] * std::conj(b[i]); p0 += std::norm(a[i]); p1 += std::norm(b[i]); }
+    }
+    ds.rho_re = (p0 > 0 && p1 > 0) ? (x / std::sqrt(p0 * p1)).real() : 0.;
+
+    const G4double c = std::sqrt(ds.T_Ephi0 * ds.T_Ephi1) * ds.rho_re;
+    const G4double lam = 0.5 * (ds.T_Ephi0 + ds.T_Ephi1) + std::hypot(0.5 * (ds.T_Ephi0 - ds.T_Ephi1), c);
+    if (lam > 1.) {
+      G4cout << "[BBR] HFSS " << dirStem << " key (" << key.first << ", " << key.second
+             << "): max transmittance " << lam
+             << " > 1 (port-normalization artefact), normalized to 1" << G4endl;
+      ds.T_Ephi0 /= lam;
+      ds.T_Ephi1 /= lam;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -274,20 +303,10 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag)
     auto& ds = fData[key];
 
     // Transmittance is constant per (IWavePhi, IWaveTheta): read from first row.
+    // The raw ratio can exceed 1 (HFSS port normalization); the constructor
+    // normalizes each key once rho is known.
     if (!tSet[key]) {
-      G4double T = (inPow > 0.) ? outPow / inPow : 0.;
-      // HFSS port normalization can report OutgoingPower/IngoingPower slightly
-      // above 1 (1.0545 for the 52 um gap at normal incidence). A per-
-      // polarization transmittance cannot exceed 1, so renormalize here at
-      // load time. Clamping only the polarization-weighted result (the old
-      // behaviour) left the unpolarized mean about 2 points above the exact
-      // 50% of a sub-cutoff parallel-plate gap.
-      if (T > 1.) {
-        G4cout << "[BBR] HFSS " << path << " key (" << iwPhi << ", " << iwThe
-               << "): raw T = " << T
-               << " > 1 (port-normalization artefact), capped to 1" << G4endl;
-        T = 1.;
-      }
+      const G4double T = (inPow > 0.) ? outPow / inPow : 0.;
       if (ephi_flag == 0) ds.T_Ephi0 = T;
       else                ds.T_Ephi1 = T;
       tSet[key] = true;
@@ -361,9 +380,10 @@ G4double BBRHFSSData::GetTransmittance(G4double E_theta, G4double E_phi,
                                        G4double iwaveTheta_deg) const
 {
   const auto& ds = FindDataset(iwavePhi_deg, iwaveTheta_deg);
-  // HFSS power ratios can slightly exceed 1 (e.g. 1.055 at normal incidence,
-  // a numerical artefact of the port normalization) — clamp to a probability.
-  G4double T = E_theta*E_theta * ds.T_Ephi0 + E_phi*E_phi * ds.T_Ephi1;
+  // The load-time normalization keeps the largest T over linear polarizations at
+  // or below 1; the clamp guards against rounding and non-unit (E_theta, E_phi).
+  G4double T = E_theta*E_theta * ds.T_Ephi0 + E_phi*E_phi * ds.T_Ephi1
+             + 2.*E_theta*E_phi * std::sqrt(ds.T_Ephi0 * ds.T_Ephi1) * ds.rho_re;
   return std::min(1., std::max(0., T));
 }
 

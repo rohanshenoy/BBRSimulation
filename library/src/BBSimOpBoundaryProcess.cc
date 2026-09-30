@@ -146,7 +146,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   if (norm > 1e-9) { E_theta /= norm; E_phi /= norm; }
   else             { E_theta = M_SQRT1_2; E_phi = M_SQRT1_2; }
 
-  // --- transmittance decision (Wang eq. 54) ---
+  // --- transmittance decision (Wang eq. 58 in eq. 53, with the cross term) ---
   G4double T = hfss.GetTransmittance(E_theta, E_phi,
                                      iwavePhi_deg, iwaveTheta_deg);
 

@@ -52,7 +52,15 @@ class BBRHFSSData
   // Shared with BBRCrackLibrary, which parses the same token from directory names.
   static G4double ParseFrequencyGHz(const std::string& token);
 
-  // Wang eq. 54: T = E_theta²·T₀ + E_phi²·T₁
+  // T = E_theta²·T₀ + E_phi²·T₁ + 2·E_theta·E_phi·√(T₀T₁)·Re ρ, clamped to [0, 1]
+  // (Wang eq. 58 substituted into eq. 53), with ρ the normalized overlap
+  // Σ E₀·E₁* / √(Σ|E₀|² Σ|E₁|²) of the two basis exit fields: the transmitted
+  // power is quadratic in the total exit field, so the two powers add without a
+  // cross term only when the basis fields are orthogonal over the exit face.
+  // T₀ and T₁ are OutgoingPower/IngoingPower of the key's first row; where the
+  // largest T over linear polarizations (the top eigenvalue of [[T₀, c], [c, T₁]],
+  // c = √(T₀T₁)·Re ρ) exceeds 1, an HFSS port-normalization artefact, the load
+  // divides both by it and logs "[BBR] HFSS … normalized to 1".
   G4double GetTransmittance(G4double E_theta, G4double E_phi,
                             G4double iwavePhi_deg, G4double iwaveTheta_deg) const;
 
@@ -92,6 +100,7 @@ class BBRHFSSData
     std::vector<FarFieldPoint> farField;
     G4double T_Ephi0 = 0.;   // transmittance, θ-polarised (Ephi=0) input
     G4double T_Ephi1 = 0.;   // transmittance, φ-polarised (Ephi=1) input
+    G4double rho_re = 0.;  // Re of the normalized exit-field overlap <E0,E1>, for the polarization cross term
     std::vector<ExitPoint> exitPoints;
   };
 

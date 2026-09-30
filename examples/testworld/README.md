@@ -20,6 +20,10 @@ with its front face at x = 0. The slab material comes from
 `InfParallelPlate_crack2` (102 µm gap at z = 3 mm). For each, the library reads
 `<dataDir>/waveguides/<id>_<freq>GHz_Ephi={0,1}`.
 
+Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x faces
+(the crack axis). Entry through a side face is not detected and is treated as
+an axial entry.
+
 ## Primary event
 
 `TestWorldPrimaryGeneratorAction` has two modes:

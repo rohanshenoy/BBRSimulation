@@ -71,8 +71,12 @@ bbrsim_add_test_program(testHFSSData LABEL unit
   CASES parse_frequency mini_loads transmittance_mixing load_cap_first_row nearest_key
         direction_cdf zero_weight_rows coherent_cross_term_in_direction exit_position
         err_missing_files err_no_keys err_key_mismatch err_freq_column err_ephi1_row_mismatch
-        err_bad_number real_data_smoke
+        err_bad_number real_data_smoke transmittance_coherent real_data_diagonal_key
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
   CASES selection_grid5 token_verbatim discovery_errors unreadable_root concurrent_first_load)
+
+bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
+  CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget snap_and_rotation
+        fatal_bbr004_bbr005 mirror_equivariance side_face_entry_documented)
