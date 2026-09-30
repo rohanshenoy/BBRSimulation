@@ -3,7 +3,10 @@
 #
 #   validation/Scripts/run_regression.sh [BUILD_DIR]        (default: build)
 #
-# 1. Configures, builds and installs the library with the C++ tests
+# 1. Refuses a prefix holding an example library (lib/libbbrsim{TestWorld,
+#    LightPipe}.*, left by a cmake --install of an example into it), which the
+#    row installed examples would load instead of its own copy.
+#    Configures, builds and installs the library with the C++ tests
 #    (BUILD_BBRSIM_TESTS=ON; BUILD_DIR, prefix BBR_PREFIX,
 #    default <repo>/install), stops if the installed data, headers or env
 #    scripts differ from data/, library/include or bbrsim_env.{sh,csh} (cmake
@@ -74,6 +77,21 @@ XFAIL="${BBR_XFAIL-check_cu_serov.py|HP_Cu alias RRR 6 is 13% low vs Serov under
 fail=0; xfail=0; xpass=0; pass=0
 line() { printf '%-6s %-30s %s\n' "$1" "$2" "$3"; }
 
+# An example installed into this prefix (the example presets install into
+# ../../install, the default prefix) leaves its library in $PREFIX/lib, and cmake
+# --install never deletes it. The row installed examples installs fresh copies into
+# $BUILD/expfx, but their RPATH lists $PREFIX/lib (libBBRsim's link directory) before
+# $BUILD/expfx/lib, so they would load the stale copy and the row would pass on old
+# example code: refuse it, as the stale-file loop in step 1 refuses stale installed
+# data, headers and env scripts.
+stale_ex=0
+for f in "$PREFIX"/lib/libbbrsimTestWorld.* "$PREFIX"/lib/libbbrsimLightPipe.*; do
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    echo "ERROR: $f is an example library installed into the prefix; the installed examples' RPATH finds it before BUILD_DIR/expfx/lib, so they would run it instead of this build. Remove it and rerun."
+    stale_ex=1
+  fi
+done
+[ "$stale_ex" -eq 0 ] || exit 2
 if [ -f "$BUILD/CMakeCache.txt" ] && ! grep -q '^CMAKE_PROJECT_NAME:STATIC=BBRsim$' "$BUILD/CMakeCache.txt"; then
   echo "ERROR: $BUILD was configured by the pre-reorg single-project build; delete it and rerun."; exit 2
 fi
@@ -420,7 +438,8 @@ fi
 # time, so the builds in $EXB (configured for $PREFIX) cannot be installed elsewhere.
 # The installed binaries run from their own directories under $BUILD/expfx_run with
 # no BBRSIMDATA and no DYLD_LIBRARY_PATH/LD_LIBRARY_PATH: RPATH and the compiled-in
-# data default must be enough.
+# data default must be enough. Their RPATH lists $PREFIX/lib first, which is why the
+# runner refuses, at the start, a prefix that holds an example library.
 EXPFX="$BUILD/expfx"; EXRUN="$BUILD/expfx_run"; exlog="$BUILD/expfx.log"; ex_bad=""
 rm -rf "$EXPFX" "$EXRUN"; : >"$exlog"
 for ex in testworld lightpipe; do
