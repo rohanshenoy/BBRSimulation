@@ -133,3 +133,9 @@ bbrsim_add_test_program(testMaterials LABEL unit
   ENV "G4LEDATA=/nonexistent;G4LEVELGAMMADATA=/nonexistent;G4NEUTRONHPDATA=/nonexistent;G4RADIOACTIVEDATA=/nonexistent;G4PARTICLEXSDATA=/nonexistent;G4PIIDATA=/nonexistent;G4REALSURFACEDATA=/nonexistent;G4SAIDXSDATA=/nonexistent;G4ABLADATA=/nonexistent;G4INCLDATA=/nonexistent;G4ENSDFSTATEDATA=/nonexistent;G4CHANNELINGDATA=/nonexistent")
 bbrsim_add_test_program(testEmission LABEL unit
   CASES planck_cdf_shape planck_cdf_invalid planck_band_loss genevt_nonrandom_exact genevt_rotation genevt_statistics genevt_guards geometric_surface_area)
+bbrsim_add_test_program(testConfig LABEL unit
+  CASES defaults command_table datadir_quotes setT_units validation_paths datadir_default datadir_env datadir_env_late
+        worker_clone_isolation worker_before_master print_flushes
+  ENVMOD "BBRSIMDATA=unset:")
+target_compile_definitions(testConfig PRIVATE "BBRSIM_TEST_PREFIX=\"${CMAKE_INSTALL_PREFIX}\"")
+set_tests_properties(testConfig.datadir_env testConfig.datadir_env_late PROPERTIES ENVIRONMENT_MODIFICATION "${BBRSIM_TEST_HERMETIC};BBRSIMDATA=set:/env/data")

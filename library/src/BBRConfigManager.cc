@@ -1,7 +1,9 @@
 #include "BBRConfigManager.hh"
 #include "BBRConfigMessenger.hh"
 
+#include "G4Exception.hh"
 #include "G4Threading.hh"
+#include <cmath>
 #include <cstdlib>
 #include "G4ios.hh"
 #include <ostream>
@@ -19,6 +21,7 @@ BBRConfigManager* BBRConfigManager::Instance() {
       theInstance = new BBRConfigManager;
       masterInstance = theInstance;
     } else {                                     // workers clone from master
+      if (!masterInstance) G4Exception("BBRConfigManager::Instance", "BBR020", FatalException, "a worker thread asked for the config before the master created it; call BBRConfigManager::Instance() in main() first");
       theInstance = new BBRConfigManager(*masterInstance);
     }
   }
@@ -56,7 +59,7 @@ BBRConfigManager::BBRConfigManager(const BBRConfigManager& master)
 BBRConfigManager::~BBRConfigManager() { delete fMessenger; fMessenger = nullptr; }
 
 void BBRConfigManager::SetThermalT_K(G4double v) {
-  if (v <= 0.) {
+  if (!std::isfinite(v) || v <= 0.) {
     G4cerr << "[BBR] thermal/setT: temperature must be > 0 K, got " << v << G4endl;
     return;
   }
@@ -64,12 +67,21 @@ void BBRConfigManager::SetThermalT_K(G4double v) {
 }
 
 void BBRConfigManager::SetEmitterSize_mm(const G4ThreeVector& v) {
-  if (v.x() <= 0. || v.y() <= 0. || v.z() <= 0.) {
+  if (!std::isfinite(v.x()) || !std::isfinite(v.y()) || !std::isfinite(v.z()) ||
+      v.x() <= 0. || v.y() <= 0. || v.z() <= 0.) {
     G4cerr << "[BBR] thermal/emitterSize: all extents must be > 0, got "
            << v << " mm" << G4endl;
     return;
   }
   Instance()->fEmitterSize_mm = v;
+}
+
+void BBRConfigManager::SetGunEnergy_eV(G4double v) {
+  if (!std::isfinite(v) || v <= 0.) {
+    G4cerr << "[BBR] gun/energy_eV: energy must be > 0 eV, got " << v << G4endl;
+    return;
+  }
+  Instance()->fGunEnergy_eV = v;
 }
 
 void BBRConfigManager::SetCuRRR(G4int rrr) {
@@ -81,7 +93,7 @@ void BBRConfigManager::SetCuRRR(G4int rrr) {
 }
 
 void BBRConfigManager::SetCuStageT_K(G4double T_K) {
-  if (T_K <= 0.) {
+  if (!std::isfinite(T_K) || T_K <= 0.) {
     G4cerr << "[BBR] det/setCuStageT: temperature must be > 0 K, got " << T_K << G4endl;
     return;
   }
@@ -115,5 +127,5 @@ void BBRConfigManager::printConfig(std::ostream& os) const {
      << "  /bbr/dataDir          " << fDataDir << "   # BBRSIMDATA\n"
      << "  /bbr/det/setCuRRR     " << fCuRRR << "\n"
      << "  /bbr/det/setCuStageT  " << fCuStageT_K  << " K\n"
-     << "=================================\n";
+     << "=================================" << G4endl;
 }

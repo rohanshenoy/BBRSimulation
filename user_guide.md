@@ -195,7 +195,7 @@ compares it with Serov (2016).
 
 | Command | Argument | Default |
 |---|---|---|
-| `/bbr/thermal/setT` | temperature in K | 4.0 |
+| `/bbr/thermal/setT` | value + unit, default K; mK accepted | `4 K` |
 | `/bbr/thermal/emitterCenter` | x y z + unit | `-50 0 0 mm` |
 | `/bbr/thermal/emitterSize` | full extents Wx Wy Wz + unit | `1 20 20 mm` |
 
@@ -206,6 +206,9 @@ the test world; other geometries need their own. The light pipe uses
 Energies follow the Planck photon-number spectrum, ∝ ν²/(e^{hν/kT} − 1), the
 right weighting when each event is one photon. It peaks at hν ≈ 1.59 kT
 (133 GHz at 4 K), not at the energy-spectrum peak of 2.82 kT (235 GHz).
+The band is fixed at 10 GHz–20 THz. Between 2.2 K and 117 K it holds at least
+99 % of the spectrum; outside that range the run prints one `BBR021` warning
+(the band misses 13.8 % of the spectrum at 0.5 K and 3.9 % at 150 K).
 Directions are uniform in θ over the outward hemisphere, following Chang's
 convention; the approximation washes out after a few reflections.
 

@@ -10,6 +10,7 @@
 #include "G4UIcmdWithAString.hh"
 #include "G4UIcmdWithAnInteger.hh"
 #include "G4UIcmdWithoutParameter.hh"
+#include "G4UnitsTable.hh"
 #include "G4ios.hh"
 
 BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager*)
@@ -18,9 +19,17 @@ BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager*)
   fPrintCmd->SetGuidance("Print all BBRConfigManager settings.");
   fPrintCmd->SetToBeBroadcasted(false);
 
-  fSetTCmd = new G4UIcmdWithADouble("/bbr/thermal/setT", this);
-  fSetTCmd->SetGuidance("Planck emitter temperature [K].");
+  // Geant4 defines only K/kelvin in the Temperature category. IsUnitDefined
+  // builds the standard table first (a G4UnitDefinition made on an empty table
+  // would leave it holding only mK); worker kernels copy the master's table.
+  if (!G4UnitDefinition::IsUnitDefined("mK"))
+    new G4UnitDefinition("millikelvin", "mK", "Temperature", 1.e-3*CLHEP::kelvin);
+
+  fSetTCmd = new G4UIcmdWithADoubleAndUnit("/bbr/thermal/setT", this);
+  fSetTCmd->SetGuidance("Planck emitter temperature (default unit K; mK accepted).");
   fSetTCmd->SetParameterName("T", false);
+  fSetTCmd->SetDefaultUnit("kelvin");
+  fSetTCmd->SetUnitCandidates("kelvin K mK");
   fSetTCmd->AvailableForStates(G4State_PreInit, G4State_Idle);
 
   fEmitCenterCmd = new G4UIcmdWith3VectorAndUnit("/bbr/thermal/emitterCenter", this);
@@ -107,7 +116,7 @@ BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager*)
                             "(default 4 K). Before /run/initialize.");
   fCuStageTCmd->SetParameterName("T", false);
   fCuStageTCmd->SetDefaultUnit("kelvin");
-  fCuStageTCmd->SetUnitCandidates("kelvin");
+  fCuStageTCmd->SetUnitCandidates("kelvin K mK");
   fCuStageTCmd->SetToBeBroadcasted(false);
   fCuStageTCmd->AvailableForStates(G4State_PreInit);
 }
@@ -126,7 +135,7 @@ BBRConfigMessenger::~BBRConfigMessenger() {
 
 void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
   if      (cmd == fPrintCmd)   { BBRConfigManager::Print(G4cout); }
-  else if (cmd == fSetTCmd)    { BBRConfigManager::SetThermalT_K(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
+  else if (cmd == fSetTCmd)    { BBRConfigManager::SetThermalT_K(G4UIcmdWithADoubleAndUnit::GetNewDoubleValue(value) / CLHEP::kelvin); }
   else if (cmd == fEmitCenterCmd) { BBRConfigManager::SetEmitterCenter_mm(G4UIcmdWith3VectorAndUnit::GetNew3VectorValue(value) / mm); }
   else if (cmd == fEmitSizeCmd)   { BBRConfigManager::SetEmitterSize_mm(G4UIcmdWith3VectorAndUnit::GetNew3VectorValue(value) / mm); }
   else if (cmd == fGunModeCmd) { BBRConfigManager::SetGunMode(G4UIcmdWithABool::GetNewBoolValue(value)); }
@@ -138,7 +147,10 @@ void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
   else if (cmd == fGunDirZCmd) { BBRConfigManager::SetGunDirZ(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunECmd)    { BBRConfigManager::SetGunEnergy_eV(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunPolCmd)  { BBRConfigManager::SetGunPol(G4UIcmdWith3Vector::GetNew3VectorValue(value)); }
-  else if (cmd == fDataDirCmd) { BBRConfigManager::SetDataDir(value); }
+  else if (cmd == fDataDirCmd) {
+    // Strip one pair of surrounding double or single quotes.
+    G4String v = value; if (v.size() >= 2 && ((v.front()=='"' && v.back()=='"') || (v.front()=='\'' && v.back()=='\''))) v = v.substr(1, v.size()-2); BBRConfigManager::SetDataDir(v);
+  }
   else if (cmd == fCuMatCmd)   { BBRConfigManager::SetCuMaterial(value); }
   else if (cmd == fCuRRRCmd)   { BBRConfigManager::SetCuRRR(G4UIcmdWithAnInteger::GetNewIntValue(value)); }
   else if (cmd == fCuStageTCmd){ BBRConfigManager::SetCuStageT_K(G4UIcmdWithADoubleAndUnit::GetNewDoubleValue(value)); }
