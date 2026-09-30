@@ -1,4 +1,5 @@
 #include "GetBBSpecCDF.hh"
+#include "G4Exception.hh"
 #include <cmath>
 
 GetBBSpecCDF::GetBBSpecCDF()  {}
@@ -6,6 +7,8 @@ GetBBSpecCDF::~GetBBSpecCDF() {}
 
 void GetBBSpecCDF::initialize(G4double temp, G4double emin, G4double emax)
 {
+  // Negated comparisons, so that a NaN argument is rejected too.
+  if (!(temp > 0.) || !(emin > 0.) || !(emin < emax)) G4Exception("GetBBSpecCDF::initialize", "BBR017", FatalException, "needs T > 0 and 0 < emin < emax");
   // Clear existing data before re-initializing (supports runtime temperature changes).
   x.clear();
   pdf.clear();

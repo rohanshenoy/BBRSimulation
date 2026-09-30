@@ -37,8 +37,9 @@ temperature, or a perfect reflector.
 
 All `/bbr/lightpipe/*` commands are **PreInit only** and are not broadcast to
 worker threads: issue them before `/run/initialize`. Errors are fatal `LP001`
-(a non-positive dimension), `LP010` (`cad` mode without a path), `LP011` (STL
-not found) and `LP012` (STL not parsable).
+(a non-positive dimension), `LP010` (`cad` mode without a path) and `LP011`
+(STL not found). A file that is not ASCII STL stops in CADMesh's own fatal
+`LexerError`.
 
 ## Primary event
 
@@ -79,7 +80,10 @@ If you `cmake --install` the example into the library's prefix, a shell that has
 ## Testing
 
 The regression runner runs `lightpipe.mac` itself (case `lp`) and checks its
-output with `check_invariants.py`. It is therefore a regression input: the
+output with `check_invariants.py`; case `lp_cad` runs
+`validation/G4Macros/Validation_LightPipeCAD.mac`, the `cad` mode on the
+bundled `box_sample.stl`, under the same validator. `lightpipe.mac` is
+therefore a regression input: the
 drift guard `regression macros pinned` fails when one of its command lines
 changes (only full-line comment and blank-line edits pass), so change them only
 together with the validators and then update the pin in

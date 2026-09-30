@@ -5,7 +5,24 @@
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
 #include "Randomize.hh"
+#include <atomic>
 #include <cmath>
+
+namespace {
+// The Planck CDF band is fixed at 10 GHz-20 THz (4.14e-5 to 8.27e-2 eV).
+// Outside 2.2-117 K more than 1 % of the photon-number spectrum lies outside
+// it and is never emitted (13.8 % at 0.5 K, 3.9 % at 150 K). Once per process.
+void WarnIfOutOfBand(G4double T_K, const char* origin)
+{
+  static std::atomic<bool> warned{false};
+  if ((T_K < 2.2 || T_K > 117.) && !warned.exchange(true)) {
+    G4ExceptionDescription ed;
+    ed << "Emitter temperature " << T_K << " K is outside 2.2-117 K: more than 1 % of the "
+       << "Planck photon-number spectrum lies outside the 10 GHz-20 THz band and is not emitted.";
+    G4Exception(origin, "BBR021", JustWarning, ed);
+  }
+}
+}  // namespace
 
 LightPipePrimaryGeneratorAction::LightPipePrimaryGeneratorAction()
   : G4VUserPrimaryGeneratorAction()
@@ -59,9 +76,8 @@ void LightPipePrimaryGeneratorAction::GeneratePrimaries(G4Event* event)
       pol = polPerp.unit();
     } else {
       if (polReq.mag2() > 0.) {
-        static G4ThreadLocal G4bool warned = false;
-        if (!warned) {
-          warned = true;
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
           G4Exception("LightPipePrimaryGeneratorAction::GeneratePrimaries", "BBR010", JustWarning,
                       "/bbr/gun/pol is parallel to the gun direction; "
                       "using random polarization.");
@@ -85,6 +101,7 @@ void LightPipePrimaryGeneratorAction::GeneratePrimaries(G4Event* event)
     fSurface.temp = T;
     fSurface.BBSpecCDF.initialize(T, 4.14e-5, 8.27e-2);
   }
+  WarnIfOutOfBand(T, "LightPipePrimaryGeneratorAction::GeneratePrimaries");
   // Rebuild the emitter box if its geometry changed via messenger.
   if (BBRConfigManager::GetEmitterCenter_mm() != fEmitterCenter_mm ||
       BBRConfigManager::GetEmitterSize_mm()   != fEmitterSize_mm) {

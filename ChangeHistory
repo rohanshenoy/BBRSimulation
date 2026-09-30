@@ -1,3 +1,4 @@
+2026-09-30  tests : C++ tests under CTest, pytest, pass-through regression; coherent HFSS transmittance, normalized per incidence key where it exceeds 1; error codes BBR012-BBR021.
 2026-09-28  bbrsim-V00-01-00  First tagged release: installable library, standalone examples, validation/ and tools/.
 2026-09-27  reorg : Installable library; standalone examples; validation/ fixtures; tools/python package; executables BBRSim/BBRLightPipe renamed bbrsimTestWorld/bbrsimLightPipe.
 2026-09-24  notebook : Copper reflectance notebook (full Drude model vs Serov 2016).

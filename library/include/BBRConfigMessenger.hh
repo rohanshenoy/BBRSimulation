@@ -25,12 +25,11 @@ class BBRConfigMessenger : public G4UImessenger {
   void SetNewValue(G4UIcommand* cmd, G4String value) override;
 
  private:
-  BBRConfigManager* fManager;
 
   G4UIcmdWithoutParameter*   fPrintCmd   = nullptr;
 
   // thermal + gun (wired in Task 2)
-  G4UIcmdWithADouble*        fSetTCmd    = nullptr;
+  G4UIcmdWithADoubleAndUnit* fSetTCmd    = nullptr;
   G4UIcmdWith3VectorAndUnit* fEmitCenterCmd = nullptr;
   G4UIcmdWith3VectorAndUnit* fEmitSizeCmd   = nullptr;
   G4UIcmdWithABool*          fGunModeCmd = nullptr;

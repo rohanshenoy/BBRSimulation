@@ -20,6 +20,18 @@
 //
 // CDFs are built at runtime (not precomputed) so the E_theta×E_phi cross term
 // in |E_theta·F₀ + E_phi·F₁|² is handled exactly.
+//
+// Fatal G4Exception codes raised while loading:
+//   BBR000  no incidence key in either CSV
+//   BBR001  far_field.csv cannot be opened
+//   BBR002  waveguide.csv cannot be opened
+//   BBR007  far_field.csv and waveguide.csv have different incidence keys
+//   BBR009  a row's Freq disagrees with the directory frequency (every row)
+//   BBR012  an Ephi=1 row does not match the Ephi=0 row at the same index
+//           (X/Y/Z of an exit point, Phi/Theta of a far-field row), or the
+//           two files have different row counts for a key
+//   BBR013  a numeric field is not a number or not finite, or a non-empty
+//           row has the wrong number of fields
 class BBRHFSSData
 {
  public:
@@ -40,7 +52,15 @@ class BBRHFSSData
   // Shared with BBRCrackLibrary, which parses the same token from directory names.
   static G4double ParseFrequencyGHz(const std::string& token);
 
-  // Wang eq. 54: T = E_theta²·T₀ + E_phi²·T₁
+  // T = E_theta²·T₀ + E_phi²·T₁ + 2·E_theta·E_phi·√(T₀T₁)·Re ρ, clamped to [0, 1]
+  // (Wang eq. 58 substituted into eq. 53), with ρ the normalized overlap
+  // Σ E₀·E₁* / √(Σ|E₀|² Σ|E₁|²) of the two basis exit fields: the transmitted
+  // power is quadratic in the total exit field, so the two powers add without a
+  // cross term only when the basis fields are orthogonal over the exit face.
+  // T₀ and T₁ are OutgoingPower/IngoingPower of the key's first row; where the
+  // largest T over linear polarizations (the top eigenvalue of [[T₀, c], [c, T₁]],
+  // c = √(T₀T₁)·Re ρ) exceeds 1, an HFSS port-normalization artefact, the load
+  // divides both by it and logs "[BBR] HFSS … normalized to 1".
   G4double GetTransmittance(G4double E_theta, G4double E_phi,
                             G4double iwavePhi_deg, G4double iwaveTheta_deg) const;
 
@@ -80,6 +100,7 @@ class BBRHFSSData
     std::vector<FarFieldPoint> farField;
     G4double T_Ephi0 = 0.;   // transmittance, θ-polarised (Ephi=0) input
     G4double T_Ephi1 = 0.;   // transmittance, φ-polarised (Ephi=1) input
+    G4double rho_re = 0.;  // Re of the normalized exit-field overlap <E0,E1>, for the polarization cross term
     std::vector<ExitPoint> exitPoints;
   };
 

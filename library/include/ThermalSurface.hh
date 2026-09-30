@@ -15,7 +15,7 @@ class ThermalSurface {
 
   // Add a box-shaped emitting surface.
   // center: world position; Wx/Wy/Wz: full extents (not half); in_out: true=outward;
-  // rot1/rot2/rot3: Euler angles (rotZ, rotY', rotX''); emissivity: 0–1.
+  // rot1/rot2/rot3: rotations about the fixed world axes, applied in the order Z (rot1), then Y (rot2), then X (rot3); emissivity: 0–1.
   void AddBoxSurface(G4ThreeVector center,
                      G4double Wx, G4double Wy, G4double Wz,
                      G4bool in_out,

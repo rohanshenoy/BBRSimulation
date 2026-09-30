@@ -59,8 +59,10 @@ the copper face over both cracks, so 200 000 events are enough.
 ### 2. HFSS crack diffraction
 
 A photon entering a crack volume is handled by the HFSS lookup, which decides
-whether it transmits and samples its exit direction and position. At 500 GHz
-and normal incidence:
+whether it transmits and samples its exit direction and position.
+Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x faces
+(the crack axis). Entry through a side face is not detected and is treated as
+an axial entry. At 500 GHz and normal incidence:
 
 | Crack | Gap | Observed T (40 000 photons) |
 |---|---|---|
@@ -70,9 +72,11 @@ and normal incidence:
 The expected value is exactly 50 %. A parallel-plate gap narrower than λ/2 is
 a perfect polarization filter: only the TEM mode, which has no cutoff,
 transmits, so unpolarized light transmits half. The raw HFSS power ratios come
-out slightly above 1 (1.0545 for crack1, a port-normalization artefact), so
-they are capped at 1 when the tables load; a `[BBR] HFSS ... capped to 1` line
-reports it.
+out slightly above 1 (1.0545 for crack1, a port-normalization artefact). When
+the tables load, an incidence key whose largest transmittance over linear
+polarizations exceeds 1 has both polarizations' transmittances divided by it,
+so the maximum is 1 and their ratio is kept; a `[BBR] HFSS ... normalized to 1`
+line reports each such key.
 
 To aim the fixed gun at a crack:
 
@@ -193,7 +197,7 @@ compares it with Serov (2016).
 
 | Command | Argument | Default |
 |---|---|---|
-| `/bbr/thermal/setT` | temperature in K | 4.0 |
+| `/bbr/thermal/setT` | value + unit, default K; mK accepted | `4 K` |
 | `/bbr/thermal/emitterCenter` | x y z + unit | `-50 0 0 mm` |
 | `/bbr/thermal/emitterSize` | full extents Wx Wy Wz + unit | `1 20 20 mm` |
 
@@ -204,6 +208,9 @@ the test world; other geometries need their own. The light pipe uses
 Energies follow the Planck photon-number spectrum, ∝ ν²/(e^{hν/kT} − 1), the
 right weighting when each event is one photon. It peaks at hν ≈ 1.59 kT
 (133 GHz at 4 K), not at the energy-spectrum peak of 2.82 kT (235 GHz).
+The band is fixed at 10 GHz–20 THz. Between 2.2 K and 117 K it holds at least
+99 % of the spectrum; outside that range the run prints one `BBR021` warning
+(the band misses 13.8 % of the spectrum at 0.5 K and 3.9 % at 150 K).
 Directions are uniform in θ over the outward hemisphere, following Chang's
 convention; the approximation washes out after a few reflections.
 
@@ -242,11 +249,15 @@ from bbrsim import io
 crossings, abspoints = io.load("examples/testworld/build/output/bbr.root")
 ```
 
-**Selecting crack entries.** Every crossing is logged from the world side:
-`mat_pre` and `vol_pre` are always `G4_Galactic` and `World`, and the entered
+**Selecting crack entries.** Every crack entry is logged from the world side:
+`mat_pre` and `vol_pre` are `G4_Galactic` and `World`, and the entered
 material and volume are `mat_post` and `vol_post`. So a crack entry is
 `mat_post == "vacuum_wg"`, split by `vol_post`, and a first copper hit is a
-`mat_post` starting with `Cu_RRR`.
+`mat_post` starting with `Cu_RRR`. The rows with `mat_pre == "vacuum_wg"` are
+photons leaving a crack: into the world (after an HFSS transmission or, for a
+photon that starts inside the crack as in the crack-wall fixture, after
+bouncing between the walls), or into the copper when the photon starts inside
+the crack.
 
 ## Scripts
 
@@ -258,10 +269,9 @@ output (default `output/bbr.root` in the current directory) through the
 
 | Script | Checks |
 |---|---|
-| `check_physics.py` | the `bbrsim` formulas against reference values (no input) |
 | `check_reflectance.py` | absorbed count vs the Drude model (`--root`, `--RRR`, `--T_K`, `--freq`) |
 | `check_cu_serov.py` | Drude loss for `OF_Cu` / `HP_Cu` vs Serov (2016) within ±10 %; `HP_Cu` is the known expected failure |
-| `check_planck_spectrum.py` | the emitted spectrum's peak (`--temp`) |
+| `check_planck_spectrum.py` | the emitted spectrum at `--temp`: its peak, and a KS test against the Planck photon-number CDF truncated to the emitter band |
 | `check_nreflect.py` | the per-photon reflection-count distribution |
 | `check_angle_distribution.py` | incidence angles at the copper vs uniform-in-θ emission (KS test, sized for the 10 000-event Planck run) |
 | `check_crack_transmittance.py` | T = 0.50 at normal incidence, no exits along the crack face |
@@ -273,6 +283,12 @@ output (default `output/bbr.root` in the current directory) through the
 
 **Validator run by hand**, because it needs a large run:
 `check_cu_absorptance.py` (`planck_5M.mac`), shown above.
+
+**Python tests** (`tools/python/tests/`, pytest): the `bbrsim` formulas against
+analytic limits and reference values, the HFSS mirror, the ROOT loader, and the
+validators on synthetic bad outputs. Run
+`conda run -n bbrsim python -m pytest -q -p no:cacheprovider tools/python/tests`
+from the repository root (pytest comes with `pip install -e "tools/python[test]"`).
 
 **Plot scripts** (`tools/`): `plot_cu_reflectance.py` (writes to the current
 directory, or `--out`), `plot_crack_angular.py` (`--iwt`, `--iwp`; writes

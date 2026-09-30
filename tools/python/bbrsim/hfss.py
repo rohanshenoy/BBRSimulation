@@ -25,6 +25,7 @@ or library/src/BBRHFSSData.cc; keep them in lock-step.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -45,14 +46,15 @@ def default_base_dir():
 class AngleDataset:
     """One (IWavePhi, IWaveTheta) incidence key of one crack dataset."""
     key: tuple                # (IWavePhi_deg, IWaveTheta_deg)
-    T0: float                 # transmittance, Ephi=0 (theta-polarised) input, capped at 1
-    T1: float                 # transmittance, Ephi=1 (phi-polarised) input, capped at 1
+    T0: float                 # transmittance, Ephi=0 (theta-polarised) input (normalized at load)
+    T1: float                 # transmittance, Ephi=1 (phi-polarised) input (normalized at load)
     theta_deg: np.ndarray     # far-field grid: outgoing Theta
     phi_deg: np.ndarray       # far-field grid: outgoing Phi
     F0_theta: np.ndarray      # complex rEtheta for Ephi=0 input
     F0_phi: np.ndarray        # complex rEphi   for Ephi=0 input
     F1_theta: np.ndarray      # complex rEtheta for Ephi=1 input
     F1_phi: np.ndarray        # complex rEphi   for Ephi=1 input
+    rho: complex = 0j         # normalized exit-field overlap <E0,E1> (polarization cross term)
 
 
 def load_dataset(dir_stem, base_dir=None):
@@ -63,16 +65,50 @@ def load_dataset(dir_stem, base_dir=None):
     same string the C++ passes to the BBRHFSSData constructor.
 
     Returns {(IWavePhi, IWaveTheta): AngleDataset}. Mirrors BBRHFSSData's
-    constructor: the Ephi=1 far-field rows are matched to the Ephi=0 rows by
-    order within each incidence key, and raw power ratios above 1 are capped.
+    constructor: every row's Freq must agree with the stem's frequency to 0.1 %
+    (BBR009); every numeric field must be a finite number (BBR013); the Ephi=1
+    rows are matched to the Ephi=0 rows by order within each incidence key and
+    must sit at the same far-field (Phi, Theta) and exit-point (X, Y, Z), with the
+    same row count and no key of their own (BBR012); the two CSVs must have the
+    same incidence keys (BBR007; BBR000 when neither has one); a key whose largest
+    transmittance over linear polarizations exceeds 1 has T0 and T1 divided by it.
+    The C++ errors are raised here as ValueError naming the code.
     """
     dataset_id = dir_stem   # local alias: the error messages below name the stem
     base = base_dir or default_base_dir()
+    stem_token = dir_stem.rsplit("_", 1)[-1]
+    f_stem = _strtod_full(stem_token[:-3]) if stem_token.endswith("GHz") else None
+    if f_stem is None or not f_stem > 0.:
+        raise ValueError(f"{dir_stem}: the stem does not end in _<freq>GHz")
     ff, wg = {}, {}
     for e in (0, 1):
         d = os.path.join(base, f"{dir_stem}_Ephi={e}")
         ff[e] = pd.read_csv(os.path.join(d, "far_field.csv"))
         wg[e] = pd.read_csv(os.path.join(d, "waveguide.csv"))
+        for name, df in (("far_field.csv", ff[e]), ("waveguide.csv", wg[e])):
+            for tok in df["Freq"].astype(str).unique():   # every row (BBR009)
+                f = parse_frequency_GHz(tok)
+                if f is None or abs(f - f_stem) > 1e-3 * f_stem:
+                    raise ValueError(f"BBR009: Freq column {tok!r} in {d}/{name} does not match "
+                                     f"the directory frequency {f_stem:g} GHz (tolerance 0.1 %)")
+            # the fields the C++ parses with Num (all but Freq and Ephi) (BBR013)
+            vals = df.drop(columns=["Freq", "Ephi"]).apply(pd.to_numeric, errors="coerce").to_numpy(float)
+            if not np.isfinite(vals).all():
+                raise ValueError(f"BBR013: non-numeric or non-finite field in {d}/{name}")
+
+    # Incidence keys, in the order the C++ checks them: an Ephi=1 key without
+    # Ephi=0 rows (BBR012, in the loaders), no key at all (BBR000), a key in one
+    # CSV only (BBR007).
+    kf, kw = _keys(ff[0]), _keys(wg[0])
+    for name, df, k0 in (("far_field.csv", ff[1], kf), ("waveguide.csv", wg[1], kw)):
+        extra = _keys(df) - k0
+        if extra:
+            raise ValueError(f"BBR012: {dataset_id}: Ephi=1 {name} has keys without Ephi=0 rows {sorted(extra)}")
+    if not kf and not kw:
+        raise ValueError(f"BBR000: {dataset_id}: no incidence key in either CSV")
+    if kf != kw:
+        raise ValueError(f"BBR007: {dataset_id}: far_field.csv and waveguide.csv have different "
+                         f"incidence keys {sorted(kf ^ kw)}")
 
     out = {}
     keys = ff[0][["IWavePhi", "IWaveTheta"]].drop_duplicates()
@@ -80,13 +116,29 @@ def load_dataset(dir_stem, base_dir=None):
         key = (round(float(phi_i), KEY_ROUND), round(float(theta_i), KEY_ROUND))
         a = ff[0][(ff[0].IWavePhi == phi_i) & (ff[0].IWaveTheta == theta_i)].reset_index(drop=True)
         b = ff[1][(ff[1].IWavePhi == phi_i) & (ff[1].IWaveTheta == theta_i)].reset_index(drop=True)
-        if len(a) != len(b) or not (np.allclose(a.Phi, b.Phi) and np.allclose(a.Theta, b.Theta)):
-            raise ValueError(f"{dataset_id} key {key}: Ephi=0 and Ephi=1 far-field grids differ")
-        T = {}
+        if len(a) != len(b) or not _same(a, b, ("Phi", "Theta"), 1e-9):
+            raise ValueError(f"BBR012: {dataset_id} key {key}: Ephi=0 and Ephi=1 far-field grids differ")
+        w = {e: wg[e][(wg[e].IWavePhi == phi_i) & (wg[e].IWaveTheta == theta_i)].reset_index(drop=True)
+             for e in (0, 1)}
+        if len(w[0]) != len(w[1]) or not _same(w[0], w[1], ("X", "Y", "Z"), 1e-12):
+            raise ValueError(f"BBR012: {dataset_id} key {key}: Ephi=0 and Ephi=1 exit points differ")
+        T, E = {}, {}
         for e in (0, 1):
-            r = wg[e][(wg[e].IWavePhi == phi_i) & (wg[e].IWaveTheta == theta_i)].iloc[0]
-            t = float(r.OutgoingPower) / float(r.IngoingPower) if r.IngoingPower > 0 else 0.0
-            T[e] = min(1.0, t)   # load-time cap (BBRHFSSData::LoadWaveguide)
+            r = w[e].iloc[0]
+            T[e] = float(r.OutgoingPower) / float(r.IngoingPower) if r.IngoingPower > 0 else 0.0
+            E[e] = np.stack([w[e][f"E{c}_real"].to_numpy(float) + 1j * w[e][f"E{c}_imag"].to_numpy(float)
+                             for c in "xyz"], axis=1)
+        # Polarization cross term (BBRHFSSData constructor): the Ephi=1 exit points pair
+        # with the Ephi=0 ones by order; rho = sum E0.E1* / sqrt(sum|E0|^2 sum|E1|^2).
+        p0, p1 = float(np.sum(np.abs(E[0]) ** 2)), float(np.sum(np.abs(E[1]) ** 2))
+        rho = complex(np.sum(E[0] * np.conj(E[1])) / np.sqrt(p0 * p1)) if p0 > 0 and p1 > 0 else 0j
+        # Load-time normalization (BBRHFSSData constructor): the largest T over linear
+        # polarizations, the top eigenvalue of [[T0, c], [c, T1]] with c = sqrt(T0 T1) Re rho,
+        # above 1 (the HFSS port-normalization artefact) divides both T0 and T1.
+        c = np.sqrt(T[0] * T[1]) * rho.real
+        lam = float(0.5 * (T[0] + T[1]) + np.hypot(0.5 * (T[0] - T[1]), c))
+        if lam > 1.0:
+            T = {e: T[e] / lam for e in (0, 1)}
         out[key] = AngleDataset(
             key, T[0], T[1],
             a.Theta.to_numpy(float), a.Phi.to_numpy(float),
@@ -94,13 +146,30 @@ def load_dataset(dir_stem, base_dir=None):
             a.rEphi_real.to_numpy(float) + 1j * a.rEphi_imag.to_numpy(float),
             b.rEtheta_real.to_numpy(float) + 1j * b.rEtheta_imag.to_numpy(float),
             b.rEphi_real.to_numpy(float) + 1j * b.rEphi_imag.to_numpy(float),
+            rho,
         )
     return out
 
 
+def _keys(df):
+    """The incidence keys of one CSV, rounded as the C++ MakeKey rounds them."""
+    return {(round(float(p), KEY_ROUND), round(float(t), KEY_ROUND))
+            for p, t in df[["IWavePhi", "IWaveTheta"]].drop_duplicates().itertuples(index=False)}
+
+
+def _same(a, b, cols, tol):
+    """Row-by-row equality of two frames' columns to tol (the C++ BBR012 tolerances:
+    1e-9 deg for Phi/Theta, 1e-12 m for X/Y/Z)."""
+    return all(np.all(np.abs(a[c].to_numpy(float) - b[c].to_numpy(float)) <= tol) for c in cols)
+
+
 def nearest_key(datasets, phi_deg, theta_deg):
-    """Nearest incidence key by L2 distance in degrees (BBRHFSSData::FindDataset)."""
-    return min(datasets, key=lambda k: (k[0] - phi_deg) ** 2 + (k[1] - theta_deg) ** 2)
+    """Nearest incidence key by L2 distance in degrees (BBRHFSSData::FindDataset).
+
+    The keys are scanned in ascending (IWavePhi, IWaveTheta) order, the std::map
+    order of the C++, and the first minimum wins, so a tie resolves the same way.
+    """
+    return min(sorted(datasets), key=lambda k: (k[0] - phi_deg) ** 2 + (k[1] - theta_deg) ** 2)
 
 
 @dataclass
@@ -169,8 +238,11 @@ def polarization_components(pol, inc):
 
 
 def transmittance(ds, E_theta, E_phi):
-    """Wang eq. 54 with the [0, 1] clamp (BBRHFSSData::GetTransmittance)."""
-    return min(1., max(0., E_theta ** 2 * ds.T0 + E_phi ** 2 * ds.T1))
+    """Wang eq. 58 applied to eq. 53 (BBRHFSSData::GetTransmittance): the transmitted power
+    of a mixed polarization includes the cross term 2 Et Ep sqrt(T0 T1) Re rho."""
+    T = (E_theta ** 2 * ds.T0 + E_phi ** 2 * ds.T1
+         + 2. * E_theta * E_phi * np.sqrt(ds.T0 * ds.T1) * ds.rho.real)
+    return min(1., max(0., T))
 
 
 def direction_weights(ds, E_theta, E_phi):
@@ -258,18 +330,53 @@ def photon_frequency_GHz(energy_eV):
     return float(nu) if nu.ndim == 0 else nu
 
 
+# What C strtod parses in full (C locale), as the C++ full-parse checks accept it
+# (end == token end): optional leading whitespace, a sign, then a decimal number,
+# a hexadecimal one (0x, optionally with a binary exponent p), inf, infinity or nan
+# in any case, and nothing after it. Python's float() differs: it also takes
+# trailing whitespace and digit underscores, and no hex.
+_STRTOD_FULL = re.compile(
+    r"[ \t\n\v\f\r]*[+-]?(?:"
+    r"(?P<hex>0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?)"
+    r"|(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
+    r"|(?i:inf|infinity|nan))")
+
+
+def _strtod_full(token):
+    """float(token) when C strtod would parse all of it, else None."""
+    m = _STRTOD_FULL.fullmatch(token)
+    if m is None:
+        return None
+    t = token.lstrip(" \t\n\v\f\r")
+    return float.fromhex(t) if m.group("hex") else float(t)
+
+
+def parse_frequency_GHz(token):
+    """BBRHFSSData::ParseFrequencyGHz: '<number>MHz|GHz|THz' -> GHz, or None.
+
+    Whitespace anywhere is ignored and the unit is case-insensitive; the number
+    must parse in full and be > 0.
+    """
+    t = re.sub(r"[ \t\n\v\f\r]", "", str(token))
+    if len(t) < 4:
+        return None
+    mult = {"mhz": 1e-3, "ghz": 1., "thz": 1e3}.get(t[-3:].lower())
+    v = _strtod_full(t[:-3]) if mult is not None else None
+    return v * mult if v is not None and v > 0. else None
+
+
 def _parse_stem_token(name, prefix, suffix):
-    """(value, token) of '<prefix><token><suffix>', or None if it does not match."""
+    """(value, token) of '<prefix><token><suffix>', or None if it does not match.
+
+    The token must parse in full as C strtod does and be > 0, as in
+    BBRCrackLibrary::Discover (so ' 500', '0x1f4' and 'inf' count; '500 ',
+    '5_00', 'nan', '0' and '-5' do not).
+    """
     if not (name.startswith(prefix) and name.endswith(suffix)):
         return None
     token = name[len(prefix):len(name) - len(suffix)]
-    if not token:
-        return None
-    try:
-        value = float(token)
-    except ValueError:
-        return None
-    return (value, token) if value > 0. else None
+    value = _strtod_full(token)
+    return (value, token) if value is not None and value > 0. else None
 
 
 def discover_frequencies(dataset_id, base_dir=None):

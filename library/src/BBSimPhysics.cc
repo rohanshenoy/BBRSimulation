@@ -6,6 +6,8 @@
 #include "G4ProcessManager.hh"
 #include "G4ProcessVector.hh"
 
+#include <vector>
+
 BBSimPhysics::BBSimPhysics(G4int verbose)
   : G4VPhysicsConstructor("BBSimPhysics")
 {
@@ -26,37 +28,49 @@ void BBSimPhysics::ConstructProcess()
     G4OpticalPhoton::OpticalPhoton()->GetProcessManager());
 }
 
-// Find G4OpBoundaryProcess in the optical photon process manager, remove it,
-// wrap it with BBSimOpBoundaryProcess, and re-add the wrapper.
+// Find the G4OpBoundaryProcess in the optical photon process manager, remove
+// it, wrap it with BBSimOpBoundaryProcess and put the wrapper in its place.
 // Follows the pattern of CDMSRDecayPhysics::WrapRDMProcess() (SuperSim).
+// BBR014 (fatal): a wrapper is already registered (BBSimPhysics registered
+// twice) or there is no stock process to wrap (registered before
+// G4OpticalPhysics, which would then add a second, unwrapped boundary process).
 void BBSimPhysics::WrapOpBoundaryProcess(G4ProcessManager* procMan) const
 {
   if(!procMan) return;
-
-  G4VProcess* opBoundary = nullptr;
   G4ProcessVector* procs = procMan->GetProcessList();
-  if(procs)
-  {
-    for(size_t i = 0; i < procs->size() && !opBoundary; ++i)
-    {
-      if(dynamic_cast<G4OpBoundaryProcess*>((*procs)[i]))
-        opBoundary = (*procs)[i];
-    }
+  std::size_t iBoundary = procs->size();
+  for(std::size_t i = 0; i < procs->size(); ++i) {
+    if(dynamic_cast<BBSimOpBoundaryProcess*>((*procs)[i]))
+      G4Exception("BBSimPhysics::WrapOpBoundaryProcess", "BBR014", FatalException,
+                  "G4OpBoundaryProcess is already wrapped: BBSimPhysics was registered twice.");
+    if(iBoundary == procs->size() && dynamic_cast<G4OpBoundaryProcess*>((*procs)[i])) iBoundary = i;
   }
+  if(iBoundary == procs->size())
+    G4Exception("BBSimPhysics::WrapOpBoundaryProcess", "BBR014", FatalException,
+                "No G4OpBoundaryProcess to wrap: register BBSimPhysics after G4OpticalPhysics.");
 
-  if(opBoundary)
-  {
-    procMan->RemoveProcess(opBoundary);
-  }
-  else
-  {
-    if(verboseLevel > 0)
-      G4cerr << "BBSimPhysics WARNING: G4OpBoundaryProcess not registered; "
-             << "creating a new one." << G4endl;
-    opBoundary = new G4OpBoundaryProcess();
-  }
+  // Put the wrapper exactly where the stock process was. Every discrete process
+  // draws a random number when it resets its interaction length, so a wrapper
+  // appended after OpWLS/OpWLS2 would change which process gets which number, and
+  // a run with WLS active would no longer be bit-identical to stock. All optical
+  // processes share the default ordering parameter, so an ordering value cannot
+  // express the position (AddDiscreteProcess(p, ord) appends after equal
+  // orderings): take the processes that follow the stock one off the list, insert
+  // the wrapper, and put them back in their original order with their orderings.
+  struct Entry { G4VProcess* proc; G4int ordAtRest, ordAlong, ordPost; };
+  auto entryOf = [procMan](G4VProcess* p) {
+    return Entry{p, procMan->GetProcessOrdering(p, idxAtRest),
+                 procMan->GetProcessOrdering(p, idxAlongStep),
+                 procMan->GetProcessOrdering(p, idxPostStep)};
+  };
+  const Entry stock = entryOf((*procs)[iBoundary]);
+  std::vector<Entry> after;
+  for(std::size_t i = iBoundary + 1; i < procs->size(); ++i) after.push_back(entryOf((*procs)[i]));
+  for(const auto& e : after) procMan->RemoveProcess(e.proc);
+  procMan->RemoveProcess(stock.proc);
 
   auto* wrapper = new BBSimOpBoundaryProcess();
-  wrapper->RegisterProcess(opBoundary);
-  procMan->AddDiscreteProcess(wrapper);
+  wrapper->RegisterProcess(stock.proc);
+  procMan->AddProcess(wrapper, stock.ordAtRest, stock.ordAlong, stock.ordPost);
+  for(const auto& e : after) procMan->AddProcess(e.proc, e.ordAtRest, e.ordAlong, e.ordPost);
 }

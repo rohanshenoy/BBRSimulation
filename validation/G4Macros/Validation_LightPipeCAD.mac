@@ -1,0 +1,22 @@
+# Validation_LightPipeCAD.mac — the light pipe in cad mode: the bundled ASCII STL
+# box, 2000 Planck photons. Checks that CADMesh import runs clean under the
+# invariants (no photon inside the wall, every termination labelled).
+# The STL path comes from BBRSIMDATA (either env script sets it; the runner
+# sources the installed one): /control/getEnv copies it into the alias
+# {BBRSIMDATA}. Without it the macro stops at UIMAN0123 and writes no output.
+# data/cad/box_sample.stl is a solid 40 x 40.7 x 10 mm box with a corner at the
+# origin; the 1 x 7 x 7 mm emitter at x = -51 mm sits 50.5 mm upstream of its
+# -x face, so no photon starts inside it (LP002 is checked in parametric mode
+# only).
+#
+# Validate:
+#   conda run -n bbrsim python <repo>/validation/check_invariants.py output/bbr.root
+/run/verbose 0
+/control/getEnv BBRSIMDATA
+/bbr/lightpipe/mode cad
+/bbr/lightpipe/stlPath {BBRSIMDATA}/cad/box_sample.stl
+/bbr/thermal/emitterCenter -51 0 0 mm
+/bbr/thermal/emitterSize 1 7 7 mm
+/run/initialize
+/random/setSeeds 11 13
+/run/beamOn 2000

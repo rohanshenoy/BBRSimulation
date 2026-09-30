@@ -25,15 +25,17 @@ report "library names no example" "$(grep -lE '(TestWorld|LightPipe)(DetectorCon
     "$REPO"/library/include/* "$REPO"/library/src/* 2>/dev/null | sed "s#^$REPO/##")"
 report "every fixture is run" "$(for f in "$REPO"/validation/G4Macros/Validation_*.mac; do
     grep -qF "$(basename "$f")" "$REPO/validation/Scripts/run_regression.sh" || basename "$f"; done)"
-# The runner runs these three example macros directly (cases refl, planck, lp),
-# and their validators rely on the seeds, event counts and settings. Each pin is
-# the sha256 of the macro's lines with full-line comments and blank lines
-# stripped, so only edits to those lines pass; any other change fails, including
-# an inline comment or trailing whitespace on a command line. The guard also
-# fails if the runner no longer runs the macro. An installed copy of validation/
-# has no examples/ unless INSTALL_EXAMPLES was on, so there it is skipped.
+# The runner runs these four example macros directly (cases refl, planck,
+# config_mt, lp), and their validators rely on the seeds, event counts and
+# settings. Each pin is the sha256 of the macro's lines with full-line comments
+# and blank lines stripped, so only edits to those lines pass; any other change
+# fails, including an inline comment or trailing whitespace on a command line.
+# The guard also fails if the runner no longer runs the macro. An installed copy
+# of validation/ has no examples/ unless INSTALL_EXAMPLES was on, so there it is
+# skipped.
 PINS="examples/testworld/G4Macros/reflectance.mac cf4e27f513d8eccd9dbf28f0834f88c1d83b06f497de0a35169915bb2d736317
 examples/testworld/G4Macros/planck.mac      ba261b402f09768d9fbdc464b177ec285354e2f9d733e64da91fecad5623b6d5
+examples/testworld/G4Macros/config_mt.mac   36dda6c6b9699527adc6e84e9880ad01fb662e4f20492a254ef5636876baf57c
 examples/lightpipe/G4Macros/lightpipe.mac   e2fbb3c3df2ba03a604c96356e2a69e9f675327dc0b664c1c8120c1d570b3b68"
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
 if [ -d "$REPO/examples" ]; then
@@ -51,4 +53,34 @@ NB_PY='import json, sys; nb = json.load(open(sys.argv[1])); sys.exit(1 if any(c.
 report "notebooks without outputs" "$(git -C "$REPO" ls-files '*.ipynb' | while read -r nb; do
     $PY -c "$NB_PY" "$REPO/$nb" >/dev/null 2>&1 || echo "$nb"; done)"
 report "tools file lists" "$(unlisted "$REPO/tools/CMakeLists.txt" "$REPO"/tools/python/bbrsim/*.py "$REPO"/tools/plot_*.py)"
+# The next three need a git checkout with examples/; an installed copy of
+# validation/ has neither, so there they are skipped like the pin guard. The
+# links and banned-names guards need REPO to be the top of the checkout: the
+# default prefix install/ lies inside it, where git works but tracks nothing.
+if [ "$(git -C "$REPO" rev-parse --show-toplevel 2>/dev/null)" = "$REPO" ]; then
+  # Every relative link and in-page anchor in the tracked *.md resolves. The
+  # guard needs the script's closing LINKS OK line, so a check that cannot run
+  # fails instead of passing with no BAD lines.
+  report "markdown links" "$(out=$(bash "$REPO/validation/Scripts/tests/check_links.sh" "$REPO" 2>&1)
+    printf '%s\n' "$out" | grep -qx 'LINKS OK' ||
+      { printf '%s\n' "$out" | grep '^BAD' | sed 's/^BAD  *//'; echo "(check_links.sh: $(printf '%s\n' "$out" | tail -1))"; })"
+  # Names the reorg retired, and module-path hacks. ChangeHistory records them
+  # and this file lists them, so both are excluded.
+  report "banned names" "$(cd "$REPO" && git grep -nIE 'sys\.path\.(insert|append)|\.\./data/waveguides|\./OpNovice2|scripts/(check_|plot_)|analysis/bbrsim|BBR_REFLECTIVITY|test_output\.csv' -- . ':!ChangeHistory' ':!data' ':!validation/Scripts/drift_guards.sh' | head -5
+    git grep -nIwE 'BBRSim|BBRLightPipe' -- . ':!ChangeHistory' ':!data' ':!validation/Scripts/drift_guards.sh' | head -5)"
+else
+  printf '%-6s %-30s %s\n' PASS "markdown links" "skipped: not the top of a git checkout (installed copy)"
+  printf '%-6s %-30s %s\n' PASS "banned names" "skipped: not the top of a git checkout (installed copy)"
+fi
+if [ -d "$REPO/examples" ]; then
+  # The four example action classes are copies (TestWorld*, LightPipe*): a fix
+  # to one belongs in the other, so they must match once the prefix is normalised.
+  report "action copies identical" "$(for f in ActionInitialization PrimaryGeneratorAction SteppingAction RunAction; do for e in hh cc; do
+      d=$([ $e = hh ] && echo include || echo src)
+      a="$REPO/examples/testworld/$d/TestWorld$f.$e"; b="$REPO/examples/lightpipe/$d/LightPipe$f.$e"
+      { [ -f "$a" ] && [ -f "$b" ] && diff -q <(sed 's/TestWorld/X/g; s/LightPipe/X/g' "$a") <(sed 's/TestWorld/X/g; s/LightPipe/X/g' "$b") >/dev/null; } || echo "$f.$e"
+    done; done)"
+else
+  printf '%-6s %-30s %s\n' PASS "action copies identical" "skipped: no examples/ here (installed copy)"
+fi
 exit $nfail

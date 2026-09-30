@@ -43,6 +43,10 @@ inline G4Material* BuildDrudeMaterial(const G4String& name,
                                        G4int    RRR,
                                        G4double T_K)
 {
+  if (RRR < 1 || !(T_K > 0.)) {   // !(T_K > 0.) also rejects NaN
+    G4ExceptionDescription ed; ed << "GetCopper needs RRR >= 1 and T > 0 K, got RRR=" << RRR << " T=" << T_K << " K";
+    G4Exception("BBRMaterials::BuildDrudeMaterial", "BBR015", FatalException, ed);
+  }
   G4Material* mat = G4Material::GetMaterial(name, false);
   if (mat) return mat;
   mat = new G4Material(name, Z, A_g_mol*g/mole, density_g_cm3*g/cm3);
@@ -53,7 +57,6 @@ inline G4Material* BuildDrudeMaterial(const G4String& name,
   const G4double m_e_kg   = 9.109e-31;         // kg
   const G4double e_C      = 1.602e-19;         // C
   const G4double eps0_SI  = 8.8541878128e-12;  // F/m
-  const G4double c_SI     = 2.998e8;           // m/s
   const G4double h_eVs    = 4.13566769692e-15; // eV·s (Planck constant)
 
   // DC conductivity via Matthiessen's rule.
@@ -134,7 +137,13 @@ inline G4Material* BuildDielectricMaterial(const G4String& name,
                                             G4double tan_delta)
 {
   G4Material* mat = G4Material::GetMaterial(name, false);
-  if (mat) return mat;
+  if (mat) {
+    auto* mpt = mat->GetMaterialPropertiesTable();
+    if (!mpt || !mpt->GetProperty("RINDEX") || !mpt->GetProperty("ABSLENGTH"))
+      G4Exception("BBRMaterials::BuildDielectricMaterial", "BBR016", FatalException,
+                  ("A material named '" + name + "' exists without RINDEX/ABSLENGTH; rename one of them").c_str());
+    return mat;
+  }
 
   // Clone the NIST base under our own name so distinct (n, tanδ) tables never
   // collide on the shared NIST instance, and the ROOT legend records a

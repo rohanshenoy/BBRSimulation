@@ -33,7 +33,7 @@ event-by-event footing.
 - Planck thermal emitter.
 - ROOT output and a Python analysis package.
 
-**Implemented, not yet exercised:** loss-tangent dielectrics (Cirlex, Si, Ge).
+**Implemented, unit-tested, not yet placed in a geometry:** loss-tangent dielectrics (Cirlex, Si, Ge).
 
 **Not yet implemented:** PCB material; leakage-current analysis; calibration
 geometry (BB source, mesh-TES detector); anomalous-skin-effect correction; the
@@ -52,6 +52,7 @@ are indicative, not quantitative. Oblique incidence is validated only on the
 | `examples/lightpipe/` | `bbrsimLightPipe`: 4 K → mixing-chamber light pipe, parametric or imported from `.STL` |
 | `validation/` | regression fixtures, PASS/FAIL validators and the regression runner |
 | `tools/` | the `bbrsim` Python package and plot scripts |
+| `tests/` | C++ unit, component and regression tests (CTest) |
 | `notebooks/` | physics notebooks, stored without outputs |
 | `data/` | runtime data: HFSS tables, copper reference data, a sample STL |
 
@@ -78,6 +79,7 @@ the output format and the analysis scripts.
 - Geant4 11.x built with optical physics (developed against 11.4.0). UI and
   visualization drivers are optional.
 - CMake ≥ 3.21 for the presets (3.16 for a manual configure).
+- CMake ≥ 3.22 to build the tests (`BUILD_BBRSIM_TESTS`; the regression runner turns it on).
 - A C++17 compiler: the same one Geant4 was built with. On macOS that is Apple
   Clang (see [Building](#building)).
 - For the Python tools, a conda environment named `bbrsim`
@@ -127,6 +129,7 @@ check `CMAKE_CXX_COMPILER` in `build/CMakeCache.txt`.
 |---|---|---|
 | `WITH_GEANT4_UIVIS` | `ON` | UI and visualization; `OFF` gives a batch-only build |
 | `BUILD_BBRSIM_TOOLS` | `ON` | Install the `bbrsim` Python package and the plot scripts |
+| `BUILD_BBRSIM_TESTS` | `OFF` | Build the C++ tests in `tests/` and register them with CTest (`ctest --test-dir build`); the regression runner turns it on |
 | `INSTALL_VALIDATION` | `ON` | Copy `validation/` into the prefix |
 | `INSTALL_EXAMPLES` | `OFF` | Copy `examples/` into the prefix |
 
@@ -199,21 +202,26 @@ simulation, copy an example directory and adapt it.
 validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 ```
 
-The runner builds and installs the library, builds both examples against it,
-runs eight fixed-seed cases in parallel (five validation fixtures and three
-example macros), scans their logs for warnings, and runs the PASS/FAIL
-validators on their output. Compiler warnings count as failures. The exit code
-is the number of unexpected failures; a green run ends with
-`pass=38  fail=0  xfail=1  xpass=0`.
+The runner builds and installs the library with its C++ tests
+(`BUILD_BBRSIM_TESTS=ON`), runs them (CTest), the Python tests (pytest) and
+the env-script test, builds both examples against the install, runs ten
+fixed-seed cases in parallel (six validation fixtures and four example macros)
+with the Geant4 thread count pinned to 8 (`BBR_THREADS` overrides), scans their
+logs for warnings, and runs the PASS/FAIL validators on their output. Last, it
+runs the examples installed into a separate prefix without the env script, and
+the plot scripts and the notebook's code on the fixture output. Compiler
+warnings count as failures. The exit code is the number of unexpected
+failures; a green run ends with `pass=54  fail=0  xfail=1  xpass=0`.
 
 The one expected failure (`check_cu_serov.py`) is an open decision: the `HP_Cu`
 alias (RRR 6) gives a loss 13 % below Serov's measurement. The fixtures, what
 each validator checks and how to run one by hand are in
 [validation/README.md](validation/README.md).
 
-There is no automated regression of the wrapper's pass-through path to stock
-`G4OpBoundaryProcess` yet; run the runner before merging any change to the
-wrapper.
+The wrapper's pass-through path is pinned by the CTest program
+`testPassthrough`: stock boundary optics with and without the wrapper, fixed
+seed, byte for byte, also with WLS active. Run the runner before merging any
+change to the wrapper.
 
 ## Analysis (Python)
 
@@ -221,12 +229,15 @@ One-time setup, from the repository root:
 
 ```bash
 conda create -n bbrsim python=3.11 numpy scipy matplotlib pandas
-conda run -n bbrsim pip install -e tools/python     # the bbrsim package and uproot
+conda run -n bbrsim pip install -e "tools/python[test]"     # the bbrsim package, uproot and pytest
 ```
 
 Run every script as `conda run -n bbrsim python <script>`, not `python3`. The
 editable install ties the `bbrsim` environment to this checkout; for another
-checkout, source its env script or rerun `pip install -e` there.
+checkout, source its env script or rerun `pip install -e` there. The package's
+tests are `conda run -n bbrsim python -m pytest -q -p no:cacheprovider tools/python/tests`,
+run from the repository root (not from `tools/python`, where the source package
+would shadow the one on `PYTHONPATH`).
 
 ```python
 from bbrsim.io import load
@@ -286,7 +297,7 @@ version is used instead. Releases are annotated tags of the form
 
 ## Upgrading an older checkout
 
-Checkouts from before `bbrsim-V00-01-00` used a different layout: delete the old `build/`, rebuild and install as above, and run `./bbrsimTestWorld` from `examples/testworld/build/` where you used to run `./BBRSim` from `build/`.
+Checkouts from before `bbrsim-V00-01-00` used a different layout: delete the old `build/`, rebuild and install as above, and run `./bbrsimTestWorld` from `examples/testworld/build/`; it replaces the executable the old layout built in `build/`.
 
 ## Software license
 

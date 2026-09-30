@@ -36,10 +36,9 @@ def first_hit_cu(df):
 def crack_crossings(df):
     """Rows where a photon ENTERS a crack (post-step material 'vacuum_wg').
 
-    Boundary crossings are logged World-side (mat_pre is always the World
-    material), so a crack entry appears as mat_post == 'vacuum_wg' with the
-    crack volume in vol_post. (The old CSV scripts keyed on mat_pre, which
-    matches nothing in the ROOT output.)
+    Crack entries are logged World-side (mat_pre is the World material), so a
+    crack entry appears as mat_post == 'vacuum_wg' with the crack volume in
+    vol_post. Rows with mat_pre == 'vacuum_wg' are photons leaving a crack.
     """
     return df[df["mat_post"] == "vacuum_wg"]
 

@@ -6,7 +6,7 @@
 #
 # Expected output:
 #   output/bbr.root — `crossings` ntuple (one row per boundary crossing)
-# Validate spectrum peak:
+# Validate the spectrum (peak and KS rows):
 #   conda run -n bbrsim python <repo>/validation/check_planck_spectrum.py output/bbr.root --temp 4
 #
 # Note: /bbr/thermal/setT is registered by BBRConfigManager at startup, so it

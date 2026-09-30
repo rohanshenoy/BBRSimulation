@@ -11,6 +11,10 @@
 // frequency): the volume name is the HFSS dataset ID and BBRCrackLibrary picks
 // the grid frequency nearest in log space. Everything else is a pure
 // pass-through.
+//
+// Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x
+// faces (the crack axis). Entry through a side face is not detected and is
+// treated as an axial entry.
 class BBSimOpBoundaryProcess : public G4WrapperProcess
 {
  public:

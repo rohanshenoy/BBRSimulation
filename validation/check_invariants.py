@@ -24,6 +24,11 @@ Termination labels. The file must hold at least one abspoints row, and
   4. the number of BBRAbsorb termination rows equals the number of BBRAbsorb
      crossings rows (one boundary absorption kills exactly one photon).
 
+Legend gaps. A code with no entry in bbr_legend.json decodes to NaN, which the
+string tests above would read as "not a metal" or "not unknown". Any NaN in a
+decoded column fails the section that reads it: mat_pre, mat_post, vol_pre and
+vol_post the metal check, status, term_status and term_vol the label check.
+
 Breaks this catches:
   - a wrong reflection normal on a daughter->mother crossing (photon reflected
     INTO the copper instead of back into the vacuum);
@@ -31,7 +36,8 @@ Breaks this catches:
   - reading the boundary process's per-thread status on a world-exit step,
     where Geant4 never invoked it, so the label is stale from an earlier step
     or track (StepTooSmall, or even BBRAbsorb for a photon that was never
-    absorbed), plus "unknown" before the first boundary crossing per thread.
+    absorbed), plus "unknown" before the first boundary crossing per thread;
+  - a legend that lacks a code the data use (the check fails closed).
 
 Usage:
     conda run -n bbrsim python validation/check_invariants.py [path/to/bbr.root] [--allow-no-crossings]
@@ -54,6 +60,26 @@ PATH = args.path
 cr, ab = load(PATH)
 
 
+def nan_codes(df, col):
+    """Codes of `col` that the legend could not decode (NaN after mapping)."""
+    m = df[col].isna()
+    return sorted(set(df.loc[m, col + "_code"].tolist())) if m.any() else []
+
+
+legend_gaps = {c: nan_codes(cr, c) for c in ("mat_pre", "mat_post", "vol_pre", "vol_post", "status")}
+if len(ab):
+    legend_gaps.update({c: nan_codes(ab, c) for c in ("term_status", "term_vol")})
+bad_legend = {c: v for c, v in legend_gaps.items() if v}
+
+
+def legend_ok(cols):
+    """Print the legend gaps among the columns a section reads; True if there are none."""
+    gaps = {c: bad_legend[c] for c in cols if c in bad_legend}
+    for c, v in gaps.items():
+        print(f"legend lacks code(s) {v} for {c}")
+    return not gaps
+
+
 def is_metal(series):
     m = series.str.startswith(METAL_PREFIXES[0], na=False)
     for p in METAL_PREFIXES[1:]:
@@ -74,7 +100,8 @@ if len(in_metal):
     for _, r in in_metal.head(5).iterrows():
         print(f"    {r['event_id']:>7}  {r['vol_pre']} -> {r['vol_post']}  {r['status']}")
 
-passed_metal = len(in_metal) == 0 and (len(cr) > 0 or args.allow_no_crossings)
+legend_metal = legend_ok(("mat_pre", "mat_post", "vol_pre", "vol_post"))
+passed_metal = legend_metal and len(in_metal) == 0 and (len(cr) > 0 or args.allow_no_crossings)
 if len(cr) == 0:
     print("no crossings at all — allowed by --allow-no-crossings" if args.allow_no_crossings
           else "no crossings at all — empty output cannot pass")
@@ -103,7 +130,9 @@ print(f"2. world exits not labelled WorldExit   : {n_left_bad} of {len(left_worl
 print(f"3. absorption labels with term_vol none : {n_abs_none}   (must be 0)")
 print(f"4. BBRAbsorb terminations / crossings   : {n_abs_term} / {n_abs_cross}   (must match)")
 
-passed = n_unknown == 0 and n_left_bad == 0 and n_abs_none == 0 and n_abs_term == n_abs_cross
+legend_labels = legend_ok(("status", "term_status", "term_vol"))
+passed = (legend_labels and n_unknown == 0 and n_left_bad == 0 and n_abs_none == 0
+          and n_abs_term == n_abs_cross)
 print(f"termination labels  : {'PASS' if passed else 'FAIL'}")
 
 failed = [s for s, ok in (("no photons in metal", passed_metal), ("termination labels", passed)) if not ok]

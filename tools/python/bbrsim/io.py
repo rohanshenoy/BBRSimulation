@@ -34,9 +34,9 @@ def load(path):
     cr["vol_post"] = cr["vol_post_code"].map(maps["volume"])
     cr["mat_post"] = cr["mat_post_code"].map(maps["material"])
 
-    if len(ab):
-        ab["term_vol"] = ab["term_vol_code"].map(maps["volume"])
-        ab["term_status"] = ab["term_status_code"].map(maps["status"])
+    # Always present, empty when there are no rows (an empty tree keeps its columns).
+    ab["term_vol"] = ab["term_vol_code"].map(maps["volume"])
+    ab["term_status"] = ab["term_status_code"].map(maps["status"])
     return cr, ab
 
 

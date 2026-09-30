@@ -53,7 +53,7 @@ class BBRConfigManager {
   static void SetGunDirX(G4double v)    { Instance()->fGunDirX = v; }
   static void SetGunDirY(G4double v)    { Instance()->fGunDirY = v; }
   static void SetGunDirZ(G4double v)    { Instance()->fGunDirZ = v; }
-  static void SetGunEnergy_eV(G4double v){ Instance()->fGunEnergy_eV = v; }
+  static void SetGunEnergy_eV(G4double v);   // finite and > 0
 
   // Fixed gun polarization (dimensionless). The zero vector (default) means
   // random polarization in the plane perpendicular to the direction; any other
