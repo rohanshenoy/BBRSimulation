@@ -9,6 +9,7 @@ Scripts/run_regression.sh   build + fixtures + validators, one command
 Scripts/drift_guards.sh     source-tree consistency checks (run by the runner, or alone)
 Scripts/make_mock_hfss_frequencies.py   the mock HFSS tree for Validation_CrackFrequency
 Scripts/consumer_smoke/     external find_package(BBRsim) + link smoke test
+Scripts/numbers.baseline    the three fixed-seed numbers that BBR_PIN=1 compares
 Scripts/tests/              make_bad_output.py (synthetic outputs for the validator negative tests),
                             test_env.sh (the env scripts in bash, zsh, tcsh, dash), check_links.sh
 ```
@@ -19,15 +20,31 @@ Scripts/tests/              make_bad_output.py (synthetic outputs for the valida
 validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 ```
 
-The runner builds and installs the library (prefix `BBR_PREFIX`, default
-`install/`), sources the installed env script, builds both examples, runs the
-drift guards and the consumer smoke test, runs the ten cases in parallel, each
-in `BUILD_DIR/regression/<case>/`, and runs the validators on their output.
-Six cases run the fixtures here; four run example macros directly (see
-[Regression inputs](#regression-inputs)). The exit code is the number of
-unexpected failures; a green run ends with the line
-`pass=47  fail=0  xfail=1  xpass=0` (two spaces between fields, then the output
-directory).
+The runner builds and installs the library with the C++ tests
+(`BUILD_BBRSIM_TESTS=ON`; prefix `BBR_PREFIX`, default `install/`), sources
+the installed env script, builds both examples, runs the drift guards, the
+consumer smoke test and the `bbrsim data default` and `version stamp` checks,
+then step 1c: the C++
+tests (`ctest`), the Python tests (`pytest`, from `/` on the installed
+`bbrsim`; pytest must be installed, `pip install -e "tools/python[test]"`) and
+`Scripts/tests/test_env.sh` (`env scripts`). It runs the ten cases in parallel,
+each in `BUILD_DIR/regression/<case>/`, with `G4FORCENUMBEROFTHREADS` pinned to
+8 (`BBR_THREADS` overrides; Geant4 warns when a run has more threads than the
+square root of its events, and the log scan would fail on a many-core machine),
+and runs the validators on their output. Six cases run the fixtures here; four
+run example macros directly (see [Regression inputs](#regression-inputs)).
+Last come two rows: `installed examples` (both examples installed into
+`BUILD_DIR/expfx`, never the prefix, run without `BBRSIMDATA` or
+`DYLD_LIBRARY_PATH`: `Validation_CrackTransmit.mac` must pass
+`check_crack_transmittance.py`, `lightpipe.mac` must write its output) and
+`tools smoke` (the four `tools/plot_*.py` and the notebook's code cells on the
+fixture output, in `BUILD_DIR/tools_smoke`). With `BBR_PIN=1` the runner also
+compares the three fixed-seed numbers (reflectance pull, crack T_obs, Planck
+peak ratio) exactly with `Scripts/numbers.baseline` (row `fixed-seed
+numbers`), for refactors that must not change behaviour. The exit code is the
+number of unexpected failures; a green run ends with the line
+`pass=54  fail=0  xfail=1  xpass=0` (two spaces between fields, then the output
+directory; `pass=55` with `BBR_PIN=1`).
 
 | Case | Macro | Executable | Validators |
 |---|---|---|---|

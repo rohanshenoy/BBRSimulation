@@ -202,21 +202,26 @@ simulation, copy an example directory and adapt it.
 validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 ```
 
-The runner builds and installs the library, builds both examples against it,
-runs ten fixed-seed cases in parallel (six validation fixtures and four
-example macros), scans their logs for warnings, and runs the PASS/FAIL
-validators on their output. Compiler warnings count as failures. The exit code
-is the number of unexpected failures; a green run ends with
-`pass=47  fail=0  xfail=1  xpass=0`.
+The runner builds and installs the library with its C++ tests
+(`BUILD_BBRSIM_TESTS=ON`), runs them (CTest), the Python tests (pytest) and
+the env-script test, builds both examples against the install, runs ten
+fixed-seed cases in parallel (six validation fixtures and four example macros)
+with the Geant4 thread count pinned to 8 (`BBR_THREADS` overrides), scans their
+logs for warnings, and runs the PASS/FAIL validators on their output. Last, it
+runs the examples installed into a separate prefix without the env script, and
+the plot scripts and the notebook's code on the fixture output. Compiler
+warnings count as failures. The exit code is the number of unexpected
+failures; a green run ends with `pass=54  fail=0  xfail=1  xpass=0`.
 
 The one expected failure (`check_cu_serov.py`) is an open decision: the `HP_Cu`
 alias (RRR 6) gives a loss 13 % below Serov's measurement. The fixtures, what
 each validator checks and how to run one by hand are in
 [validation/README.md](validation/README.md).
 
-There is no automated regression of the wrapper's pass-through path to stock
-`G4OpBoundaryProcess` yet; run the runner before merging any change to the
-wrapper.
+The wrapper's pass-through path is pinned by the CTest program
+`testPassthrough`: stock boundary optics with and without the wrapper, fixed
+seed, byte for byte, also with WLS active. Run the runner before merging any
+change to the wrapper.
 
 ## Analysis (Python)
 

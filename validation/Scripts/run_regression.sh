@@ -3,9 +3,11 @@
 #
 #   validation/Scripts/run_regression.sh [BUILD_DIR]        (default: build)
 #
-# 1. Configures, builds and installs the library (BUILD_DIR, prefix BBR_PREFIX,
-#    default <repo>/install), stops if the installed data or headers differ
-#    from data/ or library/include (cmake --install never deletes), sources the
+# 1. Configures, builds and installs the library with the C++ tests
+#    (BUILD_BBRSIM_TESTS=ON; BUILD_DIR, prefix BBR_PREFIX,
+#    default <repo>/install), stops if the installed data, headers or env
+#    scripts differ from data/, library/include or bbrsim_env.{sh,csh} (cmake
+#    --install never deletes), sources the
 #    installed bbrsim_env.sh, then builds examples/testworld and
 #    examples/lightpipe against it (BUILD_DIR/examples/<name>). Fails on build
 #    errors; compiler warnings are a FAIL. The builds are incremental, so only
@@ -13,18 +15,29 @@
 #    warnings audit. Release only: a BUILD_DIR already configured with another
 #    build type (e.g. build-debug) is refused.
 # 1b. Runs validation/Scripts/drift_guards.sh, checks that bbrsim imports from
-#    the installed copy and that it matches tools/python/bbrsim, then builds
-#    and runs validation/Scripts/consumer_smoke against the installed library.
+#    the installed copy and that it matches tools/python/bbrsim, that its
+#    data default is the installed data and that the installed version stamp
+#    matches git describe, then builds and runs
+#    validation/Scripts/consumer_smoke against the installed library.
+# 1c. Runs the C++ tests (ctest), the Python tests (pytest, on the installed
+#    bbrsim) and validation/Scripts/tests/test_env.sh (the env scripts).
 # 2. Builds the mock HFSS tree when needed, checks that the real
 #    data/waveguides holds only 500 GHz (leak guard), runs the ten cases in
-#    parallel, each in BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the
+#    parallel with a pinned Geant4 thread count (BBR_THREADS, default 8), each
+#    in BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the
 #    installed env script): the six validation/G4Macros fixtures and four
 #    example macros (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
 #    their command lines are pinned by drift_guards.sh). Scans every log for
 #    GeomNav / G4Exception / BBR0xx / LP002 messages, and checks that the
 #    frequency case's BBR008 clamp warning fires once per side.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
-#    one PASS/FAIL line per check.
+#    one PASS/FAIL line per check (with BBR_PIN=1 also the row fixed-seed
+#    numbers: the three fixed-seed numbers against Scripts/numbers.baseline).
+#    Then installs both examples into
+#    BUILD_DIR/expfx (never the prefix) and runs the installed binaries from a
+#    foreign directory without BBRSIMDATA or DYLD_*/LD_LIBRARY_PATH (row
+#    installed examples), and runs the plot scripts and the notebook's code
+#    cells on the fixture output (row tools smoke).
 #
 # Exit code is the number of unexpected failures. A check listed in XFAIL is a
 # known, documented red (see validation/README.md, PASS criteria). It is
@@ -33,6 +46,10 @@
 # is a FAIL, and an unexpected pass is flagged XPASS.
 #
 # Python is run as `conda run -n bbrsim python` (override with BBR_PYTHON).
+# Other overrides: BBR_PREFIX (install prefix), BBR_JOBS (build and ctest
+# parallelism, default 8), BBR_THREADS (Geant4 worker threads per fixture,
+# default 8), BBR_XFAIL (the known-red list below), BBR_PIN=1 (compare the
+# three fixed-seed numbers with Scripts/numbers.baseline).
 set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd -P)"
 VAL="$REPO/validation"; VM="$VAL/G4Macros"
@@ -74,9 +91,11 @@ step() {  # log label command... ; aborts the whole run on failure
   fi
 }
 # BUILD_BBRSIM_TOOLS=ON: the validators import the installed bbrsim package, so a
-# BUILD_DIR cached with it OFF must not skip reinstalling it.
+# BUILD_DIR cached with it OFF must not skip reinstalling it. BUILD_BBRSIM_TESTS=ON:
+# step 1c runs the C++ tests, and building them here puts their warnings in the
+# build log below; a BUILD_DIR cached with it OFF is switched on.
 step "$clog" "configure library" cmake -S "$REPO" -B "$BUILD" "${CLANG[@]}" -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-     -DBUILD_BBRSIM_TOOLS=ON
+     -DBUILD_BBRSIM_TOOLS=ON -DBUILD_BBRSIM_TESTS=ON
 step "$blog" "build library"     cmake --build "$BUILD" -j"$JOBS"
 step "$clog" "install library"   cmake --install "$BUILD"
 # cmake --install never deletes, so a file once installed and since removed from
@@ -85,8 +104,10 @@ step "$clog" "install library"   cmake --install "$BUILD"
 # into data/ by mistake) would go unseen by the real-data leak guard below, which
 # checks data/. The examples compile against the installed headers: one still
 # including a removed or renamed header would build here and fail on a fresh
-# install.
-for pair in "data:share/BBRsim/data" "library/include:include/BBRsim"; do
+# install. The env scripts are compared too: every example and fixture sources
+# the installed copy.
+for pair in "data:share/BBRsim/data" "library/include:include/BBRsim" \
+            "bbrsim_env.sh:share/BBRsim/bbrsim_env.sh" "bbrsim_env.csh:share/BBRsim/bbrsim_env.csh"; do
   if ! diff -rq -x .DS_Store "$REPO/${pair%%:*}" "$PREFIX/${pair#*:}" >/dev/null 2>&1; then
     echo "ERROR: $PREFIX/${pair#*:} differs from $REPO/${pair%%:*} (cmake --install never deletes stale files); remove it and rerun."
     rm -f "$clog" "$blog"; exit 2
@@ -145,12 +166,55 @@ elif ! diff -rq -x __pycache__ -x .DS_Store "$REPO/tools/python/bbrsim" "$pyinst
   line FAIL "bbrsim importable" "$pyinst differs from tools/python/bbrsim (cmake --install never deletes stale files); remove it and rerun"
   fail=$((fail+1))
 else line PASS "bbrsim importable" "installed copy"; pass=$((pass+1)); fi
+# Without BBRSIMDATA the installed package must find the installed data beside it
+# (bbrsim.paths.data_dir, the Python twin of the compiled-in C++ default).
+if bd=$(cd / && env -u BBRSIMDATA $PY -c 'import bbrsim.paths; print(bbrsim.paths.data_dir())' 2>&1) && [ "$bd" = "$PREFIX/share/BBRsim/data" ]; then
+  line PASS "bbrsim data default" "$bd"; pass=$((pass+1))
+else line FAIL "bbrsim data default" "got: $bd"; fail=$((fail+1)); fi
+# The installed version stamp names this checkout: the build rewrites .bbrsim-version
+# on every build (target version, ALL) and the install above copies it.
+vs=$(cat "$PREFIX/share/BBRsim/.bbrsim-version" 2>/dev/null); gd=$(git -C "$REPO" describe --always --dirty 2>/dev/null)
+if [ -n "$vs" ] && [ "$vs" = "$gd" ]; then line PASS "version stamp" "$vs"; pass=$((pass+1))
+else line FAIL "version stamp" "installed '$vs', git describe '$gd'"; fail=$((fail+1)); fi
 CS="$BUILD/consumer_smoke"; cslog="$BUILD/consumer_smoke.log"
 if cmake -S "$VAL/Scripts/consumer_smoke" -B "$CS" "${CLANG[@]}" -DCMAKE_PREFIX_PATH="$PREFIX" >"$cslog" 2>&1 \
    && cmake --build "$CS" >>"$cslog" 2>&1 \
    && ( cd / && env -u BBRSIMDATA "$CS/consumer_smoke" ) 2>&1 | grep -qx "BBRsim data dir: $PREFIX/share/BBRsim/data"
 then line PASS consumer_smoke "find_package(BBRsim) + link + compiled data default"; pass=$((pass+1))
 else line FAIL consumer_smoke "see $cslog"; fail=$((fail+1)); fi
+
+echo "=== 1c. tests ==="
+# The library configure forces BUILD_BBRSIM_TESTS=ON (step 1), so the test programs are
+# already built and their warnings counted. --no-tests=error: a configure that lost the
+# option would otherwise report success with zero tests.
+if env -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH ctest --test-dir "$BUILD" --no-tests=error --output-on-failure -j"$JOBS" >"$BUILD/ctest.log" 2>&1; then
+  line PASS ctest "$(grep -E '^[0-9]+% tests passed' "$BUILD/ctest.log" | tail -1)"; pass=$((pass+1))
+else
+  line FAIL ctest "see $BUILD/ctest.log"; fail=$((fail+1)); sed -n '/The following tests FAILED/,$p' "$BUILD/ctest.log" | head -20 | sed 's/^/       /'
+fi
+# pytest runs from /, never from tools/python (where the source package would shadow
+# the installed bbrsim on PYTHONPATH, which is what this row tests). Not from $REG
+# either: step 2 creates it, so it does not exist yet in a fresh BUILD_DIR. Its
+# temporary directories go outside the source tree: the test of bbrsim.paths' "no
+# data found" branch walks up from its tmp_path and would find this checkout's data/
+# if they were under $BUILD.
+pt_tmp=$(mktemp -d "${TMPDIR:-/tmp}/bbrsim-pytest.XXXXXX")
+if ! (cd / && $PY -c 'import pytest' >/dev/null 2>&1); then
+  line FAIL pytest "pytest is not installed in the bbrsim env: conda run -n bbrsim pip install -e 'tools/python[test]'"; fail=$((fail+1))
+elif (cd / && $PY -B -m pytest -q -p no:cacheprovider --basetemp="$pt_tmp/basetemp" "$REPO/tools/python/tests" >"$BUILD/pytest.log" 2>&1); then
+  line PASS pytest "$(tail -1 "$BUILD/pytest.log")"; pass=$((pass+1))
+else
+  line FAIL pytest "$(tail -1 "$BUILD/pytest.log")"; fail=$((fail+1)); grep -E '^(FAILED|ERROR)' "$BUILD/pytest.log" | head -10 | sed 's/^/       /'
+fi
+rm -rf "$pt_tmp"
+if eout=$(bash "$VAL/Scripts/tests/test_env.sh" "$REPO" "$PREFIX" 2>&1) && echo "$eout" | grep -q '^ENV OK'; then
+  line PASS "env scripts" "$(echo "$eout" | grep -c '^ok') cases, $(echo "$eout" | grep -c '^SKIP') skipped"; pass=$((pass+1))
+else line FAIL "env scripts" "$(echo "$eout" | grep '^FAIL' | head -3 | tr '\n' ' ')"; fail=$((fail+1)); fi
+
+# Geant4 warns (Run10035) when threads > sqrt(events): small fixtures fail the log scan
+# on machines with 33+ cores. Pin the count so runs and log scans are the same
+# everywhere; BBR_THREADS overrides.
+export G4FORCENUMBEROFTHREADS="${BBR_THREADS:-8}"
 
 echo "=== 2. macros ==="
 rm -rf "$REG"; mkdir -p "$REG"
@@ -335,6 +399,69 @@ done
 if [ "$frq_n" -gt 0 ] && [ "$frq_bad" -eq 0 ]; then line PASS "frequency invariants" "[frequency] check_invariants on $frq_n per-run files"; pass=$((pass+1))
 else fail=$((fail+frq_bad)); [ "$frq_n" -eq 0 ] && { line FAIL "frequency invariants" "[frequency] no per-run files found"; fail=$((fail+1)); }; fi
 check -        check_cu_serov.py
+
+# BBR_PIN=1 (for refactors that must not change behaviour): the three fixed-seed
+# numbers must equal the committed Scripts/numbers.baseline exactly.
+if [ "${BBR_PIN:-0}" = 1 ]; then
+  pin=$(
+    echo "reflectance: $($PY "$VAL/check_reflectance.py" --root "$REG/refl/output/bbr.root" 2>&1 | grep -E 'Poisson pull' | sed 's/^ *//')"
+    echo "transmit:    $($PY "$VAL/check_crack_transmittance.py" "$REG/transmit/output/bbr.root" 2>&1 | grep -E '^T_obs')"
+    echo "planck:      $($PY "$VAL/check_planck_spectrum.py" "$REG/planck/output/bbr.root" --temp 4 2>&1 | grep -E '^ratio obs/theory')")
+  if [ "$pin" = "$(cat "$VAL/Scripts/numbers.baseline")" ]; then
+    line PASS "fixed-seed numbers" "BBR_PIN: equal to Scripts/numbers.baseline"; pass=$((pass+1))
+  else
+    line FAIL "fixed-seed numbers" "BBR_PIN: differ from Scripts/numbers.baseline"; fail=$((fail+1))
+    diff <(printf '%s\n' "$pin") "$VAL/Scripts/numbers.baseline" | sed 's/^/       /'
+  fi
+fi
+
+# Installed examples: both examples configured for, built and installed into
+# $BUILD/expfx, never $PREFIX. Their RPATH comes from the install prefix at configure
+# time, so the builds in $EXB (configured for $PREFIX) cannot be installed elsewhere.
+# The installed binaries run from their own directories under $BUILD/expfx_run with
+# no BBRSIMDATA and no DYLD_LIBRARY_PATH/LD_LIBRARY_PATH: RPATH and the compiled-in
+# data default must be enough.
+EXPFX="$BUILD/expfx"; EXRUN="$BUILD/expfx_run"; exlog="$BUILD/expfx.log"; ex_bad=""
+rm -rf "$EXPFX" "$EXRUN"; : >"$exlog"
+for ex in testworld lightpipe; do
+  { cmake -S "$REPO/examples/$ex" -B "$BUILD/expfx_build/$ex" "${CLANG[@]}" -DCMAKE_PREFIX_PATH="$PREFIX" \
+          -DCMAKE_INSTALL_PREFIX="$EXPFX" && cmake --build "$BUILD/expfx_build/$ex" -j"$JOBS" \
+      && cmake --install "$BUILD/expfx_build/$ex"; } >>"$exlog" 2>&1 || ex_bad="$ex_bad build:$ex"
+done
+mkdir -p "$EXRUN/testworld" "$EXRUN/lightpipe"
+if ! (cd "$EXRUN/testworld" && env -u BBRSIMDATA -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+        "$EXPFX/bin/bbrsimTestWorld" "$VM/Validation_CrackTransmit.mac" >run.log 2>&1); then
+  ex_bad="$ex_bad run:testworld"
+elif ! (cd "$EXRUN/testworld" && $PY "$VAL/check_crack_transmittance.py" output/bbr.root 2>&1) | grep -q 'RESULT: PASS'; then
+  ex_bad="$ex_bad check_crack_transmittance"
+fi
+if ! (cd "$EXRUN/lightpipe" && env -u BBRSIMDATA -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+        "$EXPFX/bin/bbrsimLightPipe" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac" >run.log 2>&1) \
+   || [ ! -f "$EXRUN/lightpipe/output/bbr.root" ]; then
+  ex_bad="$ex_bad run:lightpipe"
+fi
+if [ -z "$ex_bad" ]; then
+  line PASS "installed examples" "expfx binaries, no BBRSIMDATA/DYLD_*: transmittance PASS, light pipe output"; pass=$((pass+1))
+else line FAIL "installed examples" "failed:$ex_bad (see $exlog, $EXRUN/*/run.log)"; fail=$((fail+1)); fi
+
+# Tools smoke: every plot script and the notebook's code cells (IPython magics
+# dropped, non-GUI backend) run on this run's fixture output, from $BUILD/tools_smoke;
+# each must exit 0. plot_crack_frequency's --out is a file name.
+TS="$BUILD/tools_smoke"; rm -rf "$TS"; mkdir -p "$TS"; ts_bad=""
+tool() {  # name command...  (run in $TS, log in $TS/<name>.log)
+  local name="$1"; shift
+  (cd "$TS" && "$@") >"$TS/$name.log" 2>&1 || ts_bad="$ts_bad $name"
+}
+tool plot_cu_reflectance  $PY "$REPO/tools/plot_cu_reflectance.py" --out "$TS/cu.png"
+tool plot_crack_angular   $PY "$REPO/tools/plot_crack_angular.py" "$REG/transmit/output/bbr.root"
+tool plot_test_output     $PY "$REPO/tools/plot_test_output.py" "$REG/planck/output/bbr.root"
+tool plot_crack_frequency $PY "$REPO/tools/plot_crack_frequency.py" "$REG/frequency/output" \
+                              --data-dir "$REG/mock_hfss" --out "$TS/crack_frequency.png"
+NB_PY='import json, sys; nb = json.load(open(sys.argv[1])); open(sys.argv[2], "w").write("\n\n".join("".join(l for l in c["source"] if not l.lstrip().startswith("%")) for c in nb["cells"] if c["cell_type"] == "code"))'
+tool notebook_extract     $PY -c "$NB_PY" "$REPO/notebooks/copper_reflectance.ipynb" "$TS/notebook.py"
+tool notebook             env MPLBACKEND=Agg $PY "$TS/notebook.py"
+if [ -z "$ts_bad" ]; then line PASS "tools smoke" "4 plot scripts and the notebook's code cells exit 0"; pass=$((pass+1))
+else line FAIL "tools smoke" "failed:$ts_bad (logs in $TS)"; fail=$((fail+1)); fi
 
 echo "=== summary ==="
 echo "pass=$pass  fail=$fail  xfail=$xfail  xpass=$xpass   (outputs under $REG)"
