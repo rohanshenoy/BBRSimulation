@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
     {"discovery_errors", [] {
       TempDir d;
       hfssfix::WriteDataset(d.path(), "legacy", hfssfix::Mini500());                 // legacy <id>_Ephi=0 (no frequency)
+      Grid(d.path(), "legacy", {"500"});             // + a valid dir beside it: only the legacy-specific BBR011 trigger explains a fatal here
       Grid(d.path(), "dup", {"500", "5e2"});
       std::filesystem::create_directories(d.path() / "waveguides" / "junk_abcGHz_Ephi=0");
       Grid(d.path(), "half", {"500"});
