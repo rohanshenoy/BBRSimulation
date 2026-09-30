@@ -73,3 +73,6 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         err_missing_files err_no_keys err_key_mismatch err_freq_column err_ephi1_row_mismatch
         err_bad_number real_data_smoke
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
+
+bbrsim_add_test_program(testCrackLibrary LABEL unit
+  CASES selection_grid5 token_verbatim discovery_errors unreadable_root concurrent_first_load)
