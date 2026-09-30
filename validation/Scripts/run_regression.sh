@@ -16,13 +16,13 @@
 #    the installed copy and that it matches tools/python/bbrsim, then builds
 #    and runs validation/Scripts/consumer_smoke against the installed library.
 # 2. Builds the mock HFSS tree when needed, checks that the real
-#    data/waveguides holds only 500 GHz (leak guard), runs the eight cases in
+#    data/waveguides holds only 500 GHz (leak guard), runs the ten cases in
 #    parallel, each in BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the
-#    installed env script): the five validation/G4Macros fixtures and three
-#    example macros (reflectance.mac, planck.mac, lightpipe.mac; their command
-#    lines are pinned by drift_guards.sh). Scans every log for GeomNav /
-#    G4Exception / BBR0xx / LP002 messages, and checks that the frequency
-#    case's BBR008 clamp warning fires once per side.
+#    installed env script): the six validation/G4Macros fixtures and four
+#    example macros (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
+#    their command lines are pinned by drift_guards.sh). Scans every log for
+#    GeomNav / G4Exception / BBR0xx / LP002 messages, and checks that the
+#    frequency case's BBR008 clamp warning fires once per side.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
 #    one PASS/FAIL line per check.
 #
@@ -208,18 +208,20 @@ scan_log() {  # case-dir [tolerated-code]
   fi
   echo $(( n_geom + n_lp + (n_start - n_tol) + n_bbr ))
 }
-# refl, planck and lp run the example macros themselves, pinned by the drift
-# guard "regression macros pinned"; the other five are validation-only fixtures.
+# refl, planck, config_mt and lp run the example macros themselves, pinned by the
+# drift guard "regression macros pinned"; the other six are validation-only fixtures.
 run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
 run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
+run_macro config_mt "$TESTWORLD" "$REPO/examples/testworld/G4Macros/config_mt.mac"   &
 run_macro wall      "$TESTWORLD" "$VM/Validation_CrackWall.mac"       &
 run_macro exit      "$TESTWORLD" "$VM/Validation_WorldExit.mac"       &
 run_macro transmit  "$TESTWORLD" "$VM/Validation_CrackTransmit.mac"   &
 run_macro oblique   "$TESTWORLD" "$VM/Validation_CrackOblique.mac"    &
 run_macro frequency "$TESTWORLD" "$VM/Validation_CrackFrequency.mac"  &
 run_macro lp        "$LIGHTPIPE" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac"   &
+run_macro lp_cad    "$LIGHTPIPE" "$VM/Validation_LightPipeCAD.mac"    &
 wait
-for d in refl planck wall exit transmit oblique frequency lp; do
+for d in refl planck config_mt wall exit transmit oblique frequency lp lp_cad; do
   code=$(cat "$REG/$d/exit.code")
   tol=""; [ "$d" = "frequency" ] && tol="BBR008"   # expected clamp warnings
   nbad=$(scan_log "$d" "$tol")
@@ -283,16 +285,28 @@ check planck   check_planck_spectrum.py --temp 4
 check planck   check_nreflect.py
 check planck   check_angle_distribution.py
 check planck   check_invariants.py
+# config_mt writes one file per run: run 0 at 4 K, run 1 at 10 K.
+check config_mt/bbr_mt_r0.root check_planck_spectrum.py --temp 4
+check config_mt/bbr_mt_r1.root check_planck_spectrum.py --temp 10
+check config_mt/bbr_mt_r0.root check_invariants.py
+check config_mt/bbr_mt_r1.root check_invariants.py
 check wall     check_crack_wall_reflection.py
 check wall     check_invariants.py
 # the world-exit fixture crosses no boundary by design, so its file holds no
 # crossings; the flag waives only that requirement of the metal invariant.
 check exit     check_invariants.py --allow-no-crossings
 check transmit check_crack_transmittance.py
-check transmit check_invariants.py
 # the transmit fixture's second run (Planck, both cracks) has its own file.
 check transmit/bbr_ratio.root check_crack_ratio.py
+# the invariants must hold in both of its files; one row covers the two.
+trn_bad=""
+for f in bbr.root bbr_ratio.root; do
+  $PY "$VAL/check_invariants.py" "$REG/transmit/output/$f" >/dev/null 2>&1 || trn_bad="$trn_bad $f"
+done
+if [ -z "$trn_bad" ]; then line PASS "transmit invariants" "[transmit] check_invariants on bbr.root and bbr_ratio.root"; pass=$((pass+1))
+else line FAIL "transmit invariants" "[transmit] check_invariants failed on:$trn_bad"; fail=$((fail+1)); fi
 check lp       check_invariants.py
+check lp_cad   check_invariants.py
 # the oblique fixture writes one file per run (output/bbr_oblique_rNN.root);
 # check_crack_oblique reads the whole directory, check_invariants runs on every
 # per-run file.

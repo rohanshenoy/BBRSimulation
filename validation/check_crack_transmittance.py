@@ -1,7 +1,10 @@
 """
 check_crack_transmittance.py
-Validate the HFSS crack transmittance at normal incidence on the output of
-Validation_CrackTransmit.mac (40 000 photons, 500 GHz, into crack1, seeds 2024 7).
+Validate the HFSS crack transmittance at normal incidence on run 1 of
+Validation_CrackTransmit.mac: 40 000 gun photons, 500 GHz, into crack1 (seeds
+2024 7), written to output/bbr.root and checked here. The fixture's run 2
+(200 000 Planck photons at 4 K over both cracks) writes output/bbr_ratio.root,
+which check_crack_ratio.py checks.
 
 Expected physics (hand-derived): a sub-cutoff parallel-plate gap is a perfect
 polarization filter — the TEM component transmits (T=1), the orthogonal

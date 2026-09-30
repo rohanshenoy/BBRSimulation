@@ -3,6 +3,12 @@ Validate that the BBRsim ROOT output (output/bbr.root) contains energies drawn f
 the Planck photon-number spectrum at the given temperature.  The number spectrum
 B ∝ ν²/(e^{hν/kT}−1) peaks at u = E/kT ≈ 1.5936.
 
+Two rows, both required for PASS: the histogram peak (30 bins in u) within
+[0.65, 1.35] of theory, and a Kolmogorov-Smirnov test of the first-crossing
+energies against the photon-number CDF truncated to the emitter's fixed band
+(4.14e-5 to 8.27e-2 eV), p > 0.01. The peak bin alone passes 10 K data analysed
+at 9-12 K; the KS row rejects a 10 % temperature error.
+
 Usage:
     conda run -n bbrsim python validation/check_planck_spectrum.py [path/to/bbr.root] [--temp T]
 """
@@ -10,6 +16,7 @@ Usage:
 import argparse
 import sys
 import numpy as np
+from scipy import stats
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -43,13 +50,26 @@ u_peak_theory = physics.PLANCK_PEAK_U
 
 ratio = u_peak_obs / u_peak_theory
 lo, hi = 0.65, 1.35
-passed = lo <= ratio <= hi
+peak_ok = lo <= ratio <= hi
+
+# KS against the photon-number CDF truncated to the emitter's band, built by a
+# cumulative trapezoid on a fine log grid (the same p-values as a quad per sample).
+E_MIN, E_MAX = 4.14e-5, 8.27e-2      # the emitter's fixed band [eV] (TestWorldPrimaryGeneratorAction)
+grid = np.geomspace(E_MIN, E_MAX, 20001)
+pdf = physics.planck_photon_number_pdf(grid, T)
+cdf = np.concatenate([[0.], np.cumsum(0.5 * (pdf[1:] + pdf[:-1]) * np.diff(grid))])
+cdf /= cdf[-1]
+ks_p = stats.kstest(data, lambda e: np.interp(e, grid, cdf)).pvalue if len(data) else 0.
+ks_ok = ks_p > 0.01
+passed = peak_ok and ks_ok
 
 print(f"Events           : {len(data)}")
 print(f"u_peak observed  : {u_peak_obs:.4f}")
 print(f"u_peak theory    : {u_peak_theory:.4f}  (photon-number spectrum)")
 print(f"ratio obs/theory : {ratio:.3f}  (expected [{lo}, {hi}])")
-print(f"RESULT           : {'PASS' if passed else 'FAIL'}")
+print(f"KS p vs Planck   : {ks_p:.3g}  (expected > 0.01; CDF truncated to [{E_MIN}, {E_MAX}] eV)")
+failed = [n for n, ok in (("peak", peak_ok), ("KS", ks_ok)) if not ok]
+print(f"RESULT           : {'FAIL (' + ', '.join(failed) + ')' if failed else 'PASS'}")
 
 # Plot
 fig, ax = plt.subplots(figsize=(7, 4))

@@ -266,7 +266,7 @@ output (default `output/bbr.root` in the current directory) through the
 | `check_physics.py` | the `bbrsim` formulas against reference values (no input) |
 | `check_reflectance.py` | absorbed count vs the Drude model (`--root`, `--RRR`, `--T_K`, `--freq`) |
 | `check_cu_serov.py` | Drude loss for `OF_Cu` / `HP_Cu` vs Serov (2016) within ±10 %; `HP_Cu` is the known expected failure |
-| `check_planck_spectrum.py` | the emitted spectrum's peak (`--temp`) |
+| `check_planck_spectrum.py` | the emitted spectrum at `--temp`: its peak, and a KS test against the Planck photon-number CDF truncated to the emitter band |
 | `check_nreflect.py` | the per-photon reflection-count distribution |
 | `check_angle_distribution.py` | incidence angles at the copper vs uniform-in-θ emission (KS test, sized for the 10 000-event Planck run) |
 | `check_crack_transmittance.py` | T = 0.50 at normal incidence, no exits along the crack face |

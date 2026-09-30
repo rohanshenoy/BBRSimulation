@@ -1,8 +1,13 @@
 # config_mt.mac
 # MT verification: two runs in one session at different emitter temperatures.
 # Proves each worker's BBRConfigManager clone updates between runs (broadcast).
-# Run 0: 4 K.  Run 1: 10 K (overwrites output/bbr.root).
-# Gate: check_planck_spectrum on the final file must PASS at --temp 10.
+# Run 0: 4 K, written to output/bbr_mt_r0.root.  Run 1: 10 K, written to
+# output/bbr_mt_r1.root: every /run/beamOn reopens the analysis file, so each
+# run names its own with /analysis/setFileName and keeps it.
+# Gate (the runner's config_mt case): check_planck_spectrum.py --temp 4 on r0 and
+# --temp 10 on r1 (peak and KS rows; a worker that missed the broadcast fails the
+# KS row), check_invariants.py on both. A regression input: its command lines
+# are pinned in validation/Scripts/drift_guards.sh.
 
 /run/verbose 0
 /event/verbose 0
@@ -12,9 +17,11 @@
 # Run 0 at 4 K
 /random/setSeeds 42 1337
 /bbr/thermal/setT 4.0
+/analysis/setFileName output/bbr_mt_r0
 /run/beamOn 20000
 
 # Run 1 at 10 K (the worker clones must pick up this broadcast)
 /random/setSeeds 7 99
 /bbr/thermal/setT 10.0
+/analysis/setFileName output/bbr_mt_r1
 /run/beamOn 20000

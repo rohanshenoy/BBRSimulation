@@ -79,7 +79,10 @@ If you `cmake --install` the example into the library's prefix, a shell that has
 ## Testing
 
 The regression runner runs `lightpipe.mac` itself (case `lp`) and checks its
-output with `check_invariants.py`. It is therefore a regression input: the
+output with `check_invariants.py`; case `lp_cad` runs
+`validation/G4Macros/Validation_LightPipeCAD.mac`, the `cad` mode on the
+bundled `box_sample.stl`, under the same validator. `lightpipe.mac` is
+therefore a regression input: the
 drift guard `regression macros pinned` fails when one of its command lines
 changes (only full-line comment and blank-line edits pass), so change them only
 together with the validators and then update the pin in
