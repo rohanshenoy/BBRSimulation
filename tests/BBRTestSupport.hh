@@ -33,6 +33,19 @@
 
 #include <unistd.h>  // mkdtemp
 
+// G4iosSetDestination arrived in Geant4 11.2. Before it the cout and cerr
+// buffers took the destination directly, as G4UImanager::SetCoutDestination does.
+#include "G4Version.hh"
+#if G4VERSION_NUMBER < 1120
+#  include "G4coutDestination.hh"
+#  include "G4strstreambuf.hh"
+inline void G4iosSetDestination(G4coutDestination* sink)
+{
+  G4coutbuf.SetDestination(sink);
+  G4cerrbuf.SetDestination(sink);
+}
+#endif
+
 namespace bbrtest {
 
 // A G4Exception turned into a C++ exception by ThrowingExceptionHandler.
