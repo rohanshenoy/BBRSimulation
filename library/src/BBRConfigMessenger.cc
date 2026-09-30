@@ -12,8 +12,8 @@
 #include "G4UIcmdWithoutParameter.hh"
 #include "G4ios.hh"
 
-BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager* mgr)
-  : G4UImessenger(), fManager(mgr) {
+BBRConfigMessenger::BBRConfigMessenger(BBRConfigManager*)
+  : G4UImessenger() {
   fPrintCmd = new G4UIcmdWithoutParameter("/bbr/config/print", this);
   fPrintCmd->SetGuidance("Print all BBRConfigManager settings.");
   fPrintCmd->SetToBeBroadcasted(false);

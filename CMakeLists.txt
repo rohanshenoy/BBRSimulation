@@ -11,6 +11,7 @@ option(WITH_GEANT4_UIVIS "Build with Geant4 UI and Vis drivers" ON)
 option(INSTALL_EXAMPLES "Copy examples/ to the installation area" OFF)
 option(INSTALL_VALIDATION "Copy validation/ to the installation area" ON)
 option(BUILD_BBRSIM_TOOLS "Install the bbrsim Python package and the plot scripts" ON)
+option(BUILD_BBRSIM_TESTS "Build the C++ tests under tests/ and register them with CTest" OFF)
 set(BBRSIM_VERSION "${PROJECT_VERSION}" CACHE STRING
     "Version string used when the source is not a git checkout")
 
@@ -29,6 +30,10 @@ endif()
 add_subdirectory(library)
 if(BUILD_BBRSIM_TOOLS)
   add_subdirectory(tools)
+endif()
+if(BUILD_BBRSIM_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
 endif()
 
 # Version stamp written to .bbrsim-version. git describe runs only when the

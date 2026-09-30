@@ -52,6 +52,7 @@ are indicative, not quantitative. Oblique incidence is validated only on the
 | `examples/lightpipe/` | `bbrsimLightPipe`: 4 K → mixing-chamber light pipe, parametric or imported from `.STL` |
 | `validation/` | regression fixtures, PASS/FAIL validators and the regression runner |
 | `tools/` | the `bbrsim` Python package and plot scripts |
+| `tests/` | C++ unit, component and regression tests (CTest) |
 | `notebooks/` | physics notebooks, stored without outputs |
 | `data/` | runtime data: HFSS tables, copper reference data, a sample STL |
 
@@ -78,6 +79,7 @@ the output format and the analysis scripts.
 - Geant4 11.x built with optical physics (developed against 11.4.0). UI and
   visualization drivers are optional.
 - CMake ≥ 3.21 for the presets (3.16 for a manual configure).
+- CMake ≥ 3.22 to build the tests (`BUILD_BBRSIM_TESTS`; the regression runner turns it on).
 - A C++17 compiler: the same one Geant4 was built with. On macOS that is Apple
   Clang (see [Building](#building)).
 - For the Python tools, a conda environment named `bbrsim`
@@ -127,6 +129,7 @@ check `CMAKE_CXX_COMPILER` in `build/CMakeCache.txt`.
 |---|---|---|
 | `WITH_GEANT4_UIVIS` | `ON` | UI and visualization; `OFF` gives a batch-only build |
 | `BUILD_BBRSIM_TOOLS` | `ON` | Install the `bbrsim` Python package and the plot scripts |
+| `BUILD_BBRSIM_TESTS` | `OFF` | Build the C++ tests in `tests/` and register them with CTest (`ctest --test-dir build`); the regression runner turns it on |
 | `INSTALL_VALIDATION` | `ON` | Copy `validation/` into the prefix |
 | `INSTALL_EXAMPLES` | `OFF` | Copy `examples/` into the prefix |
 

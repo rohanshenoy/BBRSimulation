@@ -53,7 +53,6 @@ inline G4Material* BuildDrudeMaterial(const G4String& name,
   const G4double m_e_kg   = 9.109e-31;         // kg
   const G4double e_C      = 1.602e-19;         // C
   const G4double eps0_SI  = 8.8541878128e-12;  // F/m
-  const G4double c_SI     = 2.998e8;           // m/s
   const G4double h_eVs    = 4.13566769692e-15; // eV·s (Planck constant)
 
   // DC conductivity via Matthiessen's rule.

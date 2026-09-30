@@ -25,7 +25,6 @@ class BBRConfigMessenger : public G4UImessenger {
   void SetNewValue(G4UIcommand* cmd, G4String value) override;
 
  private:
-  BBRConfigManager* fManager;
 
   G4UIcmdWithoutParameter*   fPrintCmd   = nullptr;
 
