@@ -102,17 +102,10 @@ void LightPipeDetectorConstruction::BuildFromCAD(G4LogicalVolume* worldLV)
                 FatalException, ("STL not found: " + fStlPath).c_str());
   }
 
-  G4VSolid* solid = nullptr;
-  try {
-    auto mesh = CADMesh::TessellatedMesh::FromSTL(fStlPath);
-    mesh->SetScale(mm);
-    solid = mesh->GetSolid();
-  } catch (...) {
-    G4Exception("LightPipeDetectorConstruction::BuildFromCAD", "LP012",
-                FatalException,
-                ("failed to parse STL (built-in reader is ASCII-only): "
-                 + fStlPath).c_str());
-  }
+  // A malformed STL stops in CADMesh's own fatal G4Exception (LexerError).
+  auto mesh = CADMesh::TessellatedMesh::FromSTL(fStlPath);
+  mesh->SetScale(mm);
+  G4VSolid* solid = mesh->GetSolid();
 
   auto* lv = new G4LogicalVolume(solid, ResolveWallMaterial(), "logic-LightPipe");
   new G4PVPlacement(nullptr, G4ThreeVector(), lv, "LightPipeWall",

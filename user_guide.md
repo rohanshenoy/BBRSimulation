@@ -72,9 +72,11 @@ an axial entry. At 500 GHz and normal incidence:
 The expected value is exactly 50 %. A parallel-plate gap narrower than λ/2 is
 a perfect polarization filter: only the TEM mode, which has no cutoff,
 transmits, so unpolarized light transmits half. The raw HFSS power ratios come
-out slightly above 1 (1.0545 for crack1, a port-normalization artefact), so
-they are capped at 1 when the tables load; a `[BBR] HFSS ... capped to 1` line
-reports it.
+out slightly above 1 (1.0545 for crack1, a port-normalization artefact). When
+the tables load, an incidence key whose largest transmittance over linear
+polarizations exceeds 1 has both polarizations' transmittances divided by it,
+so the maximum is 1 and their ratio is kept; a `[BBR] HFSS ... normalized to 1`
+line reports each such key.
 
 To aim the fixed gun at a crack:
 
@@ -247,11 +249,15 @@ from bbrsim import io
 crossings, abspoints = io.load("examples/testworld/build/output/bbr.root")
 ```
 
-**Selecting crack entries.** Every crossing is logged from the world side:
-`mat_pre` and `vol_pre` are always `G4_Galactic` and `World`, and the entered
+**Selecting crack entries.** Every crack entry is logged from the world side:
+`mat_pre` and `vol_pre` are `G4_Galactic` and `World`, and the entered
 material and volume are `mat_post` and `vol_post`. So a crack entry is
 `mat_post == "vacuum_wg"`, split by `vol_post`, and a first copper hit is a
-`mat_post` starting with `Cu_RRR`.
+`mat_post` starting with `Cu_RRR`. The rows with `mat_pre == "vacuum_wg"` are
+photons leaving a crack: into the world (after an HFSS transmission or, for a
+photon that starts inside the crack as in the crack-wall fixture, after
+bouncing between the walls), or into the copper when the photon starts inside
+the crack.
 
 ## Scripts
 

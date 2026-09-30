@@ -37,8 +37,9 @@ temperature, or a perfect reflector.
 
 All `/bbr/lightpipe/*` commands are **PreInit only** and are not broadcast to
 worker threads: issue them before `/run/initialize`. Errors are fatal `LP001`
-(a non-positive dimension), `LP010` (`cad` mode without a path), `LP011` (STL
-not found) and `LP012` (STL not parsable).
+(a non-positive dimension), `LP010` (`cad` mode without a path) and `LP011`
+(STL not found). A file that is not ASCII STL stops in CADMesh's own fatal
+`LexerError`.
 
 ## Primary event
 
