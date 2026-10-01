@@ -4,7 +4,7 @@ Both counters include the current crossing. A world exit without any logged
 boundary has zero for each. The legacy n_reflect column counts crossings, not
 reflections, and is deliberately ignored here.
 
-Usage: python validation/check_nreflect.py [path/to/bbr.root]
+Usage: conda run -n bbrsim python validation/check_nreflect.py [path/to/bbr.root]
 """
 
 import argparse

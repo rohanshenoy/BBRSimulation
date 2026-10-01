@@ -13,6 +13,7 @@ trap 'rm -rf "$scratch"' EXIT
 printf '/control/verbose 0\n' > "$scratch/valid.mac"
 printf '/bbr/thisCommandDoesNotExist\n' > "$scratch/invalid.mac"
 printf '/bbr/thermal/setT definitely-not-a-number\n' > "$scratch/bad-parameter.mac"
+printf '/bbr/det/setCuRRR 0\n' > "$scratch/rejected-value.mac"
 printf '/control/execute %s\n/control/verbose 0\n' \
   "$scratch/invalid.mac" > "$scratch/nested-invalid.mac"
 printf '/control/execute %s\n/control/verbose 0\n' \
@@ -24,7 +25,7 @@ for binary in "$@"; do
     cat "$scratch/run.log" >&2
     exit 1
   fi
-  for case in missing invalid bad-parameter nested-invalid nested-missing; do
+  for case in missing invalid bad-parameter rejected-value nested-invalid nested-missing; do
     if "$binary" "$scratch/$case.mac" > "$scratch/run.log" 2>&1; then
       echo "FAIL: $(basename "$binary") accepted $case macro" >&2
       cat "$scratch/run.log" >&2

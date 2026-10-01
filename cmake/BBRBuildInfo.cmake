@@ -1,17 +1,35 @@
-execute_process(COMMAND git -C "${REPO}" describe --always --dirty
-  OUTPUT_VARIABLE version OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-if(NOT version)
-  set(version "${FALLBACK}")
-endif()
-# Reproducible source-content identity, including uncommitted edits. The
-# library and each application call this separately so rebuilding one example
-# never changes the library's source fingerprint.
 if(NOT DEFINED SOURCE_DIR OR SOURCE_DIR STREQUAL "")
   set(SOURCE_DIR "${REPO}/library")
 endif()
 if(NOT DEFINED MACRO_PREFIX OR MACRO_PREFIX STREQUAL "")
   set(MACRO_PREFIX BBRSIM)
 endif()
+# The library version, like .bbrsim-version, comes from git only when REPO is the
+# top of its worktree, so a BBRsim copy inside another repository does not record
+# that repository's hash. An application records the repository it lives in.
+set(describe TRUE)
+if(MACRO_PREFIX STREQUAL "BBRSIM")
+  execute_process(COMMAND git -C "${REPO}" rev-parse --show-toplevel
+    OUTPUT_VARIABLE top OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  get_filename_component(repo_real "${REPO}" REALPATH)
+  if(top)
+    get_filename_component(top "${top}" REALPATH)
+  endif()
+  if(NOT top STREQUAL repo_real)
+    set(describe FALSE)
+  endif()
+endif()
+set(version "")
+if(describe)
+  execute_process(COMMAND git -C "${REPO}" describe --always --dirty
+    OUTPUT_VARIABLE version OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+if(NOT version)
+  set(version "${FALLBACK}")
+endif()
+# Reproducible source-content identity, including uncommitted edits. The
+# library and each application call this separately so rebuilding one example
+# never changes the library's source fingerprint.
 file(GLOB_RECURSE sources RELATIVE "${SOURCE_DIR}"
   "${SOURCE_DIR}/include/*.hh" "${SOURCE_DIR}/include/*.cc"
   "${SOURCE_DIR}/src/*.hh" "${SOURCE_DIR}/src/*.cc")

@@ -33,6 +33,11 @@ event-by-event footing.
 - Planck thermal emitter.
 - ROOT output and a Python analysis package.
 
+**Current version (2026-09-30):** each ROOT result carries a metadata file with
+its run configuration and provenance; true per-track reflection counts; batch
+runs fail on a bad macro or a rejected `/bbr/` value; and Geant4 11.1 support
+(see [Requirements](#requirements)).
+
 **Implemented, unit-tested, not yet placed in a geometry:** loss-tangent dielectrics (Cirlex, Si, Ge).
 
 **Not yet implemented:** PCB material; leakage-current analysis; calibration
@@ -76,8 +81,15 @@ the output format and the analysis scripts.
 
 ## Requirements
 
-- Geant4 11.x built with optical physics (developed against 11.4.0). UI and
-  visualization drivers are optional.
+- Geant4 11.1 or later, built with optical physics. UI and visualization
+  drivers are optional. Developed and fully validated on 11.4.0 (macOS, Apple
+  Clang). On 11.1.2 (Linux, GCC 13.2, the Caltech HPC) the library, the
+  test-world example, all 87 C++ tests and pytest passed, as did the Planck and
+  crack-transmission fixtures with their validators, all on the code before the
+  2026-09-30 changes. The current sources compile against the 11.1.2 headers
+  but have not yet been run there.
+- The regression runner (`validation/Scripts/run_regression.sh`) assumes macOS
+  and Apple Clang; on Linux, build and run the tests by hand for now.
 - CMake ≥ 3.21 for the presets (3.16 for a manual configure).
 - CMake ≥ 3.22 to build the tests (`BUILD_BBRSIM_TESTS`; the regression runner turns it on).
 - A C++17 compiler: the same one Geant4 was built with. On macOS that is Apple
@@ -130,7 +142,9 @@ install still installs only the library; configure an example directory
 separately to install its executable. Separate example builds still use
 `find_package(BBRsim)` and an installed library. In batch mode, both
 executables exit nonzero if their macro fails, including a failure in a
-nested macro.
+nested macro and a `/bbr/` value the configuration rejects (for example
+`/bbr/det/setCuRRR 0`): the macro stops there instead of running on with the
+previous value.
 
 `CMakePresets.json` pins `/usr/bin/clang` / `clang++` and `Release`; IDE CMake
 integrations pick the preset up automatically. The manual equivalent is
@@ -232,6 +246,12 @@ two include the current boundary on crossings and the terminating boundary on
 abspoints. `n_reflections` counts only reflection outcomes; `n_boundary` counts all
 logged contacts. Historical `n_reflect` remains unchanged for older analysis code.
 Use `(run_id, event_id, track_id)` to identify tracks within a result.
+Every stock boundary status now has its own status code and event type, which
+changes two things for older output: `NoRINDEX` (the photon is killed at the
+boundary) is now an `absorption` event, not `other`, and the statuses older
+output wrote as `Other` (`Undefined`, `Transmission`, the LUT, `Dichroic` and
+coated-surface statuses) now have their own names. Compare event types across
+the change with care.
 
 The examples keep their own Geant4 user actions and delegate to the ordinary
 `BBRPrimarySource`, `BBRAnalysis` and `BBRPhotonRecorder` helpers. The thermal API

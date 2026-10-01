@@ -5,6 +5,7 @@
 #include "G4Material.hh"
 #include "G4LogicalVolume.hh"
 #include "G4VSolid.hh"
+#include "G4TessellatedSolid.hh"
 #include "Randomize.hh"
 #include "G4PhysicalVolumeStore.hh"
 #include "G4OpBoundaryProcess.hh"
@@ -241,21 +242,33 @@ void BBRAnalysis::BeginRun(const G4Run* run, G4bool master) {
     config << std::setprecision(17);
     BBRConfigManager::Print(config);
     fConfiguration = config.str();
-    std::ostringstream geometry;
-    geometry << std::setprecision(17);
-    for (const auto* pv : *G4PhysicalVolumeStore::GetInstance()) {
-      geometry << pv->GetName() << " copy=" << pv->GetCopyNo()
-               << " mother=" << (pv->GetMotherLogical() ? pv->GetMotherLogical()->GetName() : "none")
-               << " translation=" << pv->GetTranslation()
-               << " rotation=" << pv->GetObjectRotationValue()
-               << " material=" << pv->GetLogicalVolume()->GetMaterial()->GetName() << '\n';
-      pv->GetLogicalVolume()->GetSolid()->StreamInfo(geometry);
+    // Geometry and the data directory are PreInit-only, so both are recorded once
+    // per process: hashing the HFSS tables at every run would re-read them all.
+    if (fGeometry.empty()) {
+      std::ostringstream geometry;
+      geometry << std::setprecision(17);
+      for (const auto* pv : *G4PhysicalVolumeStore::GetInstance()) {
+        const auto* material = pv->GetLogicalVolume()->GetMaterial();
+        geometry << pv->GetName() << " copy=" << pv->GetCopyNo()
+                 << " mother=" << (pv->GetMotherLogical() ? pv->GetMotherLogical()->GetName() : "none")
+                 << " translation=" << pv->GetTranslation()
+                 << " rotation=" << pv->GetObjectRotationValue()
+                 << " material=" << (material ? material->GetName() : "none") << '\n';
+        const auto* solid = pv->GetLogicalVolume()->GetSolid();
+        // A tessellated (CAD) solid streams every facet; record its size instead.
+        if (const auto* mesh = dynamic_cast<const G4TessellatedSolid*>(solid))
+          geometry << "solid " << solid->GetName() << " type=" << solid->GetEntityType()
+                   << " facets=" << mesh->GetNumberOfFacets() << '\n';
+        else
+          solid->StreamInfo(geometry);
+      }
+      fGeometry = geometry.str();
     }
-    fGeometry = geometry.str();
+    if (fDataFingerprint.empty())
+      fDataFingerprint = DataFingerprint(BBRConfigManager::GetDataDir());
     std::ostringstream random;
     G4Random::getTheEngine()->put(random);
     fRandomState = random.str();
-    fDataFingerprint = DataFingerprint(BBRConfigManager::GetDataDir());
     BBRConfigManager::Print(G4cout);
   }
   if (!am->OpenFile())

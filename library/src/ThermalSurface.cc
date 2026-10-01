@@ -105,12 +105,13 @@ BBEvt ThermalSurface::GenEvt()
                 "No emitting area. Add a surface with positive emissivity.");
 
   G4double prob  = G4UniformRand() * totalEffArea;
-  int idx_s = N_surfaces - 1;   // fallback: float underflow lands on the last surface
+  int idx_s = -1;
   for (int i = 0; i < N_surfaces; ++i) {
     const G4double weight = surfaces[i].area * surfaces[i].emissivity;
     if (weight == 0.) continue;
+    idx_s = i;   // float residue past the end lands on the last emitting surface
     prob -= weight;
-    if (prob <= 0.) { idx_s = i; break; }
+    if (prob <= 0.) break;
   }
 
   // ---- box emission: port of YYC case 3 ----

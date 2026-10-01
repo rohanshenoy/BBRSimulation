@@ -65,7 +65,9 @@ case "$PREFIX" in /*) ;; *) PREFIX="$REPO/$PREFIX" ;; esac
 # Canonical, as bbrsim_env.sh's BBRSIMINSTALL (pwd -P) and hence PYTHONPATH; this also
 # removes symlinks (/tmp -> /private/tmp), .. and trailing slashes, which CMake collapses.
 mkdir -p "$PREFIX" && PREFIX="$(cd "$PREFIX" >/dev/null && pwd -P)" || { echo "ERROR: cannot create $PREFIX"; exit 2; }
-EXB="$BUILD/examples"
+# Not $BUILD/examples: that is where BUILD_BBRSIM_EXAMPLES=ON builds the in-tree
+# examples, which these install-linked builds would otherwise overwrite.
+EXB="$BUILD/standalone-examples"
 CLANG=(-DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Release)
 JOBS="${BBR_JOBS:-8}"
 

@@ -42,7 +42,7 @@ PY
 
 for example in testworld lightpipe; do
   link_command="$build/examples/$example/CMakeFiles/${example}Lib.dir/link.txt"
-  if ! rg -F '../../library/libBBRsim' "$link_command" > /dev/null; then
+  if ! grep -qF '../../library/libBBRsim' "$link_command"; then
     echo "FAIL: $example does not link the source-tree BBRsim library" >&2
     exit 1
   fi

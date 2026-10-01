@@ -43,7 +43,7 @@ if [ ! -f "$header" ]; then
   echo "FAIL: standalone example has no generated application provenance" >&2
   exit 1
 fi
-first=$(rg '^#define BBRSIM_APP_SOURCE_FINGERPRINT ' "$header")
+first=$(grep -E '^#define BBRSIM_APP_SOURCE_FINGERPRINT ' "$header" || true)
 if [ -z "$first" ]; then
   echo "FAIL: application fingerprint is empty" >&2
   exit 1
@@ -56,7 +56,7 @@ mkdir -p "$scratch/before" "$scratch/after"
 
 printf '\n// Provenance fixture: local source changed.\n' >> "$copy/bbrsimTestWorld.cc"
 cmake --build "$build" -j 4
-second=$(rg '^#define BBRSIM_APP_SOURCE_FINGERPRINT ' "$header")
+second=$(grep -E '^#define BBRSIM_APP_SOURCE_FINGERPRINT ' "$header" || true)
 if [ "$first" = "$second" ]; then
   echo "FAIL: standalone source edit did not refresh application fingerprint" >&2
   exit 1
