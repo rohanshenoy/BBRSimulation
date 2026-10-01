@@ -162,6 +162,17 @@ int main(int argc, char** argv) {
       CHECK(b != a);
       CHECK(b->GetName() == "Cu_RRR100_T4.6K");
     }},
+    {"cu_temperature_identity", [] {
+      G4Material* below = BBRMaterials::GetCopper(100, 49.99999);
+      G4Material* at = BBRMaterials::GetCopper(100, 50.);
+      CHECK(below != at);
+      CHECK(below->GetName() != at->GetName());
+      CHECK(BBRMaterials::GetCopper(100, 49.99999) == below);
+      CHECK(BBRMaterials::GetCopper(100, 50.) == at);
+      const double db = 1. - Refl(below)->Value(E_of(500e9));
+      const double da = 1. - Refl(at)->Value(E_of(500e9));
+      CHECK(da > 10. * db);
+    }},
     {"cu_invalid_input", [] {  // D8
       ExpectG4Exception("BBR015", [] { BBRMaterials::GetCopper(0, 4.); }, "BuildDrudeMaterial");
       ExpectG4Exception("BBR015", [] { BBRMaterials::GetCopper(-5, 4.); }, "BuildDrudeMaterial");

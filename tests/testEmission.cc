@@ -30,7 +30,7 @@ void Seq(CLHEP::NonRandomEngine& eng, std::vector<double> v) {
 
 // The test-world emitter: 1 x 20 x 20 mm at (-50, 0, 0) mm, outward.
 void TestWorldBox(ThermalSurface& ts, G4bool outward = true) {
-  ts.BBSpecCDF.initialize(4., kEmin, kEmax);
+  ts.InitializeSpectrum(4., kEmin, kEmax);
   ts.AddBoxSurface(G4ThreeVector(-50. * mm, 0., 0.), 1. * mm, 20. * mm, 20. * mm, outward);
 }
 
@@ -62,23 +62,23 @@ int main(int argc, char** argv) {
       for (int t = 0; t < 3; ++t) {
         GetBBSpecCDF c;
         c.initialize(Ts[t], kEmin, kEmax);
-        const std::size_t N = c.x.size();
-        CHECK(N == 100001 && c.pdf.size() == N && c.cdf.size() == N);
-        CHECK(c.cdf[0] == 0.);
-        CHECK(c.cdf[N - 1] == 1.);
+        const std::size_t N = c.EnergyAxis().size();
+        CHECK(N == 100001 && c.PDF().size() == N && c.CDF().size() == N);
+        CHECK(c.CDF()[0] == 0.);
+        CHECK(c.CDF()[N - 1] == 1.);
         bool mono = true;
         double norm = 0., mean = 0.;
         std::size_t imax = 0;
         for (std::size_t i = 1; i < N; ++i) {
-          mono = mono && c.cdf[i] >= c.cdf[i - 1];
-          const double dx = c.x[i] - c.x[i - 1];
-          norm += 0.5 * (c.pdf[i] + c.pdf[i - 1]) * dx;
-          mean += 0.5 * (c.x[i] * c.pdf[i] + c.x[i - 1] * c.pdf[i - 1]) * dx;
-          if (c.pdf[i] > c.pdf[imax]) imax = i;
+          mono = mono && c.CDF()[i] >= c.CDF()[i - 1];
+          const double dx = c.EnergyAxis()[i] - c.EnergyAxis()[i - 1];
+          norm += 0.5 * (c.PDF()[i] + c.PDF()[i - 1]) * dx;
+          mean += 0.5 * (c.EnergyAxis()[i] * c.PDF()[i] + c.EnergyAxis()[i - 1] * c.PDF()[i - 1]) * dx;
+          if (c.PDF()[i] > c.PDF()[imax]) imax = i;
         }
         CHECK(mono);
         CHECK_NEAR(norm, 1., 1e-12);
-        CHECK_NEAR(c.x[imax], kUStar * kB * Ts[t], c.x[1] - c.x[0]);
+        CHECK_NEAR(c.EnergyAxis()[imax], kUStar * kB * Ts[t], c.EnergyAxis()[1] - c.EnergyAxis()[0]);
         CHECK_REL(mean, meanE[t], 1e-5);
       }
     }},
@@ -87,6 +87,37 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR017", [] { GetBBSpecCDF c; c.initialize(4., 0., kEmax); }, "GetBBSpecCDF");
       ExpectG4Exception("BBR017", [] { GetBBSpecCDF c; c.initialize(4., kEmax, kEmin); }, "GetBBSpecCDF");
       ExpectG4Exception("BBR017", [] { GetBBSpecCDF c; c.initialize(std::nan(""), kEmin, kEmax); }, "GetBBSpecCDF");
+    }},
+    {"planck_cdf_cold_band", [] {
+      // At 0.0005 K the entire 10 GHz-20 THz band underflows in the
+      // current discretization. It must fail during initialization, before
+      // a NaN CDF can be used to emit a photon.
+      ExpectG4Exception("BBR017", [] {
+        GetBBSpecCDF c;
+        c.initialize(0.0005, kEmin, kEmax);
+      }, "GetBBSpecCDF");
+    }},
+    {"planck_narrow_band", [] {
+      ThermalSurface ts;
+      TestWorldBox(ts);
+      const double oldMedian = ts.GetSpectrum().CDF()[50000];
+      ExpectG4Exception("BBR017", [&] {
+        ts.InitializeSpectrum(1e6, 1., std::nextafter(1., INFINITY));
+      }, "GetBBSpecCDF");
+      CHECK(ts.GetTemperature_K() == 4.);
+      CHECK(ts.GetSpectrum().CDF()[50000] == oldMedian);
+      CHECK(std::isfinite(ts.GenEvt().energy));
+    }},
+    {"planck_failed_reinitialization", [] {
+      ThermalSurface ts;
+      TestWorldBox(ts);
+      const double median = ts.GetSpectrum().CDF()[50000];
+      ExpectG4Exception("BBR017", [&] {
+        ts.InitializeSpectrum(0.0005, kEmin, kEmax);
+      }, "GetBBSpecCDF");
+      CHECK(ts.GetTemperature_K() == 4.);
+      CHECK(ts.GetSpectrum().CDF()[50000] == median);
+      CHECK(std::isfinite(ts.GenEvt().energy));
     }},
     {"planck_band_loss", [] {
       // P3: the band is fixed at 10 GHz-20 THz. The examples warn (BBR021)
@@ -144,14 +175,14 @@ int main(int argc, char** argv) {
       // +x face, theta = 0, local point (0.5, 5, -5) mm.
       const std::vector<double> s = {0.5, 0.3, 0.7, 0.0, 0.0, 0.1, 0.75, 0.25};
       ThermalSurface r1;
-      r1.BBSpecCDF.initialize(4., kEmin, kEmax);
+      r1.InitializeSpectrum(4., kEmin, kEmax);
       r1.AddBoxSurface(G4ThreeVector(), 1. * mm, 20. * mm, 20. * mm, true, 90. * deg, 0., 0.);
       Seq(*eng, s);
       BBEvt e = r1.GenEvt();
       CHECK_VEC(e.position, G4ThreeVector(-5., 0.5, -5.) * mm, 1e-12);
       CHECK_VEC(e.direction, G4ThreeVector(0., 1., 0.), 1e-12);
       ThermalSurface r2;
-      r2.BBSpecCDF.initialize(4., kEmin, kEmax);
+      r2.InitializeSpectrum(4., kEmin, kEmax);
       r2.AddBoxSurface(G4ThreeVector(), 1. * mm, 20. * mm, 20. * mm, true, 90. * deg, 90. * deg, 0.);
       Seq(*eng, s);
       e = r2.GenEvt();
@@ -193,7 +224,7 @@ int main(int argc, char** argv) {
         CHECK_NEAR(double(nface[f]) / N, pf[f], 4. * std::sqrt(pf[f] * (1. - pf[f]) / N));
       // Emissivity weighting: two equal boxes, emissivity 1 and 0.25.
       ThermalSurface two;
-      two.BBSpecCDF.initialize(4., kEmin, kEmax);
+      two.InitializeSpectrum(4., kEmin, kEmax);
       two.AddBoxSurface(G4ThreeVector(-100. * mm, 0., 0.), 10. * mm, 10. * mm, 10. * mm, true, 0., 0., 0., 1.0);
       two.AddBoxSurface(G4ThreeVector(+100. * mm, 0., 0.), 10. * mm, 10. * mm, 10. * mm, true, 0., 0., 0., 0.25);
       long nA = 0;
@@ -214,9 +245,37 @@ int main(int argc, char** argv) {
       }, "ThermalSurface::GenEvt");
       ExpectG4Exception("BBR019", [] {
         ThermalSurface ts;
-        ts.BBSpecCDF.initialize(4., kEmin, kEmax);
+        ts.InitializeSpectrum(4., kEmin, kEmax);
         ts.GenEvt();
       }, "ThermalSurface::GenEvt");
+    }},
+    {"surface_input_guards", [] {
+      ThermalSurface ts;
+      auto add = [&](double wx, double wy, double wz, double emissivity) {
+        ts.AddBoxSurface(G4ThreeVector(), wx * mm, wy * mm, wz * mm,
+                         true, 0., 0., 0., emissivity);
+      };
+      ExpectG4Exception("BBR023", [&] { add(-1., 1., 1., 1.); }, "ThermalSurface::AddBoxSurface");
+      ExpectG4Exception("BBR023", [&] { add(0., 1., 1., 1.); }, "ThermalSurface::AddBoxSurface");
+      ExpectG4Exception("BBR023", [&] { add(INFINITY, 1., 1., 1.); }, "ThermalSurface::AddBoxSurface");
+      ExpectG4Exception("BBR023", [&] { add(1., 1., 1., -0.1); }, "ThermalSurface::AddBoxSurface");
+      ExpectG4Exception("BBR023", [&] { add(1., 1., 1., 1.1); }, "ThermalSurface::AddBoxSurface");
+      ExpectG4Exception("BBR023", [&] { add(1., 1., 1., std::nan("")); }, "ThermalSurface::AddBoxSurface");
+      CHECK(ts.GetArea() == 0. && ts.GetEffArea() == 0.);
+    }},
+    {"zero_emissivity", [] {
+      ThermalSurface ts;
+      ts.InitializeSpectrum(4., kEmin, kEmax);
+      ts.AddBoxSurface(G4ThreeVector(), 1. * mm, 1. * mm, 1. * mm,
+                       true, 0., 0., 0., 0.);
+      CHECK(ts.GetArea() == 6. * mm * mm && ts.GetEffArea() == 0.);
+      ExpectG4Exception("BBR019", [&] { ts.GenEvt(); }, "ThermalSurface::GenEvt");
+      ts.AddBoxSurface(G4ThreeVector(10. * mm, 0., 0.),
+                       1. * mm, 1. * mm, 1. * mm, true);
+      auto* eng = new CLHEP::NonRandomEngine;
+      G4Random::setTheEngine(eng);
+      Seq(*eng, {0.5, 0.0, 0.7, 0.5, 0.25, 0.1, 0.75, 0.25});
+      CHECK(ts.GenEvt().position.x() > 9. * mm);
     }},
     {"geometric_surface_area", [] {
       GeometricSurface t;

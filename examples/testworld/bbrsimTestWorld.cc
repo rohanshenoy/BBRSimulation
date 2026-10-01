@@ -14,6 +14,8 @@
 #include "G4UImanager.hh"
 #include "G4VisExecutive.hh"
 
+#include <cstdlib>
+
 int main(int argc, char** argv)
 {
   G4UIExecutive* ui = nullptr;
@@ -40,15 +42,16 @@ int main(int argc, char** argv)
   visManager->Initialize();
 
   G4UImanager* UImanager = G4UImanager::GetUIpointer();
+  G4int commandStatus = 0;
   if (ui) {
     UImanager->ApplyCommand("/control/execute vis.mac");
     ui->SessionStart();
     delete ui;
   } else {
-    UImanager->ApplyCommand(G4String("/control/execute ") + G4String(argv[1]));
+    commandStatus = UImanager->ApplyCommand(G4String("/control/execute ") + G4String(argv[1]));
   }
 
   delete visManager;
   delete runManager;
-  return 0;
+  return commandStatus == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

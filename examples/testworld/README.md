@@ -56,6 +56,12 @@ install prefix stays `../../install`; use `cmake --install build --prefix
 macro argument the binary opens an interactive session and runs `vis.mac`. The
 macros live in `G4Macros/` and are copied beside the binary:
 
+To build this example with the current source library, configure from the
+repository root with `-DBUILD_BBRSIM_EXAMPLES=ON`; the binary is then
+`build/examples/testworld/bbrsimTestWorld`. Set `BBRSIMDATA` to the repository's
+`data/` directory when running it without installing. A batch macro error,
+including one in a nested macro, makes the executable exit nonzero.
+
 | Macro | Run |
 |---|---|
 | `planck.mac` | Planck emitter at 4 K, 10 000 events |
@@ -69,7 +75,7 @@ macros live in `G4Macros/` and are copied beside the binary:
 | `vis.mac` | visualization setup for the interactive session |
 
 Each run writes `output/bbr.root` (ntuples `crossings` and `abspoints`) and
-`output/bbr_legend.json` under the directory it runs in; a later `/run/beamOn`
+`output/bbr.metadata.json` under the directory it runs in; a later `/run/beamOn`
 overwrites them unless the macro names a new file with `/analysis/setFileName`.
 Read them with the `bbrsim` Python package (`from bbrsim import io`).
 

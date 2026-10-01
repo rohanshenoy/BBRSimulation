@@ -67,12 +67,18 @@ Outside the preset, configure with `-DCMAKE_PREFIX_PATH=<prefix>`. The preset's
 install prefix stays `../../install`; use `cmake --install build --prefix
 <prefix>` to install the example beside another library prefix.
 
+To build this example with the current source library, configure from the
+repository root with `-DBUILD_BBRSIM_EXAMPLES=ON`; the binary is then
+`build/examples/lightpipe/bbrsimLightPipe`. Set `BBRSIMDATA` to the repository's
+`data/` directory when running it without installing. A batch macro error,
+including one in a nested macro, makes the executable exit nonzero.
+
 | Macro | Run |
 |---|---|
 | `lightpipe.mac` | parametric Cu tube, 4 K Planck emitter sized to the bore, 50 000 events |
 | `vis.mac` | visualization setup for the interactive session (no macro argument) |
 
-Each run writes `output/bbr.root` and `output/bbr_legend.json` under the
+Each run writes `output/bbr.root` and `output/bbr.metadata.json` under the
 directory it runs in, with the same ntuples as the test world.
 
 If you `cmake --install` the example into the library's prefix, a shell that has sourced `bbrsim_env.sh` loads the example library from `<prefix>/lib`, because DYLD_LIBRARY_PATH is searched before RPATH. A build-tree binary then runs the installed copy. Re-install after every rebuild, or run the build-tree binary as `env -u DYLD_LIBRARY_PATH ./bbrsimLightPipe <macro>`.

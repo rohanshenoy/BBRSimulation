@@ -113,6 +113,25 @@ different prefix needs a reconfigure
 (`cmake --preset clang-release -DCMAKE_INSTALL_PREFIX=<prefix>`), not only
 `cmake --install --prefix`.
 
+For source-tree development, build both examples with the library in one CMake
+tree. This does not require an installed BBRsim library:
+
+```bash
+cmake --preset clang-release -DBUILD_BBRSIM_EXAMPLES=ON
+cmake --build --preset clang-release
+BBRSIMDATA="$PWD/data" build/examples/testworld/bbrsimTestWorld \
+  examples/testworld/G4Macros/planck.mac
+```
+
+The source-tree examples link the current library target and use its headers.
+Set `BBRSIMDATA` to the source data directory for runs that need HFSS tables;
+the compiled default remains the configured install prefix. The top-level
+install still installs only the library; configure an example directory
+separately to install its executable. Separate example builds still use
+`find_package(BBRsim)` and an installed library. In batch mode, both
+executables exit nonzero if their macro fails, including a failure in a
+nested macro.
+
 `CMakePresets.json` pins `/usr/bin/clang` / `clang++` and `Release`; IDE CMake
 integrations pick the preset up automatically. The manual equivalent is
 `cmake -S . -B build -DCMAKE_C_COMPILER=/usr/bin/clang
@@ -130,6 +149,7 @@ check `CMAKE_CXX_COMPILER` in `build/CMakeCache.txt`.
 | `WITH_GEANT4_UIVIS` | `ON` | UI and visualization; `OFF` gives a batch-only build |
 | `BUILD_BBRSIM_TOOLS` | `ON` | Install the `bbrsim` Python package and the plot scripts |
 | `BUILD_BBRSIM_TESTS` | `OFF` | Build the C++ tests in `tests/` and register them with CTest (`ctest --test-dir build`); the regression runner turns it on |
+| `BUILD_BBRSIM_EXAMPLES` | `OFF` | Build both examples against the source-tree library target |
 | `INSTALL_VALIDATION` | `ON` | Copy `validation/` into the prefix |
 | `INSTALL_EXAMPLES` | `OFF` | Copy `examples/` into the prefix |
 
@@ -193,8 +213,35 @@ Each example is a standalone CMake project built against the installed
 library, with its own `clang-release` preset. Its macros are copied beside the
 binary, so it runs from its build directory. With no argument the binary opens
 an interactive session and runs `vis.mac`. Output goes to `output/bbr.root` and
-`output/bbr_legend.json` under the directory it runs in. To start a new
+`output/bbr.metadata.json` under the directory it runs in. To start a new
 simulation, copy an example directory and adapt it.
+
+Each ROOT result has a matching `<stem>.metadata.json` containing its own category
+legend, schema version, run configuration, geometry description, initial master
+random-engine state, worker count, separate library and application source
+fingerprints, Geant4 version, and HFSS data fingerprint. Application fingerprints
+refresh when a standalone example is rebuilt, independently of the installed library.
+Keep the pair together when copying results. `/analysis/setFileName results/run.root`
+creates its parent directory and writes `results/run.metadata.json`; output failures
+stop the run with `BBR022`. The loader still reads legacy `bbr_legend.json` files,
+but new output requires its paired metadata. Master RNG state is provenance, not a
+promise of identical event ordering across different worker counts.
+
+Schema 2 adds `track_id`, `n_boundary` and `n_reflections` to both trees. The latter
+two include the current boundary on crossings and the terminating boundary on
+abspoints. `n_reflections` counts only reflection outcomes; `n_boundary` counts all
+logged contacts. Historical `n_reflect` remains unchanged for older analysis code.
+Use `(run_id, event_id, track_id)` to identify tracks within a result.
+
+The examples keep their own Geant4 user actions and delegate to the ordinary
+`BBRPrimarySource`, `BBRAnalysis` and `BBRPhotonRecorder` helpers. The thermal API
+now uses `ThermalSurface::InitializeSpectrum(T_K, emin_eV, emax_eV)` with read-only
+`GetSpectrum()`, `GetTemperature_K()`, `GetArea()` and `GetEffArea()` accessors.
+`GetBBSpecCDF` exposes `EnergyAxis()`, `PDF()` and `CDF()` as const references.
+Bands that cannot be normalized (for example 10 GHz–20 THz at 0.5 mK) fail with
+`BBR017` instead of emitting NaNs; the usual 4 K sampling sequence is unchanged.
+Invalid box geometry or emissivity raises `BBR023`; attempting emission from
+surfaces with zero total effective area raises `BBR019`.
 
 ## Validation
 
@@ -211,7 +258,8 @@ logs for warnings, and runs the PASS/FAIL validators on their output. Last, it
 runs the examples installed into a separate prefix without the env script, and
 the plot scripts and the notebook's code on the fixture output. Compiler
 warnings count as failures. The exit code is the number of unexpected
-failures; a green run ends with `pass=54  fail=0  xfail=1  xpass=0`.
+failures; a green run has `fail=0  xfail=1  xpass=0`. The runner also tests
+batch error exits, redirected results, and the optional in-tree example build.
 
 The one expected failure (`check_cu_serov.py`) is an open decision: the `HP_Cu`
 alias (RRR 6) gives a loss 13 % below Serov's measurement. The fixtures, what

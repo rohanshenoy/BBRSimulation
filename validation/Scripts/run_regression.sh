@@ -113,7 +113,7 @@ step() {  # log label command... ; aborts the whole run on failure
 # step 1c runs the C++ tests, and building them here puts their warnings in the
 # build log below; a BUILD_DIR cached with it OFF is switched on.
 step "$clog" "configure library" cmake -S "$REPO" -B "$BUILD" "${CLANG[@]}" -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-     -DBUILD_BBRSIM_TOOLS=ON -DBUILD_BBRSIM_TESTS=ON
+     -DBUILD_BBRSIM_TOOLS=ON -DBUILD_BBRSIM_TESTS=ON -DBUILD_BBRSIM_EXAMPLES=OFF
 step "$blog" "build library"     cmake --build "$BUILD" -j"$JOBS"
 step "$clog" "install library"   cmake --install "$BUILD"
 # cmake --install never deletes, so a file once installed and since removed from
@@ -219,7 +219,7 @@ fi
 pt_tmp=$(mktemp -d "${TMPDIR:-/tmp}/bbrsim-pytest.XXXXXX")
 if ! (cd / && $PY -c 'import pytest' >/dev/null 2>&1); then
   line FAIL pytest "pytest is not installed in the bbrsim env: conda run -n bbrsim pip install -e 'tools/python[test]'"; fail=$((fail+1))
-elif (cd / && $PY -B -m pytest -q -p no:cacheprovider --basetemp="$pt_tmp/basetemp" "$REPO/tools/python/tests" >"$BUILD/pytest.log" 2>&1); then
+elif (cd / && BBR_TESTWORLD_BINARY="$TESTWORLD" BBR_LIGHTPIPE_BINARY="$LIGHTPIPE" $PY -B -m pytest -q -p no:cacheprovider --basetemp="$pt_tmp/basetemp" "$REPO/tools/python/tests" >"$BUILD/pytest.log" 2>&1); then
   line PASS pytest "$(tail -1 "$BUILD/pytest.log")"; pass=$((pass+1))
 else
   line FAIL pytest "$(tail -1 "$BUILD/pytest.log")"; fail=$((fail+1)); grep -E '^(FAILED|ERROR)' "$BUILD/pytest.log" | head -10 | sed 's/^/       /'
@@ -228,6 +228,17 @@ rm -rf "$pt_tmp"
 if eout=$(bash "$VAL/Scripts/tests/test_env.sh" "$REPO" "$PREFIX" 2>&1) && echo "$eout" | grep -q '^ENV OK'; then
   line PASS "env scripts" "$(echo "$eout" | grep -c '^ok') cases, $(echo "$eout" | grep -c '^SKIP') skipped"; pass=$((pass+1))
 else line FAIL "env scripts" "$(echo "$eout" | grep '^FAIL' | head -3 | tr '\n' ' ')"; fail=$((fail+1)); fi
+
+if bash "$VAL/Scripts/check_batch_cli.sh" "$TESTWORLD" "$LIGHTPIPE" >"$BUILD/batch_cli.log" 2>&1; then
+  line PASS "batch failures" "missing, invalid and nested-invalid macros fail"; pass=$((pass+1))
+else line FAIL "batch failures" "see $BUILD/batch_cli.log"; fail=$((fail+1)); fi
+if bash "$VAL/Scripts/check_in_tree_examples.sh" "$REPO" "$BUILD/in-tree-check" "${CLANG[@]}" -DGeant4_DIR="$(sed -n 's/^Geant4_DIR:PATH=//p' "$BUILD/CMakeCache.txt")" >"$BUILD/in-tree.log" 2>&1; then
+  line PASS "in-tree examples" "source targets build without find_package(BBRsim)"; pass=$((pass+1))
+else line FAIL "in-tree examples" "see $BUILD/in-tree.log"; fail=$((fail+1)); fi
+
+if bash "$VAL/Scripts/check_app_provenance.sh" "$REPO" "$PREFIX" "$BUILD/app_provenance" "${CLANG[@]}" >"$BUILD/app_provenance.log" 2>&1; then
+  line PASS "application provenance" "standalone rebuild refreshes its metadata without rebuilding library"; pass=$((pass+1))
+else line FAIL "application provenance" "see $BUILD/app_provenance.log"; fail=$((fail+1)); fi
 
 # Geant4 warns (Run10035) when threads > sqrt(events): small fixtures fail the log scan
 # on machines with 33+ cores. Pin the count so runs and log scans are the same
@@ -374,10 +385,13 @@ check config_mt/bbr_mt_r0.root check_invariants.py
 check config_mt/bbr_mt_r1.root check_invariants.py
 check wall     check_crack_wall_reflection.py
 check wall     check_invariants.py
+check wall     check_nreflect.py
 # the world-exit fixture crosses no boundary by design, so its file holds no
 # crossings; the flag waives only that requirement of the metal invariant.
 check exit     check_invariants.py --allow-no-crossings
+check exit     check_nreflect.py
 check transmit check_crack_transmittance.py
+check transmit check_nreflect.py
 # the transmit fixture's second run (Planck, both cracks) has its own file.
 check transmit/bbr_ratio.root check_crack_ratio.py
 # the invariants must hold in both of its files; one row covers the two.
@@ -388,6 +402,7 @@ done
 if [ -z "$trn_bad" ]; then line PASS "transmit invariants" "[transmit] check_invariants on bbr.root and bbr_ratio.root"; pass=$((pass+1))
 else line FAIL "transmit invariants" "[transmit] check_invariants failed on:$trn_bad"; fail=$((fail+1)); fi
 check lp       check_invariants.py
+check lp       check_nreflect.py
 check lp_cad   check_invariants.py
 # the oblique fixture writes one file per run (output/bbr_oblique_rNN.root);
 # check_crack_oblique reads the whole directory, check_invariants runs on every

@@ -98,7 +98,9 @@ def test_select_helpers(tmp_path):
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("Cu_RRR100_T4K", (100, 4.0)), ("Cu_RRR50_T77.5K", (50, 77.5)), ("G4_Galactic", None)])
+    ("Cu_RRR100_T4K", (100, 4.0)), ("Cu_RRR50_T77.5K", (50, 77.5)),
+    ("Cu_RRR100_T1e-04K", (100, 1e-4)), ("Cu_RRR100_T1e+05K", (100, 1e5)),
+    ("G4_Galactic", None)])
 def test_parse_cu_rrr_t(name, expected):
     assert select.parse_cu_rrr_t(name) == expected
 
@@ -122,3 +124,42 @@ def test_paths_prefix_fallback_and_error(monkeypatch, tmp_path):
         paths.data_dir()
     (tmp_path / "pfx" / "share" / "BBRsim" / "data").mkdir(parents=True)
     assert paths.data_dir() == str(tmp_path / "pfx" / "share" / "BBRsim" / "data")
+
+
+def test_per_result_metadata_overrides_shared_legend(tmp_path):
+    from pathlib import Path
+    p = write_output(tmp_path, CROSS, ABS)
+    meta = {"schema_version": 2, "legend": LEGEND, "run_id": 0,
+            "configuration": "test configuration", "build": {"version": "test"}}
+    Path(p).with_suffix(".metadata.json").write_text(json.dumps(meta))
+    (tmp_path / "bbr_legend.json").write_text('{}')
+    cr, ab = io.load(p)
+    assert cr["vol_post"].iloc[0] == "CuSlab"
+    assert ab["term_status"].iloc[0] == "BBRAbsorb"
+    assert io.load_metadata(p)["schema_version"] == 2
+
+
+def test_bad_metadata_does_not_fall_back_to_legacy(tmp_path):
+    from pathlib import Path
+    p = write_output(tmp_path, CROSS, ABS)
+    Path(p).with_suffix(".metadata.json").write_text('{broken')
+    with pytest.raises(ValueError):
+        io.load(p)
+    Path(p).with_suffix(".metadata.json").write_text(json.dumps({"schema_version": 999, "legend": LEGEND}))
+    with pytest.raises(ValueError, match="schema"):
+        io.load(p)
+
+
+def test_schema2_cannot_use_an_unrelated_legacy_legend(tmp_path):
+    p = write_output(tmp_path, CROSS, ABS)
+    with uproot.open(p) as root:
+        cr = root["crossings"].arrays(library="np")
+        ab = root["abspoints"].arrays(library="np")
+    cr["n_boundary"] = cr["n_reflect"]
+    with uproot.recreate(p) as root:
+        root.mktree("crossings", {k: v.dtype for k, v in cr.items()})
+        root["crossings"].extend(cr)
+        root.mktree("abspoints", {k: v.dtype for k, v in ab.items()})
+        root["abspoints"].extend(ab)
+    with pytest.raises(ValueError, match="missing its per-result"):
+        io.load(p)

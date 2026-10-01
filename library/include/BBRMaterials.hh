@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <charconv>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -43,7 +44,7 @@ inline G4Material* BuildDrudeMaterial(const G4String& name,
                                        G4int    RRR,
                                        G4double T_K)
 {
-  if (RRR < 1 || !(T_K > 0.)) {   // !(T_K > 0.) also rejects NaN
+  if (RRR < 1 || !std::isfinite(T_K) || !(T_K > 0.)) {
     G4ExceptionDescription ed; ed << "GetCopper needs RRR >= 1 and T > 0 K, got RRR=" << RRR << " T=" << T_K << " K";
     G4Exception("BBRMaterials::BuildDrudeMaterial", "BBR015", FatalException, ed);
   }
@@ -228,7 +229,7 @@ inline G4Material* GetPerfectReflector()
 }
 
 // Copper with full Drude reflectance model, parameterized by (RRR, T_K).
-// Material name is deterministic ("Cu_RRR{RRR}_T{T_K}K", %g formatting so
+// Material name is deterministic ("Cu_RRR{RRR}_T{T_K}K", shortest round-trip formatting so
 // e.g. 4 K → "T4K", 4.6 K → "T4.6K") so repeated calls with the same
 // arguments return the cached G4Material and distinct temperatures never
 // alias to the same cache entry.
@@ -236,9 +237,13 @@ inline G4Material* GetPerfectReflector()
 // Below 50 K: σ_DC = RRR × σ_RT (phonons frozen).  Above 50 K: Matthiessen.
 inline G4Material* GetCopper(G4int RRR, G4double T_K = 4.0)
 {
-  char tbuf[32];
-  std::snprintf(tbuf, sizeof(tbuf), "%g", T_K);
-  G4String name = "Cu_RRR" + std::to_string(RRR) + "_T" + tbuf + "K";
+  char tbuf[64];
+  const auto formatted = std::to_chars(tbuf, tbuf + sizeof(tbuf), T_K, std::chars_format::general);
+  if (formatted.ec != std::errc{})
+    G4Exception("BBRMaterials::GetCopper", "BBR015", FatalException,
+                "Could not format copper temperature as a round-trip key");
+  G4String name = "Cu_RRR" + std::to_string(RRR) + "_T" +
+                  std::string(tbuf, formatted.ptr) + "K";
   return BuildDrudeMaterial(name, 29., 63.546, 8.96, RRR, T_K);
 }
 

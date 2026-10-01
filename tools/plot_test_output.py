@@ -15,7 +15,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-from bbrsim.io import load_crossings
+from bbrsim.io import load
 from bbrsim import physics, select
 
 # ── args ────────────────────────────────────────────────────────────────────
@@ -24,7 +24,8 @@ parser.add_argument("path", nargs="?", default="output/bbr.root")
 parser.add_argument("--temp", type=float, default=4.0, help="Emitter temperature [K]")
 args = parser.parse_args()
 
-df = select.add_evt_key(load_crossings(args.path))
+df, ab = load(args.path)
+df = select.add_evt_key(df)
 
 T  = args.temp
 kT = physics.K_EV * T
@@ -79,14 +80,15 @@ ax1.legend(fontsize=9)
 
 # ── Panel 2: n_reflect histogram ──────────────────────────────────────────────
 ax2 = fig.add_subplot(gs[0, 2])
-nr = df.groupby("evt_key")["n_reflect"].max().values
-bins_n = np.arange(1, min(nr.max() + 2, 22))
+nr = (ab["n_reflections"].values if "n_reflections" in ab
+      else df.groupby("evt_key")["n_reflect"].max().values)
+bins_n = np.arange(0, max(2, min(nr.max() + 2, 22)))
 cnts, edg = np.histogram(nr, bins=bins_n)
 ax2.bar(0.5*(edg[:-1]+edg[1:]), cnts, width=1.0, alpha=0.75, color="darkorange")
 ax2.set_yscale("log")
-ax2.set_xlabel("n_reflect (reflections per track)")
+ax2.set_xlabel("Reflections per track" if "n_reflections" in ab else "Boundary crossings (legacy output)")
 ax2.set_ylabel("Counts")
-ax2.set_title("Reflection count per photon")
+ax2.set_title("Final track counts")
 
 # ── Panel 3: Cu first-hit position (y vs z) ──────────────────────────────────
 ax3 = fig.add_subplot(gs[1, 0])
