@@ -12,6 +12,7 @@
 #ifndef BBRTestSupport_hh
 #define BBRTestSupport_hh
 
+#include "G4Electron.hh"
 #include "G4ExceptionSeverity.hh"
 #include "G4ThreeVector.hh"
 #include "G4VExceptionHandler.hh"
@@ -47,6 +48,17 @@ inline void G4iosSetDestination(G4coutDestination* sink)
 #endif
 
 namespace bbrtest {
+
+// Before Geant4 11.4, G4OpticalPhysics::ConstructProcess always calls
+// G4LossTableManager::Instance(), which creates e- after PreInit. That e- has no
+// process manager, and G4OpticalPhysics aborts on it. An optical-only physics
+// list therefore creates e- in PreInit, where it gets one.
+inline void CreateElectronInPreInit()
+{
+#if G4VERSION_NUMBER < 1140
+  G4Electron::Definition();
+#endif
+}
 
 // A G4Exception turned into a C++ exception by ThrowingExceptionHandler.
 struct G4ExceptionCaught : std::runtime_error {

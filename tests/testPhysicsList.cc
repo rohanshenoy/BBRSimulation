@@ -167,6 +167,7 @@ G4RunManager* BuildEventLoop(G4RunManagerType type) {
   if (!data) throw std::runtime_error("BBRSIM_TEST_DATA is not set");
   BBRConfigManager::SetDataDir(data);   // on the master, before the workers copy it
   auto* rm = G4RunManagerFactory::CreateRunManager(type);
+  bbrtest::CreateElectronInPreInit();
   rm->SetNumberOfThreads(2);            // no effect on the sequential run manager
   rm->SetUserInitialization(new CrackWorld);
   G4OpticalParameters::Instance()->SetProcessActivation("Cerenkov", false);

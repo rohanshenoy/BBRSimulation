@@ -262,6 +262,7 @@ int main(int argc, char** argv)
   Stepping* stepping = nullptr;
   try {
     auto* rm = G4RunManagerFactory::CreateRunManager(G4RunManagerType::SerialOnly);
+    bbrtest::CreateElectronInPreInit();
     rm->SetUserInitialization(new Geometry);
     // Optical photons only: Cerenkov and scintillation need charged particles
     // (G4EmSaturation creates e- after PreInit and G4OpticalPhysics then aborts).
