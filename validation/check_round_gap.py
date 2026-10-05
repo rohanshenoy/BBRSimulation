@@ -4,8 +4,15 @@ Validate the straight round gap on the output of Validation_RoundGap.mac.
 
 Setup: a vacuum_wg G4DisplacedSolid tube (radius 51 um, axis along x) in a
 0.4 mm Cu plate at z = -80 mm, fed by the mock HFSS dataset
-RoundGap_r50um_2000GHz (validation/Scripts/make_mock_round_gap.py). Eight
-fixed-gun runs at 2000 GHz write output/bbr_round_r00.root ... r07.
+RoundGap_r50um_2000GHz (validation/Scripts/make_mock_round_gap.py). Nine
+fixed-gun runs at 2000 GHz write output/bbr_round_r00.root ... r08: normal
+incidence with E across g, E along l and random polarization; the four 45 deg
+tilts toward +-l and +-g; the diagonal (IWavePhi 45, IWaveTheta 135) with random
+polarization, where the cross term averages out; and the same diagonal with a
+fixed polarization of equal theta-hat and phi-hat components, where the mock's
+Re rho = 0.288 makes the cross term 2 Et Ep sqrt(T0 T1) Re rho large. There
+T = 0.511, and 0.289 with the cross term's sign flipped, 28 sigma apart at 4000
+events, so r08 pins that sign end to end.
 
 Per run:
   * one RoundGap_r50um entry per event, along the configured direction;
@@ -16,16 +23,22 @@ Per run:
     of the table's prediction. The Ephi=0 profile (1 - (r/R)^2)^2 and the Ephi=1
     profile (r/R)^4 differ, so this sees the polarization mapping;
   * the mean exit direction is within 4 SE of the prediction in each component.
+With --log <run.log>: the startup check (BBRCrackLibrary::ValidatePlacedCracks)
+printed exactly one "[BBR] crack RoundGap_r50um:" line reporting its sidecar(s)
+fit, so the placed solid was checked against the sidecar before any photon.
+
+49 checks with --log, 48 without: 5 for each of the 6 random-polarization runs
+and 6 for each of the 3 fixed-polarization runs.
 
 Usage:
-    conda run -n bbrsim python validation/check_round_gap.py <output_dir> --data-dir <mock root>
+    conda run -n bbrsim python validation/check_round_gap.py <output_dir> --data-dir <mock root> [--log run.log]
 """
 import argparse
 import os
+import re
 import sys
 
 import numpy as np
-import pandas as pd
 
 from bbrsim import hfss
 from bbrsim.io import load
@@ -42,16 +55,17 @@ RUNS = [   # (label, gun direction, polarization or None = random, events): the 
     ("+g tilt random", (S, 0., S), None, 4000),
     ("-g tilt random", (S, 0., -S), None, 4000),
     ("diagonal random", (S, .5, .5), None, 4000),
+    ("diagonal fixed (Et = Ep)", (S, .5, .5), (.5, .14644661, -.85355339), 4000),
 ]
 SIGMA_T_MAX, Z_MAX = 3.0, 4.0
 
 ap = argparse.ArgumentParser()
 ap.add_argument("output", nargs="?", default="output")
 ap.add_argument("--data-dir", required=True, help="data root holding waveguides/RoundGap_r50um_2000GHz_*")
+ap.add_argument("--log", help="the run log; check the startup crack line of RoundGap_r50um")
 args = ap.parse_args()
 base = os.path.join(args.data_dir, "waveguides")
 datasets = hfss.load_dataset(STEM, base)
-wg = {e: pd.read_csv(os.path.join(base, f"{STEM}_Ephi={e}", "waveguide.csv")) for e in (0, 1)}
 results = []
 
 
@@ -64,14 +78,21 @@ def unit(v):
     return v / np.linalg.norm(v)
 
 
-def inner_share(key, Et, Ep):
+def inner_share(ds, Et, Ep):
     """Predicted share of exits with r < R/2 for (E_theta, E_phi) at one key."""
-    w = {e: wg[e][(wg[e].IWavePhi == key[0]) & (wg[e].IWaveTheta == key[1])].reset_index(drop=True) for e in (0, 1)}
-    E = {e: np.stack([w[e][f"E{c}_real"].to_numpy() + 1j * w[e][f"E{c}_imag"].to_numpy() for c in "xyz"], axis=1)
-         for e in (0, 1)}
-    weight = np.sum(np.abs(Et * E[0] + Ep * E[1]) ** 2, axis=1)
-    r_mm = np.hypot(w[0].Y.to_numpy(), w[0].Z.to_numpy()) * 1e3
-    return float(weight[r_mm < R_MM / 2].sum() / weight.sum())
+    r_mm = np.hypot(ds.exit_y_m, ds.exit_z_m) * 1e3
+    return float(hfss.exit_position_weights(ds, Et, Ep)[r_mm < R_MM / 2].sum())
+
+
+if args.log:
+    try:
+        with open(args.log, errors="replace") as fh:
+            lines = [ln.rstrip() for ln in fh if f"[BBR] crack {ID}:" in ln]
+    except OSError as err:
+        lines = [f"unreadable: {err}"]
+    fit = [re.search(r"; (\d+) sidecar\(s\) fit$", ln) for ln in lines]
+    check("startup crack check in the log", len(lines) == 1 and fit[0] is not None and int(fit[0].group(1)) >= 1,
+          lines[0] if len(lines) == 1 else f"{len(lines)} '[BBR] crack {ID}:' lines in {args.log}")
 
 
 for i, (label, k, pol, n) in enumerate(RUNS):
@@ -95,7 +116,7 @@ for i, (label, k, pol, n) in enumerate(RUNS):
         p = p - np.dot(p, unit(k)) * unit(k)
         Et, Ep = hfss.polarization_components(unit(p), inc)
         T_pred, W = hfss.transmittance(ds, Et, Ep), hfss.direction_weights(ds, Et, Ep)
-        share = inner_share(ds.key, Et, Ep)
+        share = inner_share(ds, Et, Ep)
     tr = ent[ent.status == "BBRDiffractionTransmit"]
     T_obs = len(tr) / max(len(ent), 1)
     sig = np.sqrt(max(T_pred * (1 - T_pred), 1e-12) / max(len(ent), 1))

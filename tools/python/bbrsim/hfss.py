@@ -57,6 +57,10 @@ class AngleDataset:
     F1_theta: np.ndarray      # complex rEtheta for Ephi=1 input
     F1_phi: np.ndarray        # complex rEphi   for Ephi=1 input
     rho: complex = 0j         # normalized exit-field overlap <E0,E1> (polarization cross term)
+    exit_y_m: np.ndarray = None   # waveguide.csv Y of every exit point (exit CS, metres; along theta_f)
+    exit_z_m: np.ndarray = None   # waveguide.csv Z of every exit point (exit CS, metres; along phi_f)
+    E0: np.ndarray = None         # (M, 3) complex exit field (Ex, Ey, Ez) for Ephi=0 input
+    E1: np.ndarray = None         # (M, 3) complex exit field for Ephi=1 input, paired by row with E0
 
 
 def load_dataset(dir_stem, base_dir=None):
@@ -149,6 +153,7 @@ def load_dataset(dir_stem, base_dir=None):
             b.rEtheta_real.to_numpy(float) + 1j * b.rEtheta_imag.to_numpy(float),
             b.rEphi_real.to_numpy(float) + 1j * b.rEphi_imag.to_numpy(float),
             rho,
+            w[0].Y.to_numpy(float), w[0].Z.to_numpy(float), E[0], E[1],
         )
     return out
 
@@ -261,6 +266,19 @@ def direction_weights(ds, E_theta, E_phi):
     w = np.where(cosN < K_MIN_NORMAL_COMPONENT, 0., w)
     s = w.sum()
     return w / s if s > 0 else np.full_like(w, 1. / len(w))
+
+
+def exit_position_weights(ds, E_theta, E_phi):
+    """Normalised sampling weights over the exit points (rows of waveguide.csv).
+
+    weight_j = |E_theta E0_j + E_phi E1_j|^2 summed over (Ex, Ey, Ez), the runtime CDF
+    of BBRHFSSData::SampleExitPosition; uniform when every weight is zero, as the C++
+    then draws a uniform index. Point j sits at ds.exit_y_m[j] along theta_f and
+    ds.exit_z_m[j] along phi_f from the exit-face centre.
+    """
+    w = np.sum(np.abs(E_theta * ds.E0 + E_phi * ds.E1) ** 2, axis=1)
+    s = w.sum()
+    return w / s if s > 0 else np.full(len(w), 1. / len(w))
 
 
 def outgoing_directions(ds, inc):

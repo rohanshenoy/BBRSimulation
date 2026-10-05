@@ -1,9 +1,10 @@
 # Validation_RoundGap.mac - the straight round gap (opt-in /bbr/testworld/roundGap)
 # against the mock dataset RoundGap_r50um_2000GHz (validation/Scripts/
 # make_mock_round_gap.py). Run from an empty directory whose parent holds
-# mock_round_gap/ (the runner links it). Eight fixed-gun runs at 2000 GHz, one
+# mock_round_gap/ (the runner links it). Nine fixed-gun runs at 2000 GHz, one
 # ROOT file each; check_round_gap.py reads them in this order. Every beam reaches
-# the hole centre (0, 0, -80) mm at x = 0.
+# the hole centre (0, 0, -80) mm at x = 0. check_round_gap.py makes 49 checks on
+# them with --log run.log (as the runner calls it), 48 without.
 /run/verbose 0
 /event/verbose 0
 /tracking/verbose 0
@@ -54,10 +55,16 @@
 /bbr/gun/posZ -60.0
 /analysis/setFileName output/bbr_round_r06
 /run/beamOn 4000
-# r07 diagonal (IWavePhi 45: the cross term is active)
+# r07 diagonal (IWavePhi 45), random polarization: the cross term averages out
 /bbr/gun/dirY 0.5
 /bbr/gun/dirZ 0.5
 /bbr/gun/posY -14.142136
 /bbr/gun/posZ -94.142136
 /analysis/setFileName output/bbr_round_r07
+/run/beamOn 4000
+# r08 the same diagonal, fixed polarization (e_theta + e_phi)/sqrt(2) of the
+# wrapper's incident basis: the cross term 2 Et Ep sqrt(T0 T1) Re rho is large
+# (T 0.511, 0.289 with its sign flipped), so this run pins the sign end to end
+/bbr/gun/pol 0.5 0.14644661 -0.85355339
+/analysis/setFileName output/bbr_round_r08
 /run/beamOn 4000

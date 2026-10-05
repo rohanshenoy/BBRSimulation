@@ -385,6 +385,48 @@ def test_direction_weights(tmp_path):
     assert np.all(dirs[w > 0] @ inc.normal > 0)
 
 
+def write_exit_dataset(base, stem, points, f0, f1):
+    """Both KEYS with the 4-point far field of write_dataset and the given exit points
+    (Y, Z in metres, X = 0); f0[j] / f1[j] are the complex (Ex, Ey, Ez) at point j."""
+    for e, fields in ((0, f0), (1, f1)):
+        d = os.path.join(base, f"{stem}_Ephi={e}")
+        os.makedirs(d)
+        with open(os.path.join(d, "far_field.csv"), "w") as fh:
+            fh.write(FF_HDR)
+            for ip, it in KEYS:
+                for p, t in GRID:
+                    fh.write(f"500GHz,{e},{ip},{it},{p},{t},0.1,0.0,0.2,0.05\n")
+        with open(os.path.join(d, "waveguide.csv"), "w") as fh:
+            fh.write(WG_HDR)
+            for ip, it in KEYS:
+                for (y, z), f in zip(points, fields):
+                    f = [complex(c) for c in f]
+                    fh.write(f"500GHz,{e},{ip},{it},0.4,1.0,0,{y},{z},"
+                             + ",".join(str(c.real) for c in f) + ","
+                             + ",".join(str(c.imag) for c in f) + "\n")
+
+
+def test_exit_position_weights(tmp_path):
+    # Three exit points; weight_j = |Et E0_j + Ep E1_j|^2 summed over components
+    # (BBRHFSSData::SampleExitPosition), normalized; uniform when every weight is zero.
+    pts = [(-1e-5, 0.0), (0.0, 2e-5), (3e-5, -4e-5)]
+    f0 = [(0, 1, 0), (0, 0, 1), (0, 0, 0)]
+    f1 = [(0, 1, 0), (0, 0, -1), (0, 0, 2j)]
+    write_exit_dataset(tmp_path, "c_500GHz", pts, f0, f1)
+    d = hfss.load_dataset("c_500GHz", str(tmp_path))[(0.0, 135.0)]
+    assert np.allclose(d.exit_y_m, [p[0] for p in pts]) and np.allclose(d.exit_z_m, [p[1] for p in pts])
+    assert d.E0.shape == (3, 3) and d.E1[2, 2] == 2j
+    assert np.allclose(hfss.exit_position_weights(d, 1.0, 0.0), [0.5, 0.5, 0.0])
+    assert np.allclose(hfss.exit_position_weights(d, 0.0, 1.0), [1 / 6, 1 / 6, 4 / 6])
+    # The diagonal adds the fields coherently: point 0 in phase (|2 R2|^2 = 2), point 1
+    # cancels (0), point 2 in quadrature (|2j R2|^2 = 2).
+    assert np.allclose(hfss.exit_position_weights(d, R2, R2), [0.5, 0.0, 0.5])
+    assert np.allclose(hfss.exit_position_weights(d, R2, -R2), [0.0, 0.5, 0.5])
+    write_exit_dataset(tmp_path / "zero", "c_500GHz", pts, [(0, 0, 0)] * 3, [(0, 0, 0)] * 3)
+    z = hfss.load_dataset("c_500GHz", str(tmp_path / "zero"))[(0.0, 180.0)]
+    assert np.allclose(hfss.exit_position_weights(z, R2, R2), [1 / 3] * 3)
+
+
 def test_random_polarization_mean_is_average(tmp_path):
     write_dataset(tmp_path, "c_500GHz", T=(0.3, 0.8))
     ds = hfss.load_dataset("c_500GHz", str(tmp_path))[(0.0, 180.0)]

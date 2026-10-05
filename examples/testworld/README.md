@@ -105,10 +105,10 @@ If you `cmake --install` the example into the library's prefix, a shell that has
 ## Testing
 
 The regression runner runs this executable on three of the macros here,
-`reflectance.mac`, `planck.mac` and `config_mt.mac`, and on five fixtures that
+`reflectance.mac`, `planck.mac` and `config_mt.mac`, and on six fixtures that
 exist only in `validation/G4Macros/` (`Validation_CrackWall`,
 `Validation_WorldExit`, `Validation_CrackTransmit`, `Validation_CrackOblique`,
-`Validation_CrackFrequency`). The three macros are therefore regression
+`Validation_CrackFrequency`, `Validation_RoundGap`). The three macros are therefore regression
 inputs: the drift guard `regression macros pinned` fails when one of their
 command lines changes (only full-line comment and blank-line edits
 pass), so change them only together with their validators and then update the

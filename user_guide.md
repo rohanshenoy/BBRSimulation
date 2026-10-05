@@ -155,6 +155,7 @@ are allowed and whether they reach the worker threads:
 | `/bbr/det/` | before `/run/initialize` | no | geometry is built once, on the master |
 | `/bbr/thermal/` | any time | yes | emitter rebuilt at the next event |
 | `/bbr/gun/` | any time | yes | read every event |
+| `/bbr/testworld/roundGap` | before `/run/initialize` | no | test world only, default `false`: `true` also places the opt-in straight round gap `RoundGap_r50um`, which needs a data root holding a `RoundGap_r50um` dataset (`/bbr/dataDir`) |
 | `/bbr/config/print` | any time | — | prints every current setting |
 
 There is no runtime geometry change: after `/run/initialize`, changing a
@@ -280,7 +281,7 @@ output (default `output/bbr.root` in the current directory) through the
 | `check_crack_wall_reflection.py` | reflection off a crack's side wall flips only p_z |
 | `check_crack_oblique.py` | 45° incidence: 138 checks against the HFSS tables and the Python model |
 | `check_crack_frequency.py` | dataset choice per photon on the mock five-frequency tree: 89 checks (`--data-dir`) |
-| `check_round_gap.py` | the opt-in straight round gap at 2000 GHz on its mock dataset: transmittance per polarization, exit positions inside the HFSS radius, the radial exit profile per polarization and the mean exit direction, 42 checks over eight runs (`--data-dir`) |
+| `check_round_gap.py` | the opt-in straight round gap at 2000 GHz on its mock dataset: transmittance per polarization, exit positions inside the HFSS radius, the radial exit profile per polarization and the mean exit direction, 49 checks over nine runs, one of them the startup crack line in the run log (`--data-dir`, `--log`) |
 | `check_invariants.py` | no photon ever travels inside a metal, and every photon death is labelled correctly (`--allow-no-crossings` for a run that crosses no boundary) |
 | `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the two mock trees): every dataset is a complete trio with a valid schema-1 sidecar (full mode lists, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
 

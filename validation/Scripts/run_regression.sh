@@ -253,13 +253,15 @@ rm -rf "$REG"; mkdir -p "$REG"
 
 # Mock multi-frequency HFSS tree for the frequency fixture. ~1.3 GB and ~5 s, so
 # it is rebuilt only when it is missing or older than the real data, the
-# generator or bbrsim/sidecar.py (which writes its sidecars). It lives in the
+# generator, bbrsim/sidecar.py (which writes its sidecars) or bbrsim/hfss.py
+# (which sidecar.py imports). It lives in the
 # build dir and is reached from a macro's run directory as ../mock_hfss via the
 # symlink beside it.
 MOCK="$BUILD/mock_hfss"
 if [ ! -d "$MOCK/waveguides" ] || \
    [ -n "$(find "$REPO/data/waveguides" "$VAL/Scripts/make_mock_hfss_frequencies.py" \
-            "$REPO/tools/python/bbrsim/sidecar.py" -newer "$MOCK/waveguides" -print -quit 2>/dev/null)" ]; then
+            "$REPO/tools/python/bbrsim/sidecar.py" "$REPO/tools/python/bbrsim/hfss.py" \
+            -newer "$MOCK/waveguides" -print -quit 2>/dev/null)" ]; then
   echo "generating mock HFSS frequency tree in $MOCK ..."
   # Written beside the final path and renamed only on success, so an interrupted
   # or failed generation cannot leave a partial tree that later runs would reuse.
@@ -274,11 +276,13 @@ fi
 ln -s "$MOCK" "$REG/mock_hfss"
 
 # Mock round-gap tree for the round case: the RoundGap_r50um dataset plus links to
-# the real cracks (BBRsim validates every placed crack). Small; rebuilt when stale.
+# the real cracks (BBRsim validates every placed crack). Small; rebuilt when it is
+# missing or older than the real data, the generator, bbrsim/sidecar.py or bbrsim/hfss.py.
 MOCKRG="$BUILD/mock_round_gap"
 if [ ! -d "$MOCKRG/waveguides" ] || \
    [ -n "$(find "$REPO/data/waveguides" "$VAL/Scripts/make_mock_round_gap.py" "$REPO/tools/python/bbrsim/sidecar.py" \
-            -newer "$MOCKRG/waveguides" -print -quit 2>/dev/null)" ]; then
+            "$REPO/tools/python/bbrsim/hfss.py" -newer "$MOCKRG/waveguides" -print -quit 2>/dev/null)" ]; then
+  echo "generating mock round-gap tree in $MOCKRG ..."
   rm -rf "$MOCKRG" "$MOCKRG.tmp"
   if ! $PY "$VAL/Scripts/make_mock_round_gap.py" --real "$REPO/data/waveguides" --dst "$MOCKRG.tmp" \
          >"$BUILD/mock_round_gap.log" 2>&1 || ! mv "$MOCKRG.tmp" "$MOCKRG"; then
@@ -450,7 +454,9 @@ for f in "$REG"/frequency/output/bbr_freq_r*.root; do
 done
 if [ "$frq_n" -gt 0 ] && [ "$frq_bad" -eq 0 ]; then line PASS "frequency invariants" "[frequency] check_invariants on $frq_n per-run files"; pass=$((pass+1))
 else fail=$((fail+frq_bad)); [ "$frq_n" -eq 0 ] && { line FAIL "frequency invariants" "[frequency] no per-run files found"; fail=$((fail+1)); }; fi
-out=$($PY "$VAL/check_round_gap.py" "$REG/round/output" --data-dir "$REG/mock_round_gap" 2>&1); rc=$?
+# 49 checks over the nine runs, including the startup crack line in the run log.
+out=$($PY "$VAL/check_round_gap.py" "$REG/round/output" --data-dir "$REG/mock_round_gap" \
+          --log "$REG/round/run.log" 2>&1); rc=$?
 res=$(echo "$out" | grep -E "^RESULT" | tail -1)
 if [ $rc -eq 0 ]; then line PASS check_round_gap.py "[round] $res"; pass=$((pass+1))
 else line FAIL check_round_gap.py "[round] $res"; fail=$((fail+1)); echo "$out" | grep -E "^  FAIL" | head -8 | sed 's/^/       /'; fi
