@@ -134,10 +134,11 @@ BBRConfigMessenger::~BBRConfigMessenger() {
 }
 
 void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
+  G4bool accepted = true;
   if      (cmd == fPrintCmd)   { BBRConfigManager::Print(G4cout); }
-  else if (cmd == fSetTCmd)    { BBRConfigManager::SetThermalT_K(G4UIcmdWithADoubleAndUnit::GetNewDoubleValue(value) / CLHEP::kelvin); }
+  else if (cmd == fSetTCmd)    { accepted = BBRConfigManager::SetThermalT_K(G4UIcmdWithADoubleAndUnit::GetNewDoubleValue(value) / CLHEP::kelvin); }
   else if (cmd == fEmitCenterCmd) { BBRConfigManager::SetEmitterCenter_mm(G4UIcmdWith3VectorAndUnit::GetNew3VectorValue(value) / mm); }
-  else if (cmd == fEmitSizeCmd)   { BBRConfigManager::SetEmitterSize_mm(G4UIcmdWith3VectorAndUnit::GetNew3VectorValue(value) / mm); }
+  else if (cmd == fEmitSizeCmd)   { accepted = BBRConfigManager::SetEmitterSize_mm(G4UIcmdWith3VectorAndUnit::GetNew3VectorValue(value) / mm); }
   else if (cmd == fGunModeCmd) { BBRConfigManager::SetGunMode(G4UIcmdWithABool::GetNewBoolValue(value)); }
   else if (cmd == fGunPosXCmd) { BBRConfigManager::SetGunPosX_mm(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunPosYCmd) { BBRConfigManager::SetGunPosY_mm(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
@@ -145,7 +146,7 @@ void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
   else if (cmd == fGunDirXCmd) { BBRConfigManager::SetGunDirX(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunDirYCmd) { BBRConfigManager::SetGunDirY(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunDirZCmd) { BBRConfigManager::SetGunDirZ(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
-  else if (cmd == fGunECmd)    { BBRConfigManager::SetGunEnergy_eV(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
+  else if (cmd == fGunECmd)    { accepted = BBRConfigManager::SetGunEnergy_eV(G4UIcmdWithADouble::GetNewDoubleValue(value)); }
   else if (cmd == fGunPolCmd)  { BBRConfigManager::SetGunPol(G4UIcmdWith3Vector::GetNew3VectorValue(value)); }
   else if (cmd == fDataDirCmd) {
     // Strip one pair of surrounding double or single quotes.
@@ -153,7 +154,14 @@ void BBRConfigMessenger::SetNewValue(G4UIcommand* cmd, G4String value) {
     if (v.size() >= 2 && ((v.front()=='"' && v.back()=='"') || (v.front()=='\'' && v.back()=='\''))) v = v.substr(1, v.size()-2);
     BBRConfigManager::SetDataDir(v);
   }
-  else if (cmd == fCuMatCmd)   { BBRConfigManager::SetCuMaterial(value); }
-  else if (cmd == fCuRRRCmd)   { BBRConfigManager::SetCuRRR(G4UIcmdWithAnInteger::GetNewIntValue(value)); }
-  else if (cmd == fCuStageTCmd){ BBRConfigManager::SetCuStageT_K(G4UIcmdWithADoubleAndUnit::GetNewDoubleValue(value)); }
+  else if (cmd == fCuMatCmd)   { accepted = BBRConfigManager::SetCuMaterial(value); }
+  else if (cmd == fCuRRRCmd)   { accepted = BBRConfigManager::SetCuRRR(G4UIcmdWithAnInteger::GetNewIntValue(value)); }
+  else if (cmd == fCuStageTCmd){ accepted = BBRConfigManager::SetCuStageT_K(G4UIcmdWithADoubleAndUnit::GetNewDoubleValue(value)); }
+  // A rejected value fails the command, so a batch macro stops and the
+  // executable exits non-zero instead of running with the previous value.
+  if (!accepted) {
+    G4ExceptionDescription ed;
+    ed << cmd->GetCommandPath() << " " << value << ": value rejected (see the [BBR] message above)";
+    cmd->CommandFailed(ed);
+  }
 }

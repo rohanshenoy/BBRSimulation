@@ -43,8 +43,11 @@ compares the three fixed-seed numbers (reflectance pull, crack T_obs, Planck
 peak ratio) exactly with `Scripts/numbers.baseline` (row `fixed-seed
 numbers`), for refactors that must not change behaviour. The exit code is the
 number of unexpected failures; a green run ends with the line
-`pass=54  fail=0  xfail=1  xpass=0` (two spaces between fields, then the output
-directory; `pass=55` with `BBR_PIN=1`).
+`fail=0  xfail=1  xpass=0`; the pass count includes the optional fixed-seed row
+when `BBR_PIN=1`. New rows cover batch errors and the optional in-tree example
+build. The application provenance row edits and rebuilds a standalone example
+copy, checking that its recorded fingerprint changes while the installed library
+fingerprint stays fixed; pytest also exercises real redirected output and per-result metadata.
 
 | Case | Macro | Executable | Validators |
 |---|---|---|---|
@@ -89,7 +92,7 @@ not installed is skipped) and exits with its FAIL count.
 
 - `check_reflectance.py` — the absorbed count is within 5 σ (Poisson) of N·D from the full Drude model.
 - `check_planck_spectrum.py` — two rows, both required: the peak of E/kT of the emitted photons is within [0.65, 1.35] of the photon-number peak 1.5936, and a Kolmogorov-Smirnov test of the first-crossing energies against the photon-number Planck CDF truncated to the emitter band (4.14e-5 to 8.27e-2 eV) gives p > 0.01. The peak row alone passes 10 K data analysed at 9–12 K; the KS row fails a 10 % temperature error (and so a worker that missed the `config_mt` broadcast).
-- `check_nreflect.py` — n_reflect = 1 is the modal bin and the counts do not rise for n = 1…10.
+- `check_nreflect.py` — schema-2 per-track boundary ordinals must be contiguous and unique; cumulative reflection counts must match decoded statuses, and final termination totals must match the crossing rows. Every track must have exactly one termination. Zero-crossing world exits pass with zero totals. Legacy schemas are explicitly unsupported by this check. The plot shows final actual reflections per track, including zero. Runs on the Planck, crack-wall, world-exit and light-pipe fixtures.
 - `check_angle_distribution.py` — first-hit Cu incidence angles below 15° match uniform-in-θ emission (KS p > 0.01). The test is N-sensitive: it is meant for the 10k-event `planck` case (`planck.mac`).
 - `check_crack_wall_reflection.py` — every crack→Cu reflection flips p_z and keeps p_x, p_y to 1e-9.
 - `check_crack_transmittance.py` — T_obs within 3 σ (binomial) of 0.50 and no tangential exits.

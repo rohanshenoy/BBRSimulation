@@ -1,8 +1,7 @@
 #----------------------------------------------------------------------------
 # BBRsim — top-level project: builds and installs the BBRsim library.
-# Layout: library/, examples/, validation/, tools/. The examples
-# and the validation smoke test are standalone projects built against the
-# installed library (source bbrsim_env.sh or pass CMAKE_PREFIX_PATH).
+# Optionally builds the examples from this source tree. The examples also
+# remain standalone projects that consume an installed library.
 cmake_minimum_required(VERSION 3.16...3.27)
 # C is enabled too (as before the reorg) so the presets' CMAKE_C_COMPILER is used.
 project(BBRsim VERSION 0.1.0 LANGUAGES C CXX)
@@ -12,6 +11,7 @@ option(INSTALL_EXAMPLES "Copy examples/ to the installation area" OFF)
 option(INSTALL_VALIDATION "Copy validation/ to the installation area" ON)
 option(BUILD_BBRSIM_TOOLS "Install the bbrsim Python package and the plot scripts" ON)
 option(BUILD_BBRSIM_TESTS "Build the C++ tests under tests/ and register them with CTest" OFF)
+option(BUILD_BBRSIM_EXAMPLES "Build the examples against this source-tree library" OFF)
 set(BBRSIM_VERSION "${PROJECT_VERSION}" CACHE STRING
     "Version string used when the source is not a git checkout")
 
@@ -28,6 +28,10 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 add_subdirectory(library)
+if(BUILD_BBRSIM_EXAMPLES)
+  add_subdirectory(examples/testworld)
+  add_subdirectory(examples/lightpipe)
+endif()
 if(BUILD_BBRSIM_TOOLS)
   add_subdirectory(tools)
 endif()

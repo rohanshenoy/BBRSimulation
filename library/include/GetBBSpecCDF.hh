@@ -14,9 +14,14 @@ class GetBBSpecCDF {
 
   void initialize(G4double temperature_K, G4double emin_eV, G4double emax_eV);
 
-  std::vector<G4double> x;    // energy axis, raw eV
-  std::vector<G4double> pdf;  // normalised PDF
-  std::vector<G4double> cdf;  // normalised CDF
+  const std::vector<G4double>& EnergyAxis() const { return x; }  // raw eV
+  const std::vector<G4double>& PDF() const { return pdf; }
+  const std::vector<G4double>& CDF() const { return cdf; }
+
+ private:
+  std::vector<G4double> x;
+  std::vector<G4double> pdf;
+  std::vector<G4double> cdf;
 };
 
 #endif

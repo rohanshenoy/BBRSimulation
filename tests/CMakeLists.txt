@@ -129,15 +129,16 @@ foreach(t stock wrapped stock2 mutant identical repeatable mutant_differs wls_st
 endforeach()
 
 bbrsim_add_test_program(testMaterials LABEL unit
-  CASES cu_table_shape cu_drude_grid cu_limits cu_serov_of cu_offgrid_interp cu_cache cu_invalid_input
+  CASES cu_table_shape cu_drude_grid cu_limits cu_serov_of cu_offgrid_interp cu_cache cu_temperature_identity cu_invalid_input
         dielectrics dielectric_offgrid_interp dielectric_name_collision flag_materials
   ENV "G4LEDATA=/nonexistent;G4LEVELGAMMADATA=/nonexistent;G4NEUTRONHPDATA=/nonexistent;G4RADIOACTIVEDATA=/nonexistent;G4PARTICLEXSDATA=/nonexistent;G4PIIDATA=/nonexistent;G4REALSURFACEDATA=/nonexistent;G4SAIDXSDATA=/nonexistent;G4ABLADATA=/nonexistent;G4INCLDATA=/nonexistent;G4ENSDFSTATEDATA=/nonexistent;G4CHANNELINGDATA=/nonexistent")
 bbrsim_add_test_program(testEmission LABEL unit
-  CASES planck_cdf_shape planck_cdf_invalid planck_band_loss genevt_nonrandom_exact genevt_rotation genevt_statistics genevt_guards geometric_surface_area)
+  CASES planck_cdf_shape planck_cdf_invalid planck_cdf_cold_band planck_narrow_band planck_failed_reinitialization planck_band_loss genevt_nonrandom_exact genevt_rotation genevt_statistics genevt_guards surface_input_guards zero_emissivity geometric_surface_area)
 bbrsim_add_test_program(testConfig LABEL unit
   CASES defaults command_table datadir_quotes setT_units validation_paths datadir_default datadir_env datadir_env_late
         worker_clone_isolation worker_before_master print_flushes
   ENVMOD "BBRSIMDATA=unset:")
+bbrsim_add_test_program(testBoundaryStatuses LABEL unit CASES stock_statuses)
 target_compile_definitions(testConfig PRIVATE "BBRSIM_TEST_PREFIX=\"${CMAKE_INSTALL_PREFIX}\"")
 set_tests_properties(testConfig.datadir_env testConfig.datadir_env_late PROPERTIES ENVIRONMENT_MODIFICATION "${BBRSIM_TEST_HERMETIC};BBRSIMDATA=set:/env/data")
 

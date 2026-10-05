@@ -135,23 +135,25 @@ int main(int argc, char** argv) {
       BBRConfigManager::Instance();
       Capture cap;
       G4iosSetDestination(&cap);
+      // A rejected value keeps the old one and fails the command.
       const G4int rc = Apply("/bbr/det/setCuRRR 0");
-      CHECK(rc == 0 && BBRConfigManager::GetCuRRR() == 100);
+      CHECK(rc != 0 && BBRConfigManager::GetCuRRR() == 100);
       CHECK(cap.err.find("[BBR]") != std::string::npos);
       cap.err.clear();
-      Apply("/bbr/det/setCuMaterial bogus");
+      CHECK(Apply("/bbr/det/setCuMaterial bogus") != 0);
       CHECK(BBRConfigManager::GetCuRRR() == 100 && BBRConfigManager::GetCuStageT_K() == 4.);
       CHECK(cap.err.find("[BBR]") != std::string::npos);
       const double nan = std::numeric_limits<double>::quiet_NaN();
-      BBRConfigManager::SetThermalT_K(nan);
+      CHECK(!BBRConfigManager::SetThermalT_K(nan));
       CHECK(BBRConfigManager::GetThermalT_K() == 4.);
-      BBRConfigManager::SetCuStageT_K(nan);
+      CHECK(!BBRConfigManager::SetCuStageT_K(nan));
       CHECK(BBRConfigManager::GetCuStageT_K() == 4.);
-      BBRConfigManager::SetGunEnergy_eV(nan);
-      BBRConfigManager::SetGunEnergy_eV(-1.);
+      CHECK(!BBRConfigManager::SetGunEnergy_eV(nan));
+      CHECK(!BBRConfigManager::SetGunEnergy_eV(-1.));
       CHECK(BBRConfigManager::GetGunEnergy_eV() == 2.07e-3);
-      BBRConfigManager::SetEmitterSize_mm(G4ThreeVector(nan, 1., 1.));
+      CHECK(!BBRConfigManager::SetEmitterSize_mm(G4ThreeVector(nan, 1., 1.)));
       CHECK(BBRConfigManager::GetEmitterSize_mm() == G4ThreeVector(1., 20., 20.));
+      CHECK(BBRConfigManager::SetCuRRR(100) && BBRConfigManager::SetCuMaterial("OFHC_Cu"));
       G4iosSetDestination(nullptr);
     }},
     {"datadir_default", [] {  // BBRSIMDATA unset: the compiled-in default

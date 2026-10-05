@@ -1,3 +1,6 @@
+2026-09-30  review : Rejected /bbr/ values fail the command, so a batch run exits non-zero; geometry and HFSS data fingerprint recorded once per process, tessellated solids by facet count; runner scripts no longer need ripgrep; standalone example builds moved to <build>/standalone-examples.
+2026-09-30  audit : Per-result schema-2 metadata and provenance; true reflection counters and validator; shared source/output helpers; finite Planck normalization, surface guards (BBR023) and exact Cu temperature keys; batch failure exits; optional in-tree example build.
+2026-09-30  g4-11.1 : Builds and passes the C++ tests on Geant4 11.1.2 (Linux, GCC 13.2).
 2026-09-30  tests : C++ tests under CTest, pytest, pass-through regression; coherent HFSS transmittance, normalized per incidence key where it exceeds 1; error codes BBR012-BBR021.
 2026-09-28  bbrsim-V00-01-00  First tagged release: installable library, standalone examples, validation/ and tools/.
 2026-09-27  reorg : Installable library; standalone examples; validation/ fixtures; tools/python package; executables BBRSim/BBRLightPipe renamed bbrsimTestWorld/bbrsimLightPipe.

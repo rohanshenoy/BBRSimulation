@@ -6,7 +6,7 @@ load_crossings.
 """
 import re
 
-_CU_RE = re.compile(r"Cu_RRR(\d+)_T(\d+(?:\.\d+)?)K")
+_CU_RE = re.compile(r"Cu_RRR(\d+)_T(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)K")
 
 
 def add_evt_key(df):

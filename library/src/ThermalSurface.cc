@@ -14,6 +14,14 @@ void ThermalSurface::AddBoxSurface(G4ThreeVector center,
                                     G4double rot1, G4double rot2, G4double rot3,
                                     G4double emissivity)
 {
+  if (!std::isfinite(center.x()) || !std::isfinite(center.y()) ||
+      !std::isfinite(center.z()) || !std::isfinite(Wx) ||
+      !std::isfinite(Wy) || !std::isfinite(Wz) ||
+      !(Wx > 0.) || !(Wy > 0.) || !(Wz > 0.) ||
+      !std::isfinite(rot1) || !std::isfinite(rot2) || !std::isfinite(rot3) ||
+      !std::isfinite(emissivity) || emissivity < 0. || emissivity > 1.)
+    G4Exception("ThermalSurface::AddBoxSurface", "BBR023", FatalException,
+                "Box needs finite center/rotation, positive extents and emissivity in [0,1]");
   GeometricSurface s;
   s.type       = 3;
   s.center     = center;
@@ -26,14 +34,24 @@ void ThermalSurface::AddBoxSurface(G4ThreeVector center,
   s.rot3       = rot3;
   s.emissivity = emissivity;
   s.CalculateArea();
+  if (!std::isfinite(s.area) || !std::isfinite(area + s.area) ||
+      !std::isfinite(effArea + s.area * emissivity))
+    G4Exception("ThermalSurface::AddBoxSurface", "BBR023", FatalException,
+                "Box area or emitting area is too large");
 
   surfaces.push_back(s);
   area    += s.area;
   effArea += s.area * emissivity;
 }
 
-G4double ThermalSurface::GetArea()    { return area; }
-G4double ThermalSurface::GetEffArea() { return effArea; }
+void ThermalSurface::InitializeSpectrum(G4double temperature_K, G4double emin_eV, G4double emax_eV)
+{
+  BBSpecCDF.initialize(temperature_K, emin_eV, emax_eV);
+  temp = temperature_K;
+}
+
+G4double ThermalSurface::GetArea() const    { return area; }
+G4double ThermalSurface::GetEffArea() const { return effArea; }
 
 void ThermalSurface::ClearSurfaces()
 {
@@ -44,29 +62,32 @@ void ThermalSurface::ClearSurfaces()
 
 BBEvt ThermalSurface::GenEvt()
 {
-  if (BBSpecCDF.cdf.size() < 2) G4Exception("ThermalSurface::GenEvt", "BBR018", FatalException, "Planck CDF not initialized: call BBSpecCDF.initialize first");
+  if (BBSpecCDF.CDF().size() < 2) G4Exception("ThermalSurface::GenEvt", "BBR018", FatalException, "Planck CDF not initialized: call InitializeSpectrum first");
   G4ThreeVector X(1, 0, 0), Y(0, 1, 0), Z(0, 0, 1);
   BBEvt thisEvt;
 
   // ---- energy: inverse CDF with quadratic interpolation (YYC exact) ----
   G4double BBSpecProbBelow = G4UniformRand();
-  G4int    nCDF            = (G4int)BBSpecCDF.cdf.size();
+  const auto& cdf = BBSpecCDF.CDF();
+  const auto& pdf = BBSpecCDF.PDF();
+  const auto& x = BBSpecCDF.EnergyAxis();
+  G4int    nCDF            = (G4int)cdf.size();
   int      idx             = nCDF - 2;
   for (int i = 0; i < nCDF; ++i) {
-    if (BBSpecCDF.cdf[i] > BBSpecProbBelow) { idx = i - 1; break; }
+    if (cdf[i] > BBSpecProbBelow) { idx = i - 1; break; }
   }
   if (idx < 0)        idx = 0;
   if (idx >= nCDF - 1) idx = nCDF - 2;
 
-  G4double a = (BBSpecCDF.pdf[idx + 1] - BBSpecCDF.pdf[idx])
-               / (BBSpecCDF.x[idx + 1] - BBSpecCDF.x[idx]) / 2.;
-  G4double b = BBSpecCDF.pdf[idx];
-  G4double c = BBSpecCDF.cdf[idx] - BBSpecProbBelow;
+  G4double a = (pdf[idx + 1] - pdf[idx])
+               / (x[idx + 1] - x[idx]) / 2.;
+  G4double b = pdf[idx];
+  G4double c = cdf[idx] - BBSpecProbBelow;
 
   if (a != 0.)
-    thisEvt.energy = BBSpecCDF.x[idx] + (-b + std::sqrt(b * b - 4. * a * c)) / 2. / a;
+    thisEvt.energy = x[idx] + (-b + std::sqrt(b * b - 4. * a * c)) / 2. / a;
   else
-    thisEvt.energy = BBSpecCDF.x[idx] - c / b;
+    thisEvt.energy = x[idx] - c / b;
 
   // ---- surface selection: weighted by effective area (area × emissivity) ----
   // Photon emission per surface scales as ε·A·T⁴ (shared T here), so a gray
@@ -79,12 +100,18 @@ BBEvt ThermalSurface::GenEvt()
   int      N_surfaces   = (int)surfaces.size();
   for (int i = 0; i < N_surfaces; ++i)
     totalEffArea += surfaces[i].area * surfaces[i].emissivity;
+  if (!(totalEffArea > 0.) || !std::isfinite(totalEffArea))
+    G4Exception("ThermalSurface::GenEvt", "BBR019", FatalException,
+                "No emitting area. Add a surface with positive emissivity.");
 
   G4double prob  = G4UniformRand() * totalEffArea;
-  int idx_s = N_surfaces - 1;   // fallback: float underflow lands on the last surface
+  int idx_s = -1;
   for (int i = 0; i < N_surfaces; ++i) {
-    prob -= surfaces[i].area * surfaces[i].emissivity;
-    if (prob <= 0.) { idx_s = i; break; }
+    const G4double weight = surfaces[i].area * surfaces[i].emissivity;
+    if (weight == 0.) continue;
+    idx_s = i;   // float residue past the end lands on the last emitting surface
+    prob -= weight;
+    if (prob <= 0.) break;
   }
 
   // ---- box emission: port of YYC case 3 ----

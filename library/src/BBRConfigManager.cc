@@ -58,49 +58,54 @@ BBRConfigManager::BBRConfigManager(const BBRConfigManager& master)
 
 BBRConfigManager::~BBRConfigManager() { delete fMessenger; fMessenger = nullptr; }
 
-void BBRConfigManager::SetThermalT_K(G4double v) {
+G4bool BBRConfigManager::SetThermalT_K(G4double v) {
   if (!std::isfinite(v) || v <= 0.) {
     G4cerr << "[BBR] thermal/setT: temperature must be > 0 K, got " << v << G4endl;
-    return;
+    return false;
   }
   Instance()->fThermalT_K = v;
+  return true;
 }
 
-void BBRConfigManager::SetEmitterSize_mm(const G4ThreeVector& v) {
+G4bool BBRConfigManager::SetEmitterSize_mm(const G4ThreeVector& v) {
   if (!std::isfinite(v.x()) || !std::isfinite(v.y()) || !std::isfinite(v.z()) ||
       v.x() <= 0. || v.y() <= 0. || v.z() <= 0.) {
     G4cerr << "[BBR] thermal/emitterSize: all extents must be > 0, got "
            << v << " mm" << G4endl;
-    return;
+    return false;
   }
   Instance()->fEmitterSize_mm = v;
+  return true;
 }
 
-void BBRConfigManager::SetGunEnergy_eV(G4double v) {
+G4bool BBRConfigManager::SetGunEnergy_eV(G4double v) {
   if (!std::isfinite(v) || v <= 0.) {
     G4cerr << "[BBR] gun/energy_eV: energy must be > 0 eV, got " << v << G4endl;
-    return;
+    return false;
   }
   Instance()->fGunEnergy_eV = v;
+  return true;
 }
 
-void BBRConfigManager::SetCuRRR(G4int rrr) {
+G4bool BBRConfigManager::SetCuRRR(G4int rrr) {
   if (rrr < 1) {
     G4cerr << "[BBR] det/setCuRRR: RRR must be >= 1, got " << rrr << G4endl;
-    return;
+    return false;
   }
   Instance()->fCuRRR = rrr;
+  return true;
 }
 
-void BBRConfigManager::SetCuStageT_K(G4double T_K) {
+G4bool BBRConfigManager::SetCuStageT_K(G4double T_K) {
   if (!std::isfinite(T_K) || T_K <= 0.) {
     G4cerr << "[BBR] det/setCuStageT: temperature must be > 0 K, got " << T_K << G4endl;
-    return;
+    return false;
   }
   Instance()->fCuStageT_K = T_K;
+  return true;
 }
 
-void BBRConfigManager::SetCuMaterial(const G4String& alias) {
+G4bool BBRConfigManager::SetCuMaterial(const G4String& alias) {
   auto* m = Instance();
   if      (alias == "OFHC_Cu") { m->fCuRRR = 100; m->fCuStageT_K = 4.0; }
   else if (alias == "OF_Cu")   { m->fCuRRR =   3; m->fCuStageT_K = 4.0; }
@@ -108,7 +113,9 @@ void BBRConfigManager::SetCuMaterial(const G4String& alias) {
   else {
     G4cerr << "[BBR] det/setCuMaterial: unknown alias '" << alias
            << "'.  Valid: OFHC_Cu, OF_Cu, HP_Cu." << G4endl;
+    return false;
   }
+  return true;
 }
 
 void BBRConfigManager::printConfig(std::ostream& os) const {

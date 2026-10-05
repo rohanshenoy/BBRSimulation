@@ -25,7 +25,8 @@ class BBRConfigManager {
 
   // --- Emitter ---
   static G4double GetThermalT_K()  { return Instance()->fThermalT_K; }
-  static void SetThermalT_K(G4double v);
+  // The validating setters keep the old value and return false on a bad one.
+  static G4bool SetThermalT_K(G4double v);
 
   // Planck emitter box geometry (values stored bare in mm; the PGA applies
   // units): world-frame centre and FULL extents (Wx, Wy, Wz). Outward
@@ -34,7 +35,7 @@ class BBRConfigManager {
   static G4ThreeVector GetEmitterCenter_mm() { return Instance()->fEmitterCenter_mm; }
   static G4ThreeVector GetEmitterSize_mm()   { return Instance()->fEmitterSize_mm; }
   static void SetEmitterCenter_mm(const G4ThreeVector& v) { Instance()->fEmitterCenter_mm = v; }
-  static void SetEmitterSize_mm(const G4ThreeVector& v);   // all components > 0
+  static G4bool SetEmitterSize_mm(const G4ThreeVector& v);   // all components > 0
 
   // --- Gun (values stored bare; PGA applies mm / eV) ---
   static G4bool   GetGunMode()     { return Instance()->fGunMode; }
@@ -53,7 +54,7 @@ class BBRConfigManager {
   static void SetGunDirX(G4double v)    { Instance()->fGunDirX = v; }
   static void SetGunDirY(G4double v)    { Instance()->fGunDirY = v; }
   static void SetGunDirZ(G4double v)    { Instance()->fGunDirZ = v; }
-  static void SetGunEnergy_eV(G4double v);   // finite and > 0
+  static G4bool SetGunEnergy_eV(G4double v);   // finite and > 0
 
   // Fixed gun polarization (dimensionless). The zero vector (default) means
   // random polarization in the plane perpendicular to the direction; any other
@@ -73,9 +74,9 @@ class BBRConfigManager {
   // --- Detector (copper) ---
   static G4int    GetCuRRR()       { return Instance()->fCuRRR; }
   static G4double GetCuStageT_K()  { return Instance()->fCuStageT_K; }
-  static void SetCuRRR(G4int rrr);
-  static void SetCuStageT_K(G4double T_K);
-  static void SetCuMaterial(const G4String& alias);  // named alias -> RRR + 4 K
+  static G4bool SetCuRRR(G4int rrr);
+  static G4bool SetCuStageT_K(G4double T_K);
+  static G4bool SetCuMaterial(const G4String& alias);  // named alias -> RRR + 4 K
 
   // --- Provenance ---
   static void Print(std::ostream& os) { Instance()->printConfig(os); }

@@ -4,6 +4,9 @@
 # runner's drift guard checks that every file under include/ and src/ is here.
 
 set(BBRsim_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRAnalysis.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRPhotonRecorder.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRPrimarySource.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBEvt.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRConfigManager.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRConfigMessenger.cc
@@ -16,6 +19,9 @@ set(BBRsim_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ThermalSurface.cc
   )
 set(BBRsim_HEADERS
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRAnalysis.hh
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRPhotonRecorder.hh
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRPrimarySource.hh
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBEvt.hh
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRConfigManager.hh
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRConfigMessenger.hh
@@ -59,3 +65,15 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/data DESTINATION share/BBRsim PATTERN .D
 install(EXPORT BBRsimTargets NAMESPACE BBRsim:: DESTINATION lib/cmake/BBRsim)
 install(FILES ${PROJECT_SOURCE_DIR}/bbrsim_env.sh ${PROJECT_SOURCE_DIR}/bbrsim_env.csh
         DESTINATION share/BBRsim)
+
+# Generate provenance on every build, writing the header only when it changes.
+add_custom_target(BBRsimBuildInfo
+  COMMAND ${CMAKE_COMMAND} "-DREPO=${PROJECT_SOURCE_DIR}"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/BBRBuildInfo.hh"
+    "-DFALLBACK=${BBRSIM_VERSION}" -P ${PROJECT_SOURCE_DIR}/cmake/BBRBuildInfo.cmake
+  BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/BBRBuildInfo.hh
+  VERBATIM)
+add_dependencies(BBRsim BBRsimBuildInfo)
+target_include_directories(BBRsim PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
+install(FILES ${PROJECT_SOURCE_DIR}/cmake/BBRBuildInfo.cmake DESTINATION lib/cmake/BBRsim)
