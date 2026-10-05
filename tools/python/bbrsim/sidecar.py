@@ -1,10 +1,11 @@
 """bbrsim.sidecar - the HFSS dataset sidecar <stem>.dataset.json (schema 1.x).
 
 Python twin of library/src/BBRDatasetSidecar.cc (checks F1-F11 and F13, codes
-BBR024 and BBR025) and of the sidecar checks in BBRHFSSData (C1-C5), plus what
-the C++ does not do: the full mode lists (Bessel zeros through scipy), the CSV
-checksums, and the builders the mock generators and the legacy-sidecar script
-use. The schema (agreed with Blackbody-Simulations on 2026-10-05) is described
+BBR024 and BBR025) and of the sidecar checks in BBRHFSSData (C1-C5, on both
+polarizations), plus what the C++ does not do: the full mode lists (Bessel zeros
+through scipy), the CSV checksums, the far-field step, the agreement of the two
+polarizations, and the builders the mock generators and the legacy-sidecar
+script use. The schema (agreed with Blackbody-Simulations on 2026-10-05) is described
 in validation/README.md, Dataset sidecars. Errors are ValueError whose message
 starts with the C++ code.
 
@@ -86,9 +87,14 @@ def _rect_count(a_m, b_m, limit_ghz):
     return total
 
 
+def _rect_lowest(a_m, b_m):
+    """(mode, cutoff_ghz) of the lowest mode of a closed rectangular guide: TE10 if a >= b, else TE01."""
+    return ("TE10", _rect_f(a_m, b_m, 1, 0)) if a_m >= b_m else ("TE01", _rect_f(a_m, b_m, 0, 1))
+
+
 def rect_modes(a_m, b_m, freq_ghz, limit_ghz=LIST_LIMIT_GHZ):
     """Closed ideal-PEC rectangular guide, a along l (index m), b along g (index n)."""
-    mode, cut = ("TE10", _rect_f(a_m, b_m, 1, 0)) if a_m >= b_m else ("TE01", _rect_f(a_m, b_m, 0, 1))
+    mode, cut = _rect_lowest(a_m, b_m)
     onsets = [{"n": 0, "mode": "TE10", "cutoff_ghz": _rect_f(a_m, b_m, 1, 0)}]
     n = 1
     while _rect_f(a_m, b_m, 0, n) <= limit_ghz:
@@ -164,8 +170,8 @@ def lowest_mode(section):
     """(mode, cutoff_ghz, polarization_filter_limit_ghz): what the C++ F13 re-derives."""
     if section["shape"] == "rectangle":
         a, b = 2 * section["y_e_half_m"], 2 * section["z_e_half_m"]
-        mode, cut = ("TE10", C / (2 * a) / 1e9) if a >= b else ("TE01", C / (2 * b) / 1e9)
-        return mode, cut, C / (2 * b) / 1e9
+        mode, cut = _rect_lowest(a, b)
+        return mode, cut, _rect_f(a, b, 0, 1)
     if section["shape"] == "disc":
         cut = X11_PRIME * C / (2 * math.pi * section["radius_m"]) / 1e9
         return "TE11", cut, cut
@@ -179,21 +185,44 @@ def _range(values):
     return {"min": float(v[0]), "max": float(v[-1]), "count": int(len(v))}
 
 
-def describe_csvs(base, stem):
-    """What the CSVs of <stem> contain: header, incidence keys, grids, per-key counts."""
-    ff = pd.read_csv(os.path.join(base, f"{stem}_Ephi=0", "far_field.csv"))
-    wg = pd.read_csv(os.path.join(base, f"{stem}_Ephi=0", "waveguide.csv"))
+FIELD_COLUMNS = WG_COLUMNS[9:15]   # the six exit-field components (real and imaginary E)
+
+
+def _read_csv(base, stem, ephi, name, columns):
+    """One CSV as a DataFrame; a missing file is BBR001 (far field) or BBR002 (waveguide), as in
+    BBRHFSSData, and a header other than the positional order BBRHFSSData reads is BBR013 (C1)."""
+    p = os.path.join(base, f"{stem}_Ephi={ephi}", name)
+    try:
+        df = pd.read_csv(p)
+    except FileNotFoundError:
+        raise ValueError(f"{'BBR001' if name == 'far_field.csv' else 'BBR002'}: {p}: cannot open") from None
+    except pd.errors.EmptyDataError:
+        raise ValueError(f"BBR013: {p}: empty, no header") from None
+    if list(df.columns) != columns:
+        raise ValueError(f"BBR013: {p}: header {list(df.columns)} differs from the columns "
+                         f"BBRHFSSData reads {columns}")
+    return df
+
+
+def _describe_one(base, stem, ephi):
+    """What the two CSVs of one polarization contain: header, incidence keys, grids, per-key counts."""
+    ff = _read_csv(base, stem, ephi, "far_field.csv", FF_COLUMNS)
+    wg = _read_csv(base, stem, ephi, "waveguide.csv", WG_COLUMNS)
 
     def per_key(df, what):
         n = df.groupby(["IWavePhi", "IWaveTheta"]).size().unique()
         if len(n) != 1:
-            raise ValueError(f"BBR012: {stem}: {what} rows per incidence key differ ({sorted(n)})")
+            raise ValueError(f"BBR012: {stem}_Ephi={ephi}: {what} rows per incidence key differ ({sorted(n)})")
         return int(n[0])
 
     th, ph = _range(ff.Theta), _range(ff.Phi)
     for r in (th, ph):
         r["step"] = (r["max"] - r["min"]) / (r["count"] - 1) if r["count"] > 1 else 0.0
+    rows_key = [(round(float(p), 2), round(float(t), 2)) for p, t in
+                wg[["IWavePhi", "IWaveTheta"]].itertuples(index=False)]
+    yz = wg[["Y", "Z"]].to_numpy(float)
     return {
+        "ephi": ephi,
         "incident_phi_deg": sorted(float(v) for v in wg.IWavePhi.unique()),
         "incident_theta_deg": sorted(float(v) for v in wg.IWaveTheta.unique()),
         "far_field": {"theta_deg": th, "phi_deg": ph, "points_per_key": per_key(ff, "far-field"),
@@ -202,25 +231,36 @@ def describe_csvs(base, stem):
                        "points_per_key_retained": per_key(wg, "exit-point"), "columns": list(wg.columns)},
         "incoming_power_w": float(wg.IngoingPower.iloc[0]),
         "x_max_abs_m": float(np.abs(wg.X.to_numpy(float)).max()),
-        "yz_m": wg[["Y", "Z"]].to_numpy(float),
-        "keys": {(round(float(p), 2), round(float(t), 2))
-                 for p, t in wg[["IWavePhi", "IWaveTheta"]].drop_duplicates().itertuples(index=False)},
+        "yz_m": yz,
+        # (key, Y, Z) of every exit row whose six field components are exactly zero
+        "zero_points": {(k, float(y), float(z)) for k, (y, z), zero in
+                        zip(rows_key, yz, (wg[FIELD_COLUMNS].to_numpy(float) == 0).all(axis=1)) if zero},
+        "rows_key": rows_key,
+        "keys": set(rows_key),
     }
 
 
+def describe_csvs(base, stem):
+    """What the CSVs of <stem> contain. The top-level fields describe Ephi=0 (what the builder
+    records); "polarizations" holds the description of each of Ephi=0 and Ephi=1."""
+    d0, d1 = _describe_one(base, stem, 0), _describe_one(base, stem, 1)
+    return {**d0, "polarizations": (d0, d1)}
+
+
 def file_entries(base, stem):
-    """{"<stem>_Ephi=N/<file>": {sha256, bytes, rows}} for the four CSVs."""
+    """{"<stem>_Ephi=N/<file>": {sha256, bytes, rows}} for the four CSVs. rows is the number of
+    non-blank lines after the header (a blank line holds only whitespace), which is pandas'
+    len(read_csv(...)) for these files, with or without a trailing newline."""
     out = {}
     for e in (0, 1):
         for name in ("far_field.csv", "waveguide.csv"):
             rel = f"{stem}_Ephi={e}/{name}"
             p = os.path.join(base, rel)
-            h, nl = hashlib.sha256(), 0
             with open(p, "rb") as fh:
-                for chunk in iter(lambda: fh.read(1 << 20), b""):
-                    h.update(chunk)
-                    nl += chunk.count(b"\n")
-            out[rel] = {"sha256": h.hexdigest(), "bytes": os.path.getsize(p), "rows": nl - 1}
+                data = fh.read()
+            lines = sum(1 for line in data.splitlines() if line.strip())
+            out[rel] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
+                        "rows": max(lines - 1, 0)}
     return out
 
 
@@ -341,15 +381,21 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
     if label != stem[len(prefix):]:
         raise ValueError(f"BBR024: frequency_label {label!r}, the directory says {stem[len(prefix):]!r}")
     f, from_label = _req(sc, "frequency_ghz", "", "num"), hfss.parse_frequency_GHz(label)
-    if not dir_freq_ghz > 0 or abs(f - dir_freq_ghz) > 1e-3 * dir_freq_ghz \
-            or from_label is None or abs(from_label - dir_freq_ghz) > 1e-3 * dir_freq_ghz:
+    if not dir_freq_ghz > 0:
+        raise ValueError(f"BBR024: directory frequency {dir_freq_ghz} GHz is not positive")
+    if from_label is None:
+        raise ValueError(f"BBR024: frequency_label {label!r} does not parse as a frequency")
+    if abs(from_label - dir_freq_ghz) > 1e-3 * dir_freq_ghz:
+        raise ValueError(f"BBR024: frequency_label {label!r} ({from_label} GHz) disagrees with the "
+                         f"directory frequency {dir_freq_ghz} GHz")
+    if abs(f - dir_freq_ghz) > 1e-3 * dir_freq_ghz:
         raise ValueError(f"BBR024: frequency_ghz {f} disagrees with the directory frequency {dir_freq_ghz} GHz")
 
     fr = _req(sc, "frames", "", "dict")                                            # F4
     ax = _req(fr, "hfss_global_axes_in_canonical", "frames.", "dict")
     hx, hy, hz = (_vec(ax, a, "frames.hfss_global_axes_in_canonical.") for a in "xyz")
     M = np.stack([hx, hy, hz], axis=1)
-    if not (np.allclose(M.T @ M, np.eye(3), atol=AXIS_TOL) and _near(np.cross(hx, hy), hz)):
+    if not (np.allclose(M.T @ M, np.eye(3), rtol=0, atol=AXIS_TOL) and _near(np.cross(hx, hy), hz)):
         raise ValueError("BBR025: frames.hfss_global_axes_in_canonical is not a right-handed orthonormal basis")
     ecs = _req(fr, "exit_cs", "frames.", "dict")
     ex, ey, ez = (_vec(ecs, a, "frames.exit_cs.") for a in "xyz")
@@ -457,44 +503,78 @@ def _contains(section, y, z):
     return y * y + z * z <= section["radius_m"] ** 2 * (1 + SECTION_REL)
 
 
-def check_csvs(base, stem, sc):
-    """C1-C5, as BBRHFSSData runs them when it is given the sidecar."""
-    d = describe_csvs(base, stem)
+def _check_one(stem, d, sc, exempt):
+    """C1-C5 on the description of one polarization; exempt holds the (key, Y, Z) that C5 lets
+    lie outside the section."""
+    tag = f"{stem}_Ephi={d['ephi']}"
     ff, xf = sc["far_field"], sc["exit_field"]
     if d["far_field"]["columns"] != ff["columns"] or d["exit_field"]["columns"] != xf["columns"]:
-        raise ValueError(f"BBR013: {stem}: a CSV header differs from the sidecar's columns")             # C1
+        raise ValueError(f"BBR013: {tag}: a CSV header differs from the sidecar's columns")              # C1
+    # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them, before the subset test
     phis = {round(float(v), 2) for v in sc["excitation"]["incident_phi_deg"]}
     thetas = {round(float(v), 2) for v in sc["excitation"]["incident_theta_deg"]}
     off = sorted(k for k in d["keys"] if k[0] not in phis or k[1] not in thetas)
     if off:
-        raise ValueError(f"BBR007: {stem}: keys {off} are not on the declared incidence grid")         # C2
+        raise ValueError(f"BBR007: {tag}: keys {off} are not on the declared incidence grid")
     for name in ("theta_deg", "phi_deg"):                                                               # C3
         got, want = d["far_field"][name], ff[name]
         if got["count"] != want["count"] or got["min"] < want["min"] - 1e-9 or got["max"] > want["max"] + 1e-9:
-            raise ValueError(f"BBR012: {stem}: far-field {name} {got} outside or unlike the declared {want}")
+            raise ValueError(f"BBR012: {tag}: far-field {name} {got} outside or unlike the declared {want}")
+        if got["count"] > 1:                     # the step, which only this validator checks
+            step = _req(want, "step", f"far_field.{name}.", "num")
+            if abs(step - got["step"]) > 1e-9 * got["step"]:
+                raise ValueError(f"BBR012: {tag}: far-field {name} step {step} declared, the data give "
+                                 f"{got['step']} = (max - min)/(count - 1)")
     if d["far_field"]["points_per_key"] != ff["points_per_key"]:
-        raise ValueError(f"BBR012: {stem}: {d['far_field']['points_per_key']} far-field rows per key, "
+        raise ValueError(f"BBR012: {tag}: {d['far_field']['points_per_key']} far-field rows per key, "
                          f"declared {ff['points_per_key']}")
     for axis in ("y_e", "z_e"):                                                                         # C4
         got, want = d["exit_field"]["grid"][axis], xf["grid"][axis]
         tol = 1e-9 * max(abs(want["min"]), abs(want["max"]))
         if got["count"] != want["count"] or got["min"] < want["min"] - tol or got["max"] > want["max"] + tol:
-            raise ValueError(f"BBR012: {stem}: exit grid {axis} {got} outside or unlike the declared {want}")
+            raise ValueError(f"BBR012: {tag}: exit grid {axis} {got} outside or unlike the declared {want}")
     if d["exit_field"]["points_per_key_retained"] != xf["points_per_key_retained"]:
-        raise ValueError(f"BBR012: {stem}: exit points per key differ from points_per_key_retained")
+        raise ValueError(f"BBR012: {tag}: exit points per key differ from points_per_key_retained")
     if d["x_max_abs_m"] > 1e-12:
-        raise ValueError(f"BBR012: {stem}: exit points off the plane x_e = 0 (|X| up to {d['x_max_abs_m']})")
-    outside = [(y, z) for y, z in d["yz_m"] if not _contains(xf["cross_section"], y, z)]                # C5
+        raise ValueError(f"BBR012: {tag}: exit points off the plane x_e = 0 (|X| up to {d['x_max_abs_m']})")
+    outside = [(y, z) for k, (y, z) in zip(d["rows_key"], d["yz_m"])                                   # C5
+               if not _contains(xf["cross_section"], y, z) and (k, float(y), float(z)) not in exempt]
     if outside:
-        raise ValueError(f"BBR025: {stem}: {len(outside)} exit point(s) outside the declared "
+        raise ValueError(f"BBR025: {tag}: {len(outside)} exit point(s) outside the declared "
                          f"cross-section, e.g. {outside[0]}")
 
 
+def check_csvs(base, stem, sc):
+    """C1-C5 on both polarizations, as BBRHFSSData runs them when it is given the sidecar, plus
+    the far-field step and the agreement of Ephi=1 with Ephi=0 on keys, grids and per-key counts.
+
+    Precondition: sc has passed check(); its blocks and types are not re-checked here. A missing
+    far_field.csv or waveguide.csv raises ValueError starting BBR001 or BBR002, as in BBRHFSSData.
+    """
+    d0, d1 = describe_csvs(base, stem)["polarizations"]
+    # C5: with outside_points "zero" a point outside the section is allowed when its six field
+    # components are exactly zero in both polarizations; with "none" or "omitted" none is.
+    exempt = d0["zero_points"] & d1["zero_points"] if sc["exit_field"]["outside_points"] == "zero" else set()
+    for p in (d0, d1):
+        _check_one(stem, p, sc, exempt)
+    agree = (("incidence keys", lambda p: p["keys"]),
+             ("far-field Theta", lambda p: p["far_field"]["theta_deg"]),
+             ("far-field Phi", lambda p: p["far_field"]["phi_deg"]),
+             ("far-field rows per key", lambda p: p["far_field"]["points_per_key"]),
+             ("exit grid", lambda p: p["exit_field"]["grid"]),
+             ("exit points per key", lambda p: p["exit_field"]["points_per_key_retained"]))
+    for what, get in agree:
+        if get(d0) != get(d1):
+            raise ValueError(f"BBR012: {stem}: Ephi=1 {what} {get(d1)} differ from Ephi=0's {get(d0)}")
+
+
 def _same(got, want, where="modes"):
+    """got carries every key of want with an equal value (floats to MODE_REL); extra keys, which a
+    later 1.x schema may add, are ignored."""
     if isinstance(want, dict):
-        if not isinstance(got, dict) or set(got) != set(want):
+        if not isinstance(got, dict) or not set(want) <= set(got):
             raise ValueError(f"BBR025: {where}: keys {sorted(got) if isinstance(got, dict) else got} "
-                             f"differ from {sorted(want)}")
+                             f"lack some of {sorted(want)}")
         for k in want:
             _same(got[k], want[k], f"{where}.{k}")
     elif isinstance(want, list):
@@ -511,11 +591,20 @@ def _same(got, want, where="modes"):
 
 
 def check_full(base, dataset_id, stem, dir_freq_ghz):
-    """Everything: check(), the full modes block, the file checksums, check_csvs()."""
+    """Everything: check(), the full modes block (basis is recorded only, not compared), the
+    sha256, bytes and rows of the four CSVs, and check_csvs(). Unknown fields are ignored."""
     sc = load(base, stem)
     check(sc, dataset_id, stem, dir_freq_ghz)
-    _same(sc["modes"], modes_for(sc["exit_field"]["cross_section"], sc["frequency_ghz"]))
-    if sc.get("files") != file_entries(base, stem):
-        raise ValueError(f"BBR024: {stem}: the files block differs from the CSVs (checksum, size or rows)")
+    want = modes_for(sc["exit_field"]["cross_section"], sc["frequency_ghz"])
+    _same(sc["modes"], {k: v for k, v in want.items() if k != "basis"})
+    files = _req(sc, "files", "", "dict")
+    for rel, entry in file_entries(base, stem).items():
+        got = files.get(rel)
+        if not isinstance(got, dict):
+            raise ValueError(f"BBR024: {path_for(base, stem)}: files has no entry for {rel}")
+        for k in ("sha256", "bytes", "rows"):
+            if got.get(k) != entry[k]:
+                raise ValueError(f"BBR024: {path_for(base, stem)}: files[{rel!r}].{k} is {got.get(k)!r}, "
+                                 f"the CSV gives {entry[k]!r}")
     check_csvs(base, stem, sc)
     return sc

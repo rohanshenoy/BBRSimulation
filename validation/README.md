@@ -179,9 +179,9 @@ sidecar that declares any other frame is rejected (F4).
 | `transmittance` | `definition`, `outgoing_power`, `incoming_includes_cos_theta` |
 | `symmetry` | `mirror_l`, `mirror_g`, `end_to_end`, `rotational` |
 | `boundaries` | `entrance`, `exit`, `walls` |
-| `modes` (required for rectangle and disc; Rohan 2026-10-04: computed, no nulls; **final**, agreed with the HFSS session 2026-10-05) | `cutoff_ghz` and `mode`: the lowest mode, which `BBR026` compares against. `basis`: the closed-PEC model string, numbers as Python repr in metres; recorded only. `list_limit_ghz` = 20000.0, inclusive. `polarization_filter_limit_ghz`: TE01 = c/(2b) for a rectangle, the TE11 cutoff for a disc. For a rectangle, `gap_family_onsets` [{n, mode, cutoff_ghz}] (n = 0 is TE10, then TE0k at k·c/(2b)) plus `mode_count_below_limit`. For a disc, `cutoffs` [{mode, cutoff_ghz, degeneracy}], ascending. `propagating_count`: entries with cutoff ≤ this file's `frequency_ghz`, the only per-frequency field. Index pairs are counted once each (TE and TM separately; disc degeneracy not doubled). Axes: a = 2·y_e_half_m with m along l, b = 2·z_e_half_m with n along g; the lowest mode is TE10 if a ≥ b, else TE01. Ties within 1e-12 relative go TE before TM, then by index. Labels are `TE{n}{p}` when both indices are below 10, otherwise `TE{n},{p}`. All derived from the declared solid; omitted for a polygon |
+| `modes` (required for rectangle and disc; computed, no nulls) | `cutoff_ghz` and `mode`: the lowest mode, which `BBR026` compares against. `basis`: the closed-PEC model string, numbers as Python repr in metres; recorded only. `list_limit_ghz` = 20000.0, inclusive. `polarization_filter_limit_ghz`: TE01 = c/(2b) for a rectangle, the TE11 cutoff for a disc. For a rectangle, `gap_family_onsets` [{n, mode, cutoff_ghz}] (n = 0 is TE10, then TE0k at k·c/(2b)) plus `mode_count_below_limit`. For a disc, `cutoffs` [{mode, cutoff_ghz, degeneracy}], ascending. `propagating_count`: entries with cutoff ≤ this file's `frequency_ghz`, the only per-frequency field. Index pairs are counted once each (TE and TM separately; disc degeneracy not doubled). Axes: a = 2·y_e_half_m with m along l, b = 2·z_e_half_m with n along g; the lowest mode is TE10 if a ≥ b, else TE01. Ties within 1e-12 relative go TE before TM, then by index. Labels are `TE{n}{p}` when both indices are below 10, otherwise `TE{n},{p}`. All derived from the declared solid; omitted for a polygon |
 | `geometry` | `shape`, `extent_mm` {p, l, g}, `bounding_box_mm` (HFSS global, [xmin, ymin, zmin, xmax, ymax, zmax]) |
-| `files` | keyed by the path relative to the sidecar, e.g. `"<dataset_id>_<label>_Ephi=0/waveguide.csv"`, each {sha256, bytes, rows} |
+| `files` | keyed by the path relative to the sidecar, e.g. `"<dataset_id>_<label>_Ephi=0/waveguide.csv"`, each {sha256, bytes, rows}; `rows` is the number of non-blank lines after the header (a blank line holds only whitespace), which is the pandas data-row count `len(read_csv(...))` with or without a trailing newline |
 
 **Checks.** A field that is missing or has the wrong JSON type is `BBR024`. A
 later 1.x sidecar may carry fields this version does not know; they are
@@ -205,13 +205,18 @@ At the CSV load, per frequency, in `BBRHFSSData`:
 
 - C1 the CSV headers equal `far_field.columns` and `exit_field.columns` (`BBR013`).
 - C2 every incidence key of the CSVs lies on the declared `incident_phi_deg` × `incident_theta_deg` grid. This is a subset check, not an equality: HFSS grids are complete, test grids may be sparse (`BBR007`).
-- C3 per key, the far-field row count equals `points_per_key` and every Phi and Theta lies in the declared [min, max]; over the whole file the distinct Phi and Theta counts equal the declared counts. The `step` is checked by the Python validator only (`BBR012`).
+- C3 per key, the far-field row count equals `points_per_key` and every Phi and Theta lies in the declared [min, max]; over the whole file the distinct Phi and Theta counts equal the declared counts (`BBR012`). Only the Python validator checks the `step`: when `count` > 1 it must equal (max − min)/(count − 1) of the data to 1e-9 relative (`BBR012`).
 - C4 X = 0 on every exit row; the exit rows per key and polarization equal `points_per_key_retained`; every Y and Z lies in the declared `grid` range, and the distinct counts equal the declared counts (`BBR012`).
-- C5 every exit point, at any key and either polarization, lies inside the declared cross-section; the message gives the count and an offending point (`BBR025`). C5 checks the data against the sidecar, F12 the sidecar against the geometry; together they put every exit point inside the placed solid.
+- C5 every exit point, at any key and either polarization, lies inside the declared cross-section; the message gives the count and an offending point (`BBR025`). With `outside_points` `"zero"`, a point outside the section is exempt when its six field components are exactly zero in both polarizations; with `"none"` or `"omitted"` every point must lie inside. C5 checks the data against the sidecar, F12 the sidecar against the geometry; together they put every exit point that carries field inside the placed solid.
+
+C1-C5 run on both polarizations, and the two must agree: the Ephi=1 CSVs have
+the same incidence keys, far-field and exit grids and per-key row counts as the
+Ephi=0 CSVs (`BBR012`; `BBRHFSSData` also pairs the rows by position).
 
 The containment tolerance is 1e-6 relative (the HFSS runner's own; never use a
-stricter one). Grid and angle comparisons use 1e-9 (degrees for angles,
-relative to the largest declared |value| for exit coordinates).
+stricter one). Incidence keys are rounded to 0.01° before the C2 subset test,
+as `BBRHFSSData` rounds them. The far-field ranges use 1e-9 degrees and the
+exit-grid ranges 1e-9 relative to the largest declared |value|.
 
 At run time, `BBR026` (a `JustWarning`, once per dataset and direction) fires
 when a photon's frequency and the grid frequency serving it lie on opposite
