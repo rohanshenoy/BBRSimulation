@@ -144,7 +144,7 @@ bbrsim_add_test_program(testConfig LABEL unit
   CASES defaults command_table datadir_quotes setT_units validation_paths datadir_default datadir_env datadir_env_late
         worker_clone_isolation worker_before_master print_flushes
   ENVMOD "BBRSIMDATA=unset:")
-bbrsim_add_test_program(testBoundaryStatuses LABEL unit CASES stock_statuses)
+bbrsim_add_test_program(testBoundaryStatuses LABEL unit CASES stock_statuses data_fingerprint)
 target_compile_definitions(testConfig PRIVATE "BBRSIM_TEST_PREFIX=\"${CMAKE_INSTALL_PREFIX}\"")
 set_tests_properties(testConfig.datadir_env testConfig.datadir_env_late PROPERTIES ENVIRONMENT_MODIFICATION "${BBRSIM_TEST_HERMETIC};BBRSIMDATA=set:/env/data")
 

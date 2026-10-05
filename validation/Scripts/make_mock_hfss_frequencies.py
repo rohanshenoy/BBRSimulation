@@ -7,8 +7,10 @@ For each id, frequency f (position i in --freqs) and Ephi in {0,1}, copies
   <src>/<id>_<source-freq>GHz_Ephi=<n>/{far_field,waveguide}.csv
 to
   <dst>/waveguides/<id>_<f>GHz_Ephi=<n>/
-applying two per-frequency signatures so that which dataset the simulation
-actually sampled is observable in the output:
+applying two per-frequency signatures (items 1 and 2) so that which dataset
+the simulation actually sampled is observable in the output, and writing a
+sidecar per mock frequency (item 3), which the C++ discovery and
+check_dataset_sidecars.py require but which leaves no trace in the output:
 
   1. transmittance  - waveguide.csv OutgoingPower scaled by --scales[i], so the
      crack transmittance differs per frequency;
@@ -108,7 +110,8 @@ def transform(src_path, dst_path, freq_token, scale, zero_back_hemisphere, is_fa
 
 
 t0 = time.time()
-n_files = 0
+n_csv = 0
+n_sidecars = 0
 for id_ in args.ids:
     for i, (ftoken, scale) in enumerate(zip(args.freqs, args.scales)):
         zero_back = (i % 2 == 1)
@@ -125,7 +128,7 @@ for id_ in args.ids:
             for name, is_ff in (("far_field.csv", True), ("waveguide.csv", False)):
                 transform(os.path.join(sdir, name), os.path.join(ddir, name),
                           ftoken, scale, zero_back, is_ff)
-                n_files += 1
+                n_csv += 1
         stem = f"{id_}_{ftoken}GHz"
         sc = copy.deepcopy(src_sidecars[id_])
         f_ghz = float(ftoken)
@@ -137,6 +140,7 @@ for id_ in args.ids:
         sc["modes"]["propagating_count"] = sidecar.modes_for(sc["exit_field"]["cross_section"], f_ghz)["propagating_count"]
         sc["files"] = sidecar.file_entries(out_root, stem)
         sidecar.write(out_root, stem, sc)
+        n_sidecars += 1
         print(f"  {id_}_{ftoken}GHz  scale={scale:<4g} "
               f"far-field={'k_z>=0 only' if zero_back else 'full'}")
-print(f"wrote {n_files} files to {out_root} in {time.time() - t0:.1f} s")
+print(f"wrote {n_csv} CSV files and {n_sidecars} sidecars to {out_root} in {time.time() - t0:.1f} s")

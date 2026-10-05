@@ -40,41 +40,6 @@ std::string JsonString(const std::string& value) {
   return out.str();
 }
 
-// FNV-1a over the name and bytes of every HFSS dataset sidecar
-// (<data root>/waveguides/*.dataset.json). Each sidecar records the sha256 of
-// its four CSVs (checked by validation/check_dataset_sidecars.py), so this
-// identifies the data at a few kilobytes of reads instead of every CSV.
-std::string DataFingerprint(const std::string& directory) {
-  std::error_code ec;
-  const auto root = std::filesystem::path(directory) / "waveguides";
-  if (!std::filesystem::is_directory(root, ec)) return "unavailable";
-  const std::string suffix = ".dataset.json";
-  std::vector<std::filesystem::path> paths;
-  for (std::filesystem::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
-    const std::string name = it->path().filename().string();
-    if (it->is_regular_file() && name.size() > suffix.size() &&
-        name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
-      paths.push_back(it->path());
-  }
-  if (ec) return "unavailable";
-  std::sort(paths.begin(), paths.end());
-  std::uint64_t hash = 14695981039346656037ULL;
-  auto add = [&](unsigned char c) { hash = (hash ^ c) * 1099511628211ULL; };
-  for (const auto& p : paths) {
-    for (unsigned char c : p.filename().string()) add(c);
-    add(0);
-    std::ifstream input(p, std::ios::binary);
-    char buffer[65536];
-    while (input.read(buffer, sizeof(buffer)) || input.gcount())
-      for (std::streamsize i = 0; i < input.gcount(); ++i) add(static_cast<unsigned char>(buffer[i]));
-    if (!input.eof()) return "unavailable";
-    add(0);
-  }
-  std::ostringstream value;
-  value << "fnv1a64:" << std::hex << std::setw(16) << std::setfill('0') << hash;
-  return value.str();
-}
-
 const char* kOutputFile = "output/bbr.root";
 
 // Distinct sentinels so an absent physical volume/material ("none", an expected
@@ -139,6 +104,44 @@ const std::vector<StatusInfo> kStatuses = {
 #undef STOCK_STATUS
 #undef LOCAL_STATUS
 }  // namespace
+
+// FNV-1a over the name and bytes of every HFSS dataset sidecar
+// (<data root>/waveguides/*.dataset.json). Each sidecar records the sha256 of
+// its four CSVs (checked by validation/check_dataset_sidecars.py), so this
+// identifies the data at a few kilobytes of reads instead of every CSV.
+// "unavailable": no readable waveguides/ directory; "no-sidecars": one with
+// no sidecar in it (the empty-input hash would look like a real fingerprint).
+std::string BBRAnalysis::DataFingerprint(const std::string& dataRoot) {
+  std::error_code ec;
+  const auto root = std::filesystem::path(dataRoot) / "waveguides";
+  if (!std::filesystem::is_directory(root, ec)) return "unavailable";
+  const std::string suffix = ".dataset.json";
+  std::vector<std::filesystem::path> paths;
+  for (std::filesystem::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+    const std::string name = it->path().filename().string();
+    if (it->is_regular_file() && name.size() > suffix.size() &&
+        name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
+      paths.push_back(it->path());
+  }
+  if (ec) return "unavailable";
+  if (paths.empty()) return "no-sidecars";
+  std::sort(paths.begin(), paths.end());
+  std::uint64_t hash = 14695981039346656037ULL;
+  auto add = [&](unsigned char c) { hash = (hash ^ c) * 1099511628211ULL; };
+  for (const auto& p : paths) {
+    for (unsigned char c : p.filename().string()) add(c);
+    add(0);
+    std::ifstream input(p, std::ios::binary);
+    char buffer[65536];
+    while (input.read(buffer, sizeof(buffer)) || input.gcount())
+      for (std::streamsize i = 0; i < input.gcount(); ++i) add(static_cast<unsigned char>(buffer[i]));
+    if (!input.eof()) return "unavailable";
+    add(0);
+  }
+  std::ostringstream value;
+  value << "fnv1a64:" << std::hex << std::setw(16) << std::setfill('0') << hash;
+  return value.str();
+}
 
 BBRAnalysis::BBRAnalysis(const G4String& applicationVersion, const G4String& applicationFingerprint)
   : fApplicationVersion(applicationVersion), fApplicationFingerprint(applicationFingerprint) {

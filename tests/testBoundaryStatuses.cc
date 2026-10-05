@@ -3,6 +3,7 @@
 #include "G4OpBoundaryProcess.hh"
 
 #include <array>
+#include <regex>
 
 int main(int argc, char** argv) {
   return bbrtest::RunCase(argc, argv, {
@@ -54,6 +55,35 @@ int main(int argc, char** argv) {
       CHECK(BBRAnalysis::EventTypeForStatus("BBRDiffractionReflect") == 1);
       CHECK(BBRAnalysis::EventTypeForStatus("BBRReflect") == 1);
       CHECK(BBRAnalysis::EventTypeForStatus("BBRDiffractionTransmit") == 0);
+    }},
+    {"data_fingerprint", [] {
+      // The metadata fingerprint hashes only <data root>/waveguides/*.dataset.json.
+      bbrtest::TempDir tmp;
+      const auto root = tmp.path() / "data";
+      const auto wg = root / "waveguides";
+      const auto fp = [&] { return BBRAnalysis::DataFingerprint(root.string()); };
+      CHECK(BBRAnalysis::DataFingerprint((tmp.path() / "absent").string()) == "unavailable");
+      bbrtest::WriteFile(root / "README", "no waveguides here\n");
+      CHECK(fp() == "unavailable");
+      bbrtest::WriteFile(wg / "c_500GHz_Ephi=0" / "waveguide.csv", "Freq\n500GHz\n");
+      bbrtest::WriteFile(wg / "notes.txt", "not a sidecar\n");
+      CHECK(fp() == "no-sidecars");
+      bbrtest::WriteFile(wg / "c_500GHz.dataset.json", "{\"schema_version\": \"1.0\"}\n");
+      const std::string first = fp();
+      CHECK(std::regex_match(first, std::regex("^fnv1a64:[0-9a-f]{16}$")));
+      CHECK(fp() == first);
+      bbrtest::WriteFile(wg / "c_500GHz_Ephi=0" / "waveguide.csv", "Freq\n500GHz\n600GHz\n");
+      CHECK(fp() == first);                                   // a CSV edit is not hashed
+      bbrtest::WriteFile(wg / "refined_1.csv", "x\n");
+      bbrtest::WriteFile(wg / "SHA256SUMS", "abc  x\n");
+      bbrtest::WriteFile(wg / "c_500GHz_Ephi=1" / "extra.dataset.json", "{}\n");
+      CHECK(fp() == first);                                   // nor a non-sidecar or nested file
+      bbrtest::WriteFile(wg / "c_500GHz.dataset.json", "{\"schema_version\": \"1.1\"}\n");
+      const std::string edited = fp();
+      CHECK(std::regex_match(edited, std::regex("^fnv1a64:[0-9a-f]{16}$")));
+      CHECK(edited != first);                                 // a sidecar edit is
+      bbrtest::WriteFile(wg / "d_500GHz.dataset.json", "{}\n");
+      CHECK(fp() != edited);                                  // and so is a new sidecar
     }},
   });
 }

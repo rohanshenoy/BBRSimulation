@@ -80,6 +80,7 @@ def test_mock_generator(repo_root, tmp_path):
     dst = tmp_path / "tree" / "mock"
     r = run(gen, "--src", src, "--dst", dst, "--ids", "c", cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
+    assert "wrote 20 CSV files and 5 sidecars to " in r.stdout
     base = str(dst / "waveguides")
     grid = hfss.discover_frequencies("c", base)
     assert [f for f, _ in grid] == [50.0, 150.0, 500.0, 1500.0, 5000.0]
@@ -94,3 +95,17 @@ def test_mock_generator(repo_root, tmp_path):
         sc = sidecar.check_full(base, "c", stem, f)      # every mock frequency has a valid sidecar
         assert sc["frequency_ghz"] == f and sc["provenance"]["mock_of"] == "c_500GHz"
         assert sc["modes"]["propagating_count"] == sidecar.modes_for(sc["exit_field"]["cross_section"], f)["propagating_count"]
+
+
+def test_mock_generator_needs_source_sidecar(repo_root, tmp_path):
+    # A source dataset without its sidecar: rc 2, the BBR024 message, nothing written.
+    gen = repo_root / "validation/Scripts/make_mock_hfss_frequencies.py"
+    src = tmp_path / "tree" / "data" / "waveguides"
+    write_source(src, "c")
+    missing = src / "c_500GHz.dataset.json"
+    missing.unlink()
+    dst = tmp_path / "tree" / "mock"
+    r = run(gen, "--src", src, "--dst", dst, "--ids", "c", cwd=tmp_path)
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert f"source sidecar: BBR024: {missing.resolve()}: missing" in r.stdout
+    assert not dst.exists()
