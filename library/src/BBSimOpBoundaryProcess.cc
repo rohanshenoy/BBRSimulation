@@ -100,7 +100,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // so the CSV exit positions and far-field angles need no transform.
   G4double cosVal = std::min(1., std::max(-1., -khat.dot(normal_hat)));
   G4double iwaveTheta_deg = std::acos(cosVal) * (180. / CLHEP::pi);
-  // IWavePhi: azimuth in HFSS x̂_i=phi_hat, ŷ_i=-theta_hat plane. Transverse
+  // IWavePhi: azimuth of -k in the HFSS X-Y plane (X = -phi_hat, Y = +theta_hat). Transverse
   // components below 1e-12 are snapped to +0 first: for a k exactly in the
   // x-z plane (k_y == 0) atan2(-0, -x) is -180° but atan2(+0, -x) is +180°,
   // and which one the expression yields depends on how the optimiser orders
@@ -119,8 +119,8 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // signs so everything sampled from the folded dataset (outgoing direction,
   // polarization, exit position) is mapped back to the true frame. Without
   // the un-fold, oblique photons get mirror-image outgoing distributions.
-  //   sy: phi → |phi|        (mirrors ŷ_i, i.e. flips theta_hat)
-  //   sx: |phi| → 180−|phi|  (mirrors x̂_i, i.e. flips phi_hat)
+  //   sy: phi → |phi|        (mirrors Y, i.e. flips theta_hat)
+  //   sx: |phi| → 180−|phi|  (mirrors X, i.e. flips phi_hat)
   const G4double sy = (iwavePhi_raw < 0.) ? -1. : 1.;
   G4double iwavePhi_deg = std::abs(iwavePhi_raw);
   const G4double sx = (iwavePhi_deg > 90.) ? -1. : 1.;

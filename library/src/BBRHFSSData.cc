@@ -507,8 +507,8 @@ G4ThreeVector BBRHFSSData::SampleExitPosition(
   const auto& ep = eps[j];
   // HFSS coordinates are SI (meters); Geant4's base unit is mm, so multiply by
   // CLHEP::m. The CSV points are in the exit coordinate system (x_e, y_e, z_e) =
-  // (Z, Y, -X)_HFSS = (normal, theta_hat, phi_hat): the exit plane is X = 0, CSV Y
-  // runs along crack_x (theta_f) and CSV Z along crack_y (phi_f).
+  // (Z, Y, -X)_HFSS = (normal, theta_hat, phi_hat): the exit plane is x_e = 0 (CSV X
+  // column = 0), CSV Y runs along crack_x (theta_f) and CSV Z along crack_y (phi_f).
   return exit_face_center + (ep.y * CLHEP::m) * crack_x
                           + (ep.z * CLHEP::m) * crack_y;
 }
