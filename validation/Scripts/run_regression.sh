@@ -24,7 +24,8 @@
 #    validation/Scripts/consumer_smoke against the installed library.
 # 1c. Runs the C++ tests (ctest), the Python tests (pytest, on the installed
 #    bbrsim) and validation/Scripts/tests/test_env.sh (the env scripts).
-# 2. Builds the mock HFSS tree when needed, checks that the real
+# 2. Builds the mock HFSS tree (each mock frequency with its dataset sidecar)
+#    when needed, checks that the real
 #    data/waveguides holds only 500 GHz (leak guard), runs the ten cases in
 #    parallel with a pinned Geant4 thread count (BBR_THREADS, default 8), each
 #    in BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the
@@ -251,13 +252,14 @@ echo "=== 2. macros ==="
 rm -rf "$REG"; mkdir -p "$REG"
 
 # Mock multi-frequency HFSS tree for the frequency fixture. ~1.3 GB and ~5 s, so
-# it is rebuilt only when it is missing or older than the real data or the
-# generator. It lives in the build dir and is reached from a macro's run
-# directory as ../mock_hfss via the symlink beside it.
+# it is rebuilt only when it is missing or older than the real data, the
+# generator or bbrsim/sidecar.py (which writes its sidecars). It lives in the
+# build dir and is reached from a macro's run directory as ../mock_hfss via the
+# symlink beside it.
 MOCK="$BUILD/mock_hfss"
 if [ ! -d "$MOCK/waveguides" ] || \
    [ -n "$(find "$REPO/data/waveguides" "$VAL/Scripts/make_mock_hfss_frequencies.py" \
-            -newer "$MOCK/waveguides" -print -quit 2>/dev/null)" ]; then
+            "$REPO/tools/python/bbrsim/sidecar.py" -newer "$MOCK/waveguides" -print -quit 2>/dev/null)" ]; then
   echo "generating mock HFSS frequency tree in $MOCK ..."
   # Written beside the final path and renamed only on success, so an interrupted
   # or failed generation cannot leave a partial tree that later runs would reuse.
@@ -434,6 +436,9 @@ done
 if [ "$frq_n" -gt 0 ] && [ "$frq_bad" -eq 0 ]; then line PASS "frequency invariants" "[frequency] check_invariants on $frq_n per-run files"; pass=$((pass+1))
 else fail=$((fail+frq_bad)); [ "$frq_n" -eq 0 ] && { line FAIL "frequency invariants" "[frequency] no per-run files found"; fail=$((fail+1)); }; fi
 check -        check_cu_serov.py
+# Every HFSS dataset, real and mock, carries a valid schema-1 sidecar: checks,
+# full mode lists, CSV checksums, C1-C5 (validation/README.md, Dataset sidecars).
+check -        check_dataset_sidecars.py "$REPO/data/waveguides" "$MOCK/waveguides"
 
 # BBR_PIN=1 (for refactors that must not change behaviour): the three fixed-seed
 # numbers must equal the committed Scripts/numbers.baseline exactly.

@@ -4,7 +4,7 @@ Fixed-seed fixtures and PASS/FAIL validators that gate every change to BBRsim.
 
 ```
 G4Macros/Validation_*.mac   the six validation-only fixtures
-check_*.py                  the 12 validators
+check_*.py                  the 13 validators
 Scripts/run_regression.sh   build + fixtures + validators, one command
 Scripts/drift_guards.sh     source-tree consistency checks (run by the runner, or alone)
 Scripts/make_mock_hfss_frequencies.py   the mock HFSS tree for Validation_CrackFrequency
@@ -61,7 +61,7 @@ fingerprint stays fixed; pytest also exercises real redirected output and per-re
 | `frequency` | `Validation_CrackFrequency.mac` | `bbrsimTestWorld` | `check_crack_frequency.py --data-dir mock_hfss` on `output/`; `check_invariants.py` on each of the 16 `bbr_freq_rNN.root` |
 | `lp` | `examples/lightpipe/G4Macros/lightpipe.mac` | `bbrsimLightPipe` | `check_invariants.py` |
 | `lp_cad` | `Validation_LightPipeCAD.mac` | `bbrsimLightPipe` | `check_invariants.py` (cad mode, the bundled `box_sample.stl` through `BBRSIMDATA`) |
-| — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL) |
+| — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL); `check_dataset_sidecars.py` on `data/waveguides` and `BUILD_DIR/mock_hfss/waveguides` |
 
 A case passes when the binary exits 0, writes its ROOT output, and its log
 holds no `GeomNav`, `G4Exception`, `BBR0xx` or `LP002` line (the frequency case
@@ -100,6 +100,7 @@ not installed is skipped) and exits with its FAIL count.
 - `check_crack_oblique.py`, `check_crack_frequency.py` — all 138 and 89 checks respectively.
 - `check_invariants.py` — both invariants, each printed in its own section: no photons in metal (no crossing starts inside a `Cu_RRR*` or `BBR_Perfect*` material, and the file holds at least one crossing; `--allow-no-crossings` waives only the latter, for the world-exit fixture), and termination labels (the file holds at least one `abspoints` row, no `unknown` label, every world exit is `WorldExit`, every absorption has a volume, and the `BBRAbsorb` counts agree between the two ntuples). A code with no legend entry fails the section that reads that column (`legend lacks code(s) …`), so a legend gap cannot make a check pass vacuously.
 - `check_cu_serov.py` — full-Drude loss for the `OF_Cu` (RRR 3) and `HP_Cu` (RRR 6) aliases within ±10 % of Serov et al. (2016). **XFAIL:** `HP_Cu` comes out 13 % low at 230 GHz, because RRR 6 was derived with Hagen-Rubens. Whether to move `HP_Cu` to RRR 5 or accept a wider tolerance is an open decision; the runner reports the check as XFAIL, and as XPASS (a failure) if it starts passing.
+- `check_dataset_sidecars.py` — every dataset in the real tree (`data/waveguides`) and the mock tree (`BUILD_DIR/mock_hfss/waveguides`) has a complete trio and a sidecar that passes `bbrsim.sidecar.check_full` (checks, full mode lists, CSV checksums, C1-C5), and the frequencies of each ID agree on the frequency-independent blocks; each directory must hold at least one dataset. See [Dataset sidecars](#dataset-sidecars).
 
 One validator needs an output the fixtures do not produce, so it is run by
 hand: `check_cu_absorptance.py` (0.3 < A_obs/A_theory < 3 against the
@@ -271,11 +272,16 @@ sidecar before it writes any, so a refusal leaves `data/` untouched.
 `Validation_CrackFrequency.mac` tests the frequency-keyed HFSS lookup against a
 mock five-frequency tree (50 / 150 / 500 / 1500 / 5000 GHz) that
 `Scripts/make_mock_hfss_frequencies.py` builds from the real 500 GHz data; the
-script refuses to write inside `data/`. The runner builds the tree in
-`BUILD_DIR/mock_hfss` when it is missing or older than the data or the script
-(about 1.3 GB), and links it into the regression directory, where the fixture's
-`/bbr/dataDir ../mock_hfss` finds it. The fixture header gives the by-hand
-recipe.
+script refuses to write inside `data/`. Each mock frequency gets its own
+sidecar `<id>_<f>GHz.dataset.json`, a copy of the 500 GHz one with the
+frequency, `modes.propagating_count`, the CSV checksums and the provenance
+(`mock_of`, `transmittance_scale`, `far_field_theta_above_90_zeroed`)
+rewritten, so the tree passes BBRsim's discovery checks and
+`check_dataset_sidecars.py`. The runner builds the tree in
+`BUILD_DIR/mock_hfss` when it is missing or older than the data, the script or
+`tools/python/bbrsim/sidecar.py` (about 1.3 GB), and links it into the
+regression directory, where the fixture's `/bbr/dataDir ../mock_hfss` finds it.
+The fixture header gives the by-hand recipe.
 
 ## Leak guard
 

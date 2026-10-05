@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from bbrsim import hfss
+from bbrsim import sidecar
 
 
 def run(script, *args, cwd):
@@ -57,6 +58,13 @@ def write_source(waveguides, dataset_id):
         (d / "far_field.csv").write_text(FF_HDR + "".join(
             f"500GHz,{e},0,180,0,{t},0.1,0.0,0.2,0.05\n" for t in (60, 120)))
         (d / "waveguide.csv").write_text(WG_HDR + f"500GHz,{e},0,180,{out},1.0,0,0,0,0,1,0,0,0,0\n")
+    sc = sidecar.build_from_csvs(
+        str(waveguides), dataset_id, "500GHz",
+        section={"shape": "rectangle", "y_e_half_m": 2e-3, "z_e_half_m": 2.5e-5},
+        extent_mm={"p": 1.0, "l": 4.0, "g": 0.05}, provenance={"producer": "test"},
+        exit_origin_mm=[0.0, 0.0, 1.0], plane_wave_origin_mm=[0.0, 0.0, 0.0],
+        bounding_box_mm=[-0.025, -2.0, 0.0, 0.025, 2.0, 1.0])
+    sidecar.write(str(waveguides), f"{dataset_id}_500GHz", sc)
 
 
 def test_mock_generator(repo_root, tmp_path):
@@ -82,3 +90,7 @@ def test_mock_generator(repo_root, tmp_path):
         amps = np.abs(np.concatenate([ds.F0_theta[back], ds.F0_phi[back], ds.F1_theta[back], ds.F1_phi[back]]))
         truncated = f in (150.0, 1500.0)
         assert np.all(amps == 0) if truncated else np.all(amps > 0)
+    for f, stem in grid:
+        sc = sidecar.check_full(base, "c", stem, f)      # every mock frequency has a valid sidecar
+        assert sc["frequency_ghz"] == f and sc["provenance"]["mock_of"] == "c_500GHz"
+        assert sc["modes"]["propagating_count"] == sidecar.modes_for(sc["exit_field"]["cross_section"], f)["propagating_count"]

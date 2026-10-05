@@ -98,9 +98,10 @@ nearest its frequency (in log frequency) and records the choice in the
 `hfss_freq_GHz` column. Only a 500 GHz dataset exists, so every photon of a
 broadband Planck run gets the 500 GHz tables, and broadband crack results are
 indicative, not quantitative. Adding real data means adding
-`<id>_<freq>GHz_Ephi=N` directories under `waveguides/`. There is no
-interpolation between frequencies; a photon beyond the grid uses the nearest
-edge, with one `BBR008` warning per crack and side.
+`<id>_<freq>GHz_Ephi=N` directories under `waveguides/`, each pair with its
+`<id>_<freq>GHz.dataset.json` sidecar (see `validation/README.md`, Dataset
+sidecars). There is no interpolation between frequencies; a photon beyond the
+grid uses the nearest edge, with one `BBR008` warning per crack and side.
 
 ### 3. Copper reflectance
 
