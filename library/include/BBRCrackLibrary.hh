@@ -46,6 +46,11 @@ class BBRCrackLibrary
   // chosen_GHz receives that frequency. A photon outside the grid uses the
   // nearest edge and triggers one BBR008 warning per (dataset, side); a grid
   // with a single frequency never warns, since there is nothing to choose.
+  // A photon whose frequency and the chosen grid frequency lie on opposite
+  // sides of the dataset's lowest-mode cutoff (modes.cutoff_ghz) triggers one
+  // BBR026 warning per (dataset, direction). The table is used unchanged; a
+  // one-point grid warns too, because one point cannot cover both sides of a
+  // cutoff.
   // Fatal BBR011 if the data directory is unreadable or holds no
   // <id>_<freq>GHz_Ephi=0 directory for this id.
   const BBRHFSSData& Lookup(const G4String& datasetId, G4double nu_GHz,
@@ -77,6 +82,8 @@ class BBRCrackLibrary
     std::vector<FrequencyEntry> entries;  // ascending in freq_GHz
     G4bool warnedLow = false;
     G4bool warnedHigh = false;
+    G4bool warnedBelowCutoff = false;   // BBR026: photon below the lowest-mode cutoff, grid point above
+    G4bool warnedAboveCutoff = false;   // BBR026: photon above it, grid point below
   };
 
   // Scans the waveguide directory for this id. The caller must hold the lock.

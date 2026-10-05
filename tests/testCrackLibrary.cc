@@ -213,5 +213,18 @@ int main(int argc, char** argv) {
         }
       }
     }},
+    {"cutoff_warning", [] {
+      TempDir d; Grid(d.path(), "one", {"500"}); Grid(d.path(), "low", {"10", "500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      CHECK(Handler().CountWarnings("BBR026") == 0);
+      CHECK_NEAR(Pick("one", 10), 500, 0);    // photon below cutoff, served above it: warns (a one-point grid too)
+      CHECK_NEAR(Pick("one", 12), 500, 0);    // once per dataset and direction
+      CHECK_NEAR(Pick("one", 600), 500, 0);   // both above: silent
+      CHECK(Handler().CountWarnings("BBR026") == 1);
+      CHECK_NEAR(Pick("low", 12), 10, 0);     // both below: silent
+      CHECK_NEAR(Pick("low", 20), 10, 0);     // photon above, served by the 10 GHz point below: warns
+      CHECK(Handler().CountWarnings("BBR026") == 2);
+      CHECK(Handler().CountWarnings("BBR008") == 0);   // in-grid selections never clamp
+    }},
   });
 }

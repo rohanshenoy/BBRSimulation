@@ -32,8 +32,10 @@
 #    installed env script): the seven validation/G4Macros fixtures and four
 #    example macros (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
 #    their command lines are pinned by drift_guards.sh). Scans every log for
-#    GeomNav / G4Exception / BBR0xx / LP002 messages, and checks that the
-#    frequency case's BBR008 clamp warning fires once per side.
+#    GeomNav / G4Exception / BBR0xx / LP002 messages, checks that the
+#    frequency case's BBR008 clamp warning fires once per side, and that the
+#    BBR026 cutoff warning tolerated in the Planck cases fires at most once per
+#    dataset and direction.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
 #    one PASS/FAIL line per check (with BBR_PIN=1 also the row fixed-seed
 #    numbers: the three fixed-seed numbers against Scripts/numbers.baseline).
@@ -304,20 +306,21 @@ run_macro() {  # case executable macro-path
   mkdir -p "$REG/$1" && ( cd "$REG/$1" && "$2" "$3" >run.log 2>&1; echo $? >exit.code )
 }
 
-# Count log lines that indicate trouble. A tolerated exception code (the
-# expected BBR008 clamp warnings of the frequency case) is subtracted from both
+# Count log lines that indicate trouble. The tolerated exception codes, an ERE
+# alternation (the expected BBR008 clamp warnings of the frequency case, the
+# BBR026 cutoff warnings of the Planck cases), are subtracted from both
 # the code hits and the two-line G4Exception banner, which a single grep cannot
 # do: a JustWarning prints "G4Exception-START" and "*** G4Exception : CODE" on
 # separate lines, and threads interleave.
-scan_log() {  # case-dir [tolerated-code]
+scan_log() {  # case-dir [tolerated-codes-ERE]
   local log="$REG/$1/run.log" tol="${2:-}"
   local n_geom n_lp n_start n_bbr n_tol=0
   n_geom=$(grep -c -i "GeomNav" "$log" || true)
   n_lp=$(grep -c "LP002" "$log" || true)
   n_start=$(grep -c "G4Exception-START" "$log" || true)
   if [ -n "$tol" ]; then
-    n_bbr=$(grep -E "BBR0[0-9][0-9]" "$log" | grep -v -c "$tol" || true)
-    n_tol=$(grep -c -E "G4Exception : $tol" "$log" || true)
+    n_bbr=$(grep -E "BBR0[0-9][0-9]" "$log" | grep -v -c -E "$tol" || true)
+    n_tol=$(grep -c -E "G4Exception : ($tol)" "$log" || true)
   else
     n_bbr=$(grep -c -E "BBR0[0-9][0-9]" "$log" || true)
   fi
@@ -339,7 +342,11 @@ run_macro lp_cad    "$LIGHTPIPE" "$VM/Validation_LightPipeCAD.mac"    &
 wait
 for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_cad; do
   code=$(cat "$REG/$d/exit.code")
-  tol=""; [ "$d" = "frequency" ] && tol="BBR008"   # expected clamp warnings
+  case "$d" in
+    frequency) tol="BBR008|BBR026" ;;               # clamp warnings; Planck photons below the TE10 cutoff
+    planck|config_mt|transmit) tol="BBR026" ;;      # Planck photons below the cracks' TE10 cutoff (14.99 GHz)
+    *) tol="" ;;
+  esac
   nbad=$(scan_log "$d" "$tol")
   if [ "$code" -eq 0 ] && [ "$nbad" -eq 0 ] && ls "$REG/$d"/output/*.root >/dev/null 2>&1; then
     line PASS "run:$d" "exit 0, no GeomNav/G4Exception/BBR0xx/LP002${tol:+ (except $tol)}"; pass=$((pass+1))
@@ -356,6 +363,15 @@ for side in low high; do
   if [ "$n" -eq 1 ]; then line PASS "clamp warning $side" "[frequency] BBR008 once"; pass=$((pass+1))
   else line FAIL "clamp warning $side" "[frequency] BBR008 count $n, expected 1"; fail=$((fail+1)); fi
 done
+# BBR026 may fire in the Planck cases, at most once per dataset and direction.
+# Counted per case: each case is its own process with its own one-shot flags.
+c26=""
+for d in planck config_mt transmit frequency; do
+  c=$(grep -oE "BBR026 dataset=[A-Za-z0-9_]+ direction=(below|above)" "$REG/$d/run.log" | sort | uniq -c | awk '$1 > 1')
+  [ -n "$c" ] && c26="$c26 [$d] $c"
+done
+if [ -z "$c26" ]; then line PASS "cutoff warning once" "BBR026 at most once per dataset and direction per case"; pass=$((pass+1))
+else line FAIL "cutoff warning once" "$c26"; fail=$((fail+1)); fi
 
 echo "=== 3. validators ==="
 # An XFAIL holds only for the documented failure: the validator reached its

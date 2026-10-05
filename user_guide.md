@@ -102,6 +102,11 @@ indicative, not quantitative. Adding real data means adding
 `<id>_<freq>GHz.dataset.json` sidecar (see `validation/README.md`, Dataset
 sidecars). There is no interpolation between frequencies; a photon beyond the
 grid uses the nearest edge, with one `BBR008` warning per crack and side.
+When a photon's frequency and the dataset serving it lie on opposite sides of
+the guide's lowest-mode cutoff (`modes.cutoff_ghz` in the sidecar: TE10 at
+14.99 GHz for the slab cracks, TE11 at 1757 GHz for the 50 µm round gap),
+BBRsim warns once with `BBR026`. The 2000 GHz round-gap data are therefore for
+fixed-energy gun runs only until a dataset below cutoff exists.
 
 ### 3. Copper reflectance
 

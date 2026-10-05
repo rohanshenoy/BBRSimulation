@@ -215,6 +215,24 @@ const BBRHFSSData& BBRCrackLibrary::Lookup(const G4String& datasetId, G4double n
     }
   }
 
+  // The lowest-mode cutoff (modes.cutoff_ghz): below it a closed guide carries
+  // no propagating mode, so a table from the other side is the wrong physics.
+  const G4double fc = E[k].sidecar->cutoffGHz;
+  if (fc > 0. && ((nu_GHz < fc) != (E[k].freq_GHz < fc))) {
+    const G4bool below = nu_GHz < fc;
+    G4bool& warned = below ? set.warnedBelowCutoff : set.warnedAboveCutoff;
+    if (!warned) {
+      warned = true;
+      G4ExceptionDescription ed;
+      ed << "BBR026 dataset=" << datasetId << " direction=" << (below ? "below" : "above")
+         << " nu_GHz=" << nu_GHz << " grid_GHz=" << E[k].freq_GHz << " cutoff_GHz=" << fc
+         << " (" << E[k].sidecar->lowestMode << ") : the photon and the HFSS dataset serving it lie on "
+         << "opposite sides of the lowest-mode cutoff; the table is used unchanged. Reported once per "
+         << "dataset and direction.";
+      G4Exception("BBRCrackLibrary::Lookup", "BBR026", JustWarning, ed);
+    }
+  }
+
   if (!E[k].data)
     E[k].data = std::make_unique<BBRHFSSData>(fWaveguidesDir, E[k].dirStem, E[k].freq_GHz, E[k].sidecar.get());
 
