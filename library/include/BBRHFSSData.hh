@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+struct BBRDatasetSidecar;
+
 // Loads HFSS far-field and waveguide CSVs and samples the diffraction boundary
 // condition per Wang (2025) eqs. 54-58.
 //
@@ -25,13 +27,17 @@
 //   BBR000  no incidence key in either CSV
 //   BBR001  far_field.csv cannot be opened
 //   BBR002  waveguide.csv cannot be opened
-//   BBR007  far_field.csv and waveguide.csv have different incidence keys
+//   BBR007  far_field.csv and waveguide.csv have different incidence keys; with
+//           a sidecar, also C2 (validation/README.md, Dataset sidecars)
 //   BBR009  a row's Freq disagrees with the directory frequency (every row)
 //   BBR012  an Ephi=1 row does not match the Ephi=0 row at the same index
 //           (X/Y/Z of an exit point, Phi/Theta of a far-field row), or the
-//           two files have different row counts for a key
+//           two files have different row counts for a key; with a sidecar,
+//           also C3-C4 (validation/README.md, Dataset sidecars)
 //   BBR013  a numeric field is not a number or not finite, or a non-empty
-//           row has the wrong number of fields
+//           row has the wrong number of fields; with a sidecar, also C1
+//           (validation/README.md, Dataset sidecars)
+//   BBR025  (with a sidecar) an exit point outside the declared cross-section
 class BBRHFSSData
 {
  public:
@@ -42,8 +48,14 @@ class BBRHFSSData
   // expectedFreqGHz: the frequency parsed from the directory name. Each CSV's
   //   Freq column must agree with it to 0.1 % (BBR009), so a mislabelled or
   //   mis-copied dataset cannot be used under the wrong frequency.
+  // sidecar (optional): the dataset's parsed <dirStem>.dataset.json. When
+  // given, the loader also runs the sidecar checks C1-C5: header = declared
+  // columns (BBR013), keys on the declared grid (BBR007), far-field and
+  // exit-grid rows per key, ranges and counts, X = 0 (BBR012), every exit
+  // point inside the declared cross-section (BBR025). BBRCrackLibrary always
+  // passes it; a direct construction without one keeps the pre-sidecar checks.
   BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
-              G4double expectedFreqGHz);
+              G4double expectedFreqGHz, const BBRDatasetSidecar* sidecar = nullptr);
 
   // Frequency this dataset was loaded as [GHz].
   G4double GetFrequencyGHz() const { return fFreqGHz; }
@@ -115,9 +127,11 @@ class BBRHFSSData
   // Nearest-neighbour lookup by L2 distance in (phi, theta) degree space.
   const AngleDataset& FindDataset(G4double iwavePhi_deg, G4double iwaveTheta_deg) const;
 
+  void CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4String& dirStem) const;
+
   // ephi_flag: 0 = Ephi=0 CSV (fill _0 fields), 1 = Ephi=1 CSV (fill _1 fields).
-  void LoadFarField(const G4String& path, int ephi_flag);
-  void LoadWaveguide(const G4String& path, int ephi_flag);
+  void LoadFarField(const G4String& path, int ephi_flag, const BBRDatasetSidecar* sc);
+  void LoadWaveguide(const G4String& path, int ephi_flag, const BBRDatasetSidecar* sc);
 };
 
 #endif

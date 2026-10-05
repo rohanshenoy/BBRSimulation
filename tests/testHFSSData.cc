@@ -1,6 +1,7 @@
 #include "BBRTestSupport.hh"
 #include "HFSSFixture.hh"
 #include "BBRHFSSData.hh"
+#include "BBRDatasetSidecar.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4coutDestination.hh"
 #include "G4ios.hh"
@@ -25,6 +26,33 @@ struct Capture : public G4coutDestination {
 BBRHFSSData Load(TempDir& d, const Dataset& ds, const std::string& stem = "c_500GHz", double f = 500.) {
   const auto wg = hfssfix::WriteDataset(d.path(), stem, ds);
   return BBRHFSSData(wg.string(), stem, f);
+}
+
+// The dataset under <TempDir>/waveguides/c_500GHz with the sidecar built from p
+// (default: SidecarFrom), loaded through BBRHFSSData with that sidecar (C1-C5).
+BBRHFSSData LoadChecked(TempDir& d, const Dataset& ds, const hfssfix::SidecarParams* p = nullptr) {
+  const std::string stem = "c_500GHz";
+  const auto wg = hfssfix::WriteDataset(d.path(), stem, ds, false);
+  const auto params = p ? *p : hfssfix::SidecarFrom(stem, ds);
+  const auto sc = BBRDatasetSidecar::Parse(hfssfix::SidecarJson(params), "test", "c", stem, 500.);
+  return BBRHFSSData(wg.string(), stem, 500., &sc);
+}
+
+// f must stop with `code` from a BBRHFSSData origin and a message containing `what`,
+// so each sidecar case pins the check it is meant to reach, not one that fires earlier.
+template <typename F>
+void ExpectCheck(const std::string& code, const std::string& what, F&& f) {
+  try {
+    f();
+    Report(false, __FILE__, __LINE__, "expected " + code + " (" + what + "), none raised");
+  } catch (const G4ExceptionCaught& e) {
+    Report(e.code == code && e.origin.find("BBRHFSSData") != std::string::npos &&
+             std::string(e.what()).find(what) != std::string::npos,
+           __FILE__, __LINE__, "expected " + code + " containing \"" + what + "\", got " + e.code + " from " +
+             e.origin + ": " + e.what());
+  } catch (const std::exception& e) {
+    Report(false, __FILE__, __LINE__, "expected " + code + ", got C++ exception: " + e.what());
+  }
 }
 }  // namespace
 
@@ -279,6 +307,88 @@ int main(int argc, char** argv) {
         CHECK_NEAR(sum / 360., 0.5 * (t0 + t1), 1e-12);   // the clamp never acts
         CHECK_NEAR(sum / 360., mean45, 1e-6);
         CHECK_NEAR(c.GetTransmittance(1, 0, 0, 180), 1.0, 1e-9);
+      }
+    }},
+    {"sidecar_checks_pass", [] {
+      TempDir d1; CHECK_NEAR(LoadChecked(d1, hfssfix::Mini500()).GetFrequencyGHz(), 500., 0);
+      TempDir d2; LoadChecked(d2, hfssfix::NineKey());                 // 3 far-field rows, 2 exit points per key
+      TempDir d3; LoadChecked(d3, hfssfix::WrapKeys("500", "0.01"));   // the section grows to the 10 mm rows
+    }},
+    {"sidecar_c1_header", [] {
+      Dataset ds = hfssfix::Mini500();
+      const auto p = hfssfix::SidecarFrom("c_500GHz", ds);
+      ds.ff0.replace(ds.ff0.find(",Theta,"), 7, ",Thet,");
+      TempDir d; ExpectCheck("BBR013", "differs from the columns its sidecar declares", [&] { LoadChecked(d, ds, &p); });
+    }},
+    {"sidecar_c2_key_off_grid", [] {
+      auto p = hfssfix::SidecarFrom("c_500GHz", hfssfix::Mini500());
+      p.thetas = {135.};
+      TempDir d; ExpectCheck("BBR007", "incidence key (0, 180) is not on the declared",
+                             [&] { LoadChecked(d, hfssfix::Mini500(), &p); });
+    }},
+    {"sidecar_c3_far_field", [] {
+      const Dataset ds = hfssfix::NineKey();
+      const auto p = hfssfix::SidecarFrom("c_500GHz", ds);
+      auto q = p; q.thMax = 100.;   // the Theta = 110 rows lie outside
+      TempDir d1; ExpectCheck("BBR012", "(Phi, Theta) = (60, 110) of key (0, 90) lies outside the declared ranges",
+                              [&] { LoadChecked(d1, ds, &q); });
+      q = p; q.ffPerKey = 2;
+      TempDir d2; ExpectCheck("BBR012", "has 3 far-field rows; points_per_key is 2", [&] { LoadChecked(d2, ds, &q); });
+      q = p; q.phCount = 4;
+      TempDir d3; ExpectCheck("BBR012", "the far field has 3 Phi and 3 Theta values; the sidecar declares 4 and 3",
+                              [&] { LoadChecked(d3, ds, &q); });
+    }},
+    {"sidecar_c4_exit_rows", [] {
+      const Dataset ds = hfssfix::NineKey();
+      auto q = hfssfix::SidecarFrom("c_500GHz", ds);
+      q.exitPerKey = 1;
+      TempDir d1; ExpectCheck("BBR012", "has 2 exit points; points_per_key_retained is 1", [&] { LoadChecked(d1, ds, &q); });
+      Dataset off = hfssfix::Mini500();   // X = 1 um: not on the exit plane
+      off.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,3,4,1e-06,0,0,0,1,0,0,0,0\n";
+      off.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,1e-06,0,0,0,0,1,0,0,0\n";
+      TempDir d2; ExpectCheck("BBR012", "has X = 1e-06 m; the sidecar declares x_e = 0", [&] { LoadChecked(d2, off); });
+      auto r = hfssfix::SidecarFrom("c_500GHz", ds);
+      r.yMax = 0.0005;              // the Y = 1 mm points lie beyond the declared grid
+      TempDir d3; ExpectCheck("BBR012", "(Y, Z) = (0.001, 1e-05) m of key (0, 90) lies outside the declared grid",
+                              [&] { LoadChecked(d3, ds, &r); });
+      r = hfssfix::SidecarFrom("c_500GHz", ds);
+      r.zCount = 3;
+      TempDir d4; ExpectCheck("BBR012", "the exit grid has 2 Y and 2 Z values; the sidecar declares 2 and 3",
+                              [&] { LoadChecked(d4, ds, &r); });
+    }},
+    {"sidecar_c5_outside_section", [] {
+      const Dataset ds = hfssfix::WrapKeys("500", "0.01");   // exit points at Y = 10 mm
+      auto p = hfssfix::SidecarFrom("c_500GHz", ds);
+      p.yHalf = 5e-3;                                       // the declared section ends at 5 mm
+      TempDir d; ExpectCheck("BBR025", "5 exit point(s) lie outside the declared cross-section",
+                             [&] { LoadChecked(d, ds, &p); });
+    }},
+    {"sidecar_c5_zero_outside", [] {
+      // An exit point outside the section with no field at all: exempt only when outside_points is "zero".
+      Dataset ds = hfssfix::Mini500();
+      ds.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,3,4,0,0,0,0,1,0,0,0,0\n500GHz,0,0,180,3,4,0,0.01,0,0,0,0,0,0,0\n";
+      ds.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,0,1,0,0,0\n500GHz,1,0,180,1,4,0,0.01,0,0,0,0,0,0,0\n";
+      auto p = hfssfix::SidecarFrom("c_500GHz", ds);
+      p.yHalf = 4.5e-3;                                    // the point at Y = 10 mm lies outside
+      p.outsidePoints = "zero";
+      TempDir d1; LoadChecked(d1, ds, &p);                 // exempt: all six components zero in both polarizations
+      p.outsidePoints = "omitted";
+      TempDir d2; ExpectCheck("BBR025", "1 exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = (0.01, 0) m",
+                              [&] { LoadChecked(d2, ds, &p); });
+      // "zero" exempts only a point with no field in EITHER polarization: one Ephi=1 component is enough to refuse it.
+      Dataset one = ds;
+      one.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,0,1,0,0,0\n500GHz,1,0,180,1,4,0,0.01,0,0,0,0,0,0,1e-30\n";
+      p.outsidePoints = "zero";
+      TempDir d3; ExpectCheck("BBR025", "1 exit point(s) lie outside", [&] { LoadChecked(d3, one, &p); });
+    }},
+    {"sidecar_real_data", [] {
+      const char* root = std::getenv("BBRSIM_TEST_DATA");
+      if (!root) { CHECK(false && "BBRSIM_TEST_DATA not set"); return; }
+      const std::string wg = std::string(root) + "/waveguides";
+      for (const std::string id : {"InfParallelPlate_crack1Rohan", "InfParallelPlate_crack2"}) {
+        const auto sc = BBRDatasetSidecar::Load(wg, id, id + "_500GHz", 500.);
+        BBRHFSSData h(wg, id + "_500GHz", 500., &sc);
+        CHECK_NEAR(h.GetFrequencyGHz(), 500., 0);
       }
     }},
   });
