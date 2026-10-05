@@ -27,8 +27,10 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   // Forwards to the wrapped process, then runs
   // BBRCrackLibrary::ValidatePlacedCracks() (once per process), so a missing or
   // wrong HFSS dataset, or a crack too small for its exit grid, stops the run at
-  // the first /run/beamOn, before any event. A geometry without vacuum_wg
-  // volumes sees nothing new.
+  // the first run initialization (/run/initialize with an MT or task run
+  // manager, whose Initialize calls BeamOn(0); /run/beamOn with a sequential
+  // one), before any event. A geometry without vacuum_wg volumes sees nothing
+  // new.
   void BuildPhysicsTable(const G4ParticleDefinition& particle) override;
 
   // What the wrapper itself did on the last PostStepDoIt invocation.

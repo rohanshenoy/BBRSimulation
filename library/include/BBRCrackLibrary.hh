@@ -16,13 +16,17 @@
 // nearest frequency). Datasets live under
 // BBRConfigManager::GetDataDir()/waveguides as <id>_<freq>GHz_Ephi={0,1};
 // the frequency grid for an id is discovered from those directory names on the
-// first Lookup, and each frequency's CSVs are loaded on first selection.
+// first Lookup or ValidatePlacedCracks, and each frequency's CSVs are loaded on
+// first selection.
 // Adding a crack still requires only placing a new vacuum_wg volume whose name
 // matches a dataset directory — no code changes.
 //
 // Discovery also loads every frequency's sidecar <id>_<freq>GHz.dataset.json
 // (F1-F11, F13; fatal BBR024 or BBR025); the frequencies must agree on the
-// frequency-independent blocks (BBR024).
+// frequency-independent blocks (BBR024, naming the blocks that differ). It
+// then checks that both Ephi directories of every frequency hold far_field.csv
+// (else fatal BBR001) and waveguide.csv (else BBR002) as regular files; the
+// files are only checked to exist there, and are read on first selection.
 //
 // The cache is shared mutable state with synchronized lazy initialization, not
 // an immutable singleton: discovery, selection, loading and the one-time clamp
@@ -34,6 +38,10 @@ class BBRCrackLibrary
  public:
   static BBRCrackLibrary& Instance();
 
+  // The HFSS dataset ID of a crack volume: its physical volume name up to the
+  // first ':' ("gap:1" -> "gap", "gap" -> "gap").
+  static G4String DatasetIdOf(const G4String& volumeName);
+
   // Dataset for `datasetId` at the grid frequency nearest nu_GHz in log space;
   // chosen_GHz receives that frequency. A photon outside the grid uses the
   // nearest edge and triggers one BBR008 warning per (dataset, side); a grid
@@ -44,9 +52,9 @@ class BBRCrackLibrary
                             G4double& chosen_GHz);
 
   // Validates every vacuum_wg volume of the geometry before the first event:
-  // discovers its dataset (sidecars included) and checks that each sidecar's
-  // exit cross-section fits strictly inside the volume's solid (F12, fatal
-  // BBR025). Prints each crack's HFSS and Geant4 extents (F11). Called once per
+  // discovers its dataset (sidecars and CSV presence included) and checks that
+  // each sidecar's exit cross-section fits strictly inside the volume's solid
+  // (F12, fatal BBR025). Prints each crack's HFSS and Geant4 extents (F11). Called once per
   // process by BBSimOpBoundaryProcess::BuildPhysicsTable; later calls return.
   void ValidatePlacedCracks();
 

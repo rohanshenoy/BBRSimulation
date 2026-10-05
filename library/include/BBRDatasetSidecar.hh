@@ -83,9 +83,16 @@ struct BBRDatasetSidecar {
   // SameInvariant, never as text.
   std::string invariant;
 
+  // The top-level invariant blocks on which this and other differ, in the order
+  // frames, symmetry, boundaries, geometry, modes, cross_section: objects
+  // compared over the keys both carry, arrays element by element, numbers to
+  // 1e-9 relative, strings and booleans exactly. Empty when either invariant
+  // is empty (a sidecar not produced by Parse). The Python twin is
+  // bbrsim.sidecar.invariant_diff.
+  std::vector<std::string> InvariantDiff(const BBRDatasetSidecar& other) const;
+
   // True when this and other carry the same frequency-independent physics:
-  // objects compared over the keys both carry, arrays element by element,
-  // numbers to 1e-9 relative, strings and booleans exactly.
+  // both produced by Parse and InvariantDiff(other) empty.
   G4bool SameInvariant(const BBRDatasetSidecar& other) const;
 };
 

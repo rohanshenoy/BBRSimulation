@@ -151,9 +151,17 @@ conda run -n bbrsim python <repo>/validation/check_crack_transmittance.py output
 under `waveguides/` has a sidecar `<id>_<freq>GHz.dataset.json` beside it
 (JSON, schema 1.x, agreed with Blackbody-Simulations on 2026-10-05). BBRsim
 reads it when it discovers the dataset, and checks every placed crack at the
-first `/run/beamOn`, before any event. A missing or inconsistent sidecar is the
-fatal `BBR024`; a convention BBRsim does not implement, or a declared
-cross-section that does not fit the crack solid, is the fatal `BBR025`. The
+first run initialization (`/run/initialize` with a multithreaded or task run
+manager, as in the examples; `/run/beamOn` with a sequential one), before any
+event. A missing or inconsistent sidecar is the fatal `BBR024`; a convention
+BBRsim does not implement, or a declared cross-section that does not fit the
+crack solid, is the fatal `BBR025`; a missing `far_field.csv` or
+`waveguide.csv` in either Ephi directory is the fatal `BBR001` or `BBR002`
+(the CSVs themselves load at the first photon that selects the frequency).
+Every placed `vacuum_wg` volume is validated, whether or not a photon reaches
+it, so a data tree named with `/bbr/dataDir` or `BBRSIMDATA` must hold a
+complete dataset with sidecars for each placed crack; the test world always
+places both `InfParallelPlate_crack1Rohan` and `InfParallelPlate_crack2`. The
 frequency-independent blocks are repeated in every frequency's file, so a
 copied frequency stays self-describing. Every frequency of one ID must agree on
 the frame mapping (`frames.hfss_global_axes_in_canonical` and
@@ -204,7 +212,7 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 - F9 `transmittance`: the supported `definition` string and `incoming_includes_cos_theta` false (`BBR025`).
 - F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`).
 - F11 `geometry.extent_mm`: p, l, g > 0 (`BBR024`); compared with the placed solid's bounding limits along local x, y, z, printed as one `[BBR]` info line and stored in `metadata.json` (info only, not a warning).
-- F12 `exit_field.cross_section` against the placed solid, at the first `/run/beamOn`, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset, is strictly inside the solid. With `rim_points` `"included"`, the recorded Geant4 margin is what makes this pass (`BBR025`).
+- F12 `exit_field.cross_section` against the placed solid, at the first run initialization, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset, is strictly inside the solid. With `rim_points` `"included"`, the recorded Geant4 margin is what makes this pass (`BBR025`).
 - F13 `modes.mode`, `.cutoff_ghz`, `.polarization_filter_limit_ghz`: re-derived from `cross_section` to 1e-6 relative with closed forms (rectangle f_mn = (c/2)·√((m/a)² + (n/b)²), c = 299792458 m/s; disc TE11 with x′₁₁ = 1.8411837813). The full lists are re-derived only by the Python validator, with scipy (`BBR025`).
 
 At the CSV load, per frequency, in `BBRHFSSData`:

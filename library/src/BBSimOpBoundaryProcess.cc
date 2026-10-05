@@ -88,7 +88,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // E/h_Planck is a frequency in 1/ns; 1e9*hertz is exactly 1/ns, so the
   // quotient is in GHz.
   const G4String volName   = touch->GetVolume()->GetName();
-  const G4String datasetId = volName.substr(0, volName.find(':'));
+  const G4String datasetId = BBRCrackLibrary::DatasetIdOf(volName);
   const G4double nu_GHz =
       aTrack.GetKineticEnergy() / CLHEP::h_Planck / (1e9 * CLHEP::hertz);
   const BBRHFSSData& hfss =

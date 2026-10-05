@@ -76,10 +76,11 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         sidecar_c4_exit_rows sidecar_c5_outside_section sidecar_c5_zero_outside sidecar_real_data
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 bbrsim_add_test_program(testSidecar LABEL unit
-  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only field_types f12_fits_solid)
+  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only invariant_diff field_types f12_fits_solid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
-  CASES selection_grid5 token_verbatim discovery_errors unreadable_root concurrent_first_load
+  CASES selection_grid5 token_verbatim discovery_errors discovery_missing_far_field discovery_missing_waveguide
+        dataset_id_of unreadable_root concurrent_first_load
         sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok)
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
@@ -150,7 +151,7 @@ set_tests_properties(testConfig.datadir_env testConfig.datadir_env_late PROPERTI
 # The event-loop fatal on a worker thread aborts the process; ExpectAbort.cmake
 # checks the abort and the code. Same environment as the testPhysicsList cases,
 # and its own working directory, where the case writes its HFSS data root.
-bbrsim_add_abort_test(testPhysicsList.event_loop_fatal_mt testPhysicsList event_loop_fatal_mt BBR001)
+bbrsim_add_abort_test(testPhysicsList.event_loop_fatal_mt testPhysicsList event_loop_fatal_mt BBR013)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/work/testPhysicsList.event_loop_fatal_mt)
 set_tests_properties(testPhysicsList.event_loop_fatal_mt PROPERTIES LABELS regression
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/work/testPhysicsList.event_loop_fatal_mt

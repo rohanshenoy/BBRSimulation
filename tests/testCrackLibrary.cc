@@ -76,8 +76,37 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR011", [] { Pick("dup", 500); }, "BBRCrackLibrary");
       ExpectG4Exception("BBR011", [] { Pick("junk", 500); }, "BBRCrackLibrary");
       ExpectG4Exception("BBR011", [] { Pick("nosuch", 500); }, "BBRCrackLibrary");
-      ExpectG4Exception("BBR001", [] { Pick("half", 500); }, "BBRHFSSData");        // Ephi=1 missing: at first selection
-      ExpectG4Exception("BBR001", [] { Pick("half", 500); }, "BBRHFSSData");        // and again (the lock was released)
+      // Ephi=1 missing: at discovery, before any CSV is read, and again (nothing was cached, the lock was released)
+      ExpectG4Exception("BBR001", [] { Pick("half", 500); }, "BBRCrackLibrary::Discover", "half_500GHz_Ephi=1/far_field.csv");
+      ExpectG4Exception("BBR001", [] { Pick("half", 500); }, "BBRCrackLibrary::Discover", "half_500GHz_Ephi=1/far_field.csv");
+    }},
+    {"discovery_missing_far_field", [] {
+      // One CSV of four missing, at the frequency a photon would not select: BBR001 at discovery.
+      TempDir d; Grid(d.path(), "ff", {"50", "500"});
+      const auto gone = d.path() / "waveguides" / "ff_500GHz_Ephi=0" / "far_field.csv";
+      std::filesystem::remove(gone);
+      BBRConfigManager::SetDataDir(d.path().string());
+      ExpectG4Exception("BBR001", [] { Pick("ff", 50); }, "BBRCrackLibrary::Discover",
+                        "Missing HFSS file " + std::filesystem::absolute(gone).string() +
+                          " (no such regular file): every frequency of dataset ff needs far_field.csv and "
+                          "waveguide.csv in both ff_500GHz_Ephi=0 and ff_500GHz_Ephi=1.");
+    }},
+    {"discovery_missing_waveguide", [] {
+      // A waveguide.csv that is a directory is no regular file either: BBR002 at discovery.
+      TempDir d; Grid(d.path(), "wg", {"500"});
+      const auto bad = d.path() / "waveguides" / "wg_500GHz_Ephi=1" / "waveguide.csv";
+      std::filesystem::remove(bad);
+      std::filesystem::create_directories(bad);
+      BBRConfigManager::SetDataDir(d.path().string());
+      ExpectG4Exception("BBR002", [] { Pick("wg", 500); }, "BBRCrackLibrary::Discover",
+                        "Missing HFSS file " + std::filesystem::absolute(bad).string() +
+                          " (no such regular file): every frequency of dataset wg needs far_field.csv and "
+                          "waveguide.csv in both wg_500GHz_Ephi=0 and wg_500GHz_Ephi=1.");
+    }},
+    {"dataset_id_of", [] {
+      CHECK(BBRCrackLibrary::DatasetIdOf("gap:1") == "gap");
+      CHECK(BBRCrackLibrary::DatasetIdOf("gap") == "gap");
+      CHECK(BBRCrackLibrary::DatasetIdOf("gap:1:2") == "gap");   // up to the first ':'
     }},
     {"unreadable_root", [] {
       BBRConfigManager::SetDataDir("/nonexistent/bbrsim-root");
@@ -110,8 +139,9 @@ int main(int argc, char** argv) {
       p.yHalf = 4.0e-3;   // another exit section at one frequency
       bbrtest::WriteFile(d.path() / "waveguides" / "mix_500GHz.dataset.json", hfssfix::SidecarJson(p));
       BBRConfigManager::SetDataDir(d.path().string());
+      // The exit section, and the modes it determines, are named as the differing blocks.
       ExpectG4Exception("BBR024", [] { Pick("mix", 50); }, "BBRCrackLibrary::Discover",
-                        "disagree on their frequency-independent physics");
+                        "disagree on their frequency-independent physics, in block(s) modes, cross_section: ");
     }},
     {"validate_placed_cracks", [] {
       // Two placements of one id ("gap:1", "gap:2") with different solids: each is checked.

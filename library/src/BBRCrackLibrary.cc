@@ -17,6 +17,8 @@
 #include <filesystem>
 #include <limits>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 namespace {
 G4Mutex cacheMutex = G4MUTEX_INITIALIZER;
@@ -35,6 +37,11 @@ BBRCrackLibrary& BBRCrackLibrary::Instance()
 {
   static BBRCrackLibrary sInstance;
   return sInstance;
+}
+
+G4String BBRCrackLibrary::DatasetIdOf(const G4String& volumeName)
+{
+  return volumeName.substr(0, volumeName.find(':'));
 }
 
 BBRCrackLibrary::FrequencySet& BBRCrackLibrary::Discover(const G4String& datasetId)
@@ -124,12 +131,32 @@ BBRCrackLibrary::FrequencySet& BBRCrackLibrary::Discover(const G4String& dataset
     e.sidecar = std::make_unique<BBRDatasetSidecar>(
         BBRDatasetSidecar::Load(fWaveguidesDir, datasetId, e.dirStem, e.freq_GHz));
   for (std::size_t i = 1; i < set.entries.size(); ++i) {
-    if (!set.entries[i].sidecar->SameInvariant(*set.entries[0].sidecar)) {
+    const std::vector<std::string> differ = set.entries[i].sidecar->InvariantDiff(*set.entries[0].sidecar);
+    if (!differ.empty()) {
       G4ExceptionDescription ed;
-      ed << "The sidecars of dataset " << datasetId << " disagree on their frequency-independent physics "
-         << "(frame mapping, symmetry, boundaries, geometry, modes or cross-section): "
-         << set.entries[0].sidecar->path << " and " << set.entries[i].sidecar->path << ".";
+      ed << "The sidecars of dataset " << datasetId << " disagree on their frequency-independent physics, "
+         << "in block(s)";
+      for (std::size_t b = 0; b < differ.size(); ++b) ed << (b ? ", " : " ") << differ[b];
+      ed << ": " << set.entries[0].sidecar->path << " and " << set.entries[i].sidecar->path << ".";
       G4Exception("BBRCrackLibrary::Discover", "BBR024", FatalException, ed);
+    }
+  }
+
+  // Every frequency's four CSVs must be present before the first event, so an
+  // incomplete tree stops the run at startup rather than mid-run. Existence
+  // only: the CSVs are read on first selection (BBRHFSSData, same codes).
+  for (const auto& e : set.entries) {
+    for (const char* ephi : {"_Ephi=0", "_Ephi=1"}) {
+      for (const auto& [file, code] : {std::pair{"far_field.csv", "BBR001"}, std::pair{"waveguide.csv", "BBR002"}}) {
+        const fs::path p = dir / (e.dirStem + ephi) / file;
+        std::error_code ec3;
+        if (fs::is_regular_file(p, ec3)) continue;
+        G4ExceptionDescription ed;
+        ed << "Missing HFSS file " << AbsPath(p) << " (no such regular file): every frequency of dataset "
+           << datasetId << " needs far_field.csv and waveguide.csv in both " << e.dirStem << "_Ephi=0 and "
+           << e.dirStem << "_Ephi=1.";
+        G4Exception("BBRCrackLibrary::Discover", code, FatalException, ed);
+      }
     }
   }
 
@@ -203,8 +230,7 @@ void BBRCrackLibrary::ValidatePlacedCracks()
     const G4Material* mat = lv ? lv->GetMaterial() : nullptr;
     if (!mat || mat->GetName() != "vacuum_wg") continue;
     const G4String name = pv->GetName();
-    const G4String id = name.substr(0, name.find(':'));
-    FrequencySet& set = Discover(id);
+    FrequencySet& set = Discover(DatasetIdOf(name));
     const G4VSolid& solid = *lv->GetSolid();
     for (const auto& e : set.entries) e.sidecar->CheckFitsSolid(solid, name);
     G4ThreeVector lo, hi;

@@ -147,6 +147,33 @@ int main(int argc, char** argv) {
       p.zHalf = 2.6e-5;                                   // another exit section: different physics
       CHECK(!a.SameInvariant(Parse(hfssfix::SidecarJson(p))));
     }},
+    {"invariant_diff", [] {
+      // The names of the differing top-level blocks, in the order frames, symmetry,
+      // boundaries, geometry, modes, cross_section; empty exactly when SameInvariant.
+      using V = std::vector<std::string>;
+      const auto a = Parse(Valid());
+      const auto pose = Parse(Edit(Valid(), "\"pose_rule\": \"canonical-z\"", "\"pose_rule\": \"legacy\""));
+      CHECK(a.InvariantDiff(pose).empty() && a.SameInvariant(pose));
+      const auto sym = Parse(Edit(Valid(), "\"rotational\": false", "\"rotational\": true"));
+      CHECK(a.InvariantDiff(sym) == V{"symmetry"} && !a.SameInvariant(sym));
+      const auto wall = Parse(Edit(Valid(), "\"walls\": \"PEC\"", "\"walls\": \"Cu\""));
+      CHECK(a.InvariantDiff(wall) == V{"boundaries"});
+      const auto both = Parse(Edit(Edit(Valid(), "\"walls\": \"PEC\"", "\"walls\": \"Cu\""),
+                                   "\"rotational\": false", "\"rotational\": true"));
+      CHECK(both.InvariantDiff(a) == (V{"symmetry", "boundaries"}));
+      const auto geo = Parse(Edit(Valid(), "\"g\": 0.052", "\"g\": 0.06"));
+      CHECK(a.InvariantDiff(geo) == V{"geometry"});
+      const auto near = Parse(Edit(Valid(), "\"g\": 0.052", "\"g\": 0.0520000000001"));   // 2e-12 relative
+      CHECK(a.InvariantDiff(near).empty());
+      // Another exit section moves the modes it determines too (TE10 follows the long side).
+      auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
+      p.yHalf = 4.0e-3;
+      const auto sec = Parse(hfssfix::SidecarJson(p));
+      CHECK(a.InvariantDiff(sec) == (V{"modes", "cross_section"}) && sec.InvariantDiff(a) == a.InvariantDiff(sec));
+      // A sidecar not produced by Parse has no invariant: no blocks named, and SameInvariant stays false.
+      const BBRDatasetSidecar blank;
+      CHECK(blank.InvariantDiff(a).empty() && a.InvariantDiff(blank).empty() && !a.SameInvariant(blank));
+    }},
     {"field_types", [] {
       // Mistyped fields are BBR024; a column list that is an array but not the
       // positional order (non-string entries included) is BBR025, as in bbrsim.sidecar.check.

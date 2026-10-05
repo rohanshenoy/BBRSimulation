@@ -382,9 +382,18 @@ bool Close(const json& a, const json& b) {
 }
 }  // namespace
 
+std::vector<std::string> BBRDatasetSidecar::InvariantDiff(const BBRDatasetSidecar& other) const {
+  std::vector<std::string> differ;
+  if (invariant.empty() || other.invariant.empty()) return differ;   // not produced by Parse
+  const json a = json::parse(invariant), b = json::parse(other.invariant);
+  for (const char* k : {"frames", "symmetry", "boundaries", "geometry", "modes", "cross_section"})
+    if (a.contains(k) && b.contains(k) && !Close(a.at(k), b.at(k))) differ.emplace_back(k);
+  return differ;
+}
+
 G4bool BBRDatasetSidecar::SameInvariant(const BBRDatasetSidecar& other) const {
   if (invariant.empty() || other.invariant.empty()) return false;   // not produced by Parse
-  return Close(json::parse(invariant), json::parse(other.invariant));
+  return InvariantDiff(other).empty();
 }
 
 void BBRDatasetSidecar::CheckFitsSolid(const G4VSolid& solid, const std::string& volumeName) const {
