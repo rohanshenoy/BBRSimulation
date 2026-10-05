@@ -155,9 +155,15 @@ first `/run/beamOn`, before any event. A missing or inconsistent sidecar is the
 fatal `BBR024`; a convention BBRsim does not implement, or a declared
 cross-section that does not fit the crack solid, is the fatal `BBR025`. The
 frequency-independent blocks are repeated in every frequency's file, so a
-copied frequency stays self-describing, and all frequencies of one ID must
-agree on them (`modes.propagating_count`, the only per-frequency field of
-`modes`, excepted).
+copied frequency stays self-describing. Every frequency of one ID must agree on
+the frame mapping (`frames.hfss_global_axes_in_canonical` and
+`frames.exit_cs_axes_in_canonical`), `symmetry`, `boundaries`, `geometry.shape`
+and `geometry.extent_mm`, the `modes` block without `basis` and
+`propagating_count`, and `exit_field.cross_section`: numbers to 1e-9 relative,
+everything else exactly, over the fields both sidecars carry. Descriptive and
+pose-dependent fields (`frames.canonical`, `pose_rule`, the face selectors, the
+origins, `geometry.bounding_box_mm`) may differ, so a hand-written legacy
+sidecar and one written by the HFSS runner can serve one ID.
 
 **Frames.** Canonical (p, l, g) = (propagation from entrance to exit, long,
 gap), p × l = g, which is the Geant4 crack-local (x, y, z). The sampler
@@ -204,14 +210,15 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 At the CSV load, per frequency, in `BBRHFSSData`:
 
 - C1 the CSV headers equal `far_field.columns` and `exit_field.columns` (`BBR013`).
-- C2 every incidence key of the CSVs lies on the declared `incident_phi_deg` × `incident_theta_deg` grid. This is a subset check, not an equality: HFSS grids are complete, test grids may be sparse (`BBR007`).
+- C2 every incidence key of the CSVs lies on the declared `incident_phi_deg` × `incident_theta_deg` grid. This is a subset check, not an equality: HFSS grids are complete, test grids may be sparse. Within one polarization, `far_field.csv` and `waveguide.csv` carry the same key set (`BBR007` for either).
 - C3 per key, the far-field row count equals `points_per_key` and every Phi and Theta lies in the declared [min, max]; over the whole file the distinct Phi and Theta counts equal the declared counts (`BBR012`). Only the Python validator checks the `step`: when `count` > 1 it must equal (max − min)/(count − 1) of the data to 1e-9 relative (`BBR012`).
 - C4 X = 0 on every exit row; the exit rows per key and polarization equal `points_per_key_retained`; every Y and Z lies in the declared `grid` range, and the distinct counts equal the declared counts (`BBR012`).
 - C5 every exit point, at any key and either polarization, lies inside the declared cross-section; the message gives the count and an offending point (`BBR025`). With `outside_points` `"zero"`, a point outside the section is exempt when its six field components are exactly zero in both polarizations; with `"none"` or `"omitted"` every point must lie inside. C5 checks the data against the sidecar, F12 the sidecar against the geometry; together they put every exit point that carries field inside the placed solid.
 
 C1-C5 run on both polarizations, and the two must agree: the Ephi=1 CSVs have
 the same incidence keys, far-field and exit grids and per-key row counts as the
-Ephi=0 CSVs (`BBR012`; `BBRHFSSData` also pairs the rows by position).
+Ephi=0 CSVs (`BBR012`; `BBRHFSSData` also pairs the rows by position). A CSV
+row with the wrong number of fields, or an empty field, is `BBR013`.
 
 The containment tolerance is 1e-6 relative (the HFSS runner's own; never use a
 stricter one). Incidence keys are rounded to 0.01° before the C2 subset test,
@@ -222,7 +229,9 @@ At run time, `BBR026` (a `JustWarning`, once per dataset and direction) fires
 when a photon's frequency and the grid frequency serving it lie on opposite
 sides of `modes.cutoff_ghz`; the runner tolerates it only where it is expected.
 
-Recorded but not checked: `provenance`, `boundaries`, `geometry.shape`,
+Recorded but not checked against the conventions BBRsim implements (of these,
+only `boundaries`, `geometry.shape` and `symmetry.rotational` enter the
+agreement across frequencies): `provenance`, `boundaries`, `geometry.shape`,
 `geometry.bounding_box_mm`, `symmetry.rotational`, `pose_rule` and the origins
 are copied into `<stem>.metadata.json`. The `files` checksums are verified by
 the runner's `check_dataset_sidecars.py`; BBRsim itself does not verify them.

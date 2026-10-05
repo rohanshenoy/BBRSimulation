@@ -7,7 +7,9 @@ through scipy), the CSV checksums, the far-field step, the agreement of the two
 polarizations, and the builders the mock generators and the legacy-sidecar
 script use. The schema (agreed with Blackbody-Simulations on 2026-10-05) is described
 in validation/README.md, Dataset sidecars. Errors are ValueError whose message
-starts with the C++ code.
+starts with the C++ code. invariant() and same_invariant() hold what every
+frequency of one ID must share: physics only, numbers to 1e-9 relative, over the
+fields both sidecars carry.
 
 Frames: canonical (p, l, g) = (propagation, long, gap), p x l = g, equal to the
 Geant4 crack-local (x, y, z). The sampler implements one frame: the HFSS global
@@ -39,8 +41,7 @@ WG_COLUMNS = ["Freq", "Ephi", "IWavePhi", "IWaveTheta", "OutgoingPower", "Ingoin
 HFSS_AXES = {"x": [0, 0, -1], "y": [0, 1, 0], "z": [1, 0, 0]}        # in canonical components
 EXIT_CS_GLOBAL = {"x": [0, 0, 1], "y": [0, 1, 0], "z": [-1, 0, 0]}   # in HFSS global components
 IDENTITY = {"x": [1, 0, 0], "y": [0, 1, 0], "z": [0, 0, 1]}
-CANONICAL = ("p, l, g = propagation (entrance to exit), long, gap; p x l = g; "
-             "Geant4 crack-local (x, y, z) = (p, l, g)")
+CANONICAL = "p,l,g; p x l = g; Geant4 crack-local (x,y,z) = (p,l,g)"   # the HFSS writer's exact text
 
 
 def path_for(base, stem):
@@ -190,7 +191,8 @@ FIELD_COLUMNS = WG_COLUMNS[9:15]   # the six exit-field components (real and ima
 
 def _read_csv(base, stem, ephi, name, columns):
     """One CSV as a DataFrame; a missing file is BBR001 (far field) or BBR002 (waveguide), as in
-    BBRHFSSData, and a header other than the positional order BBRHFSSData reads is BBR013 (C1)."""
+    BBRHFSSData, and a header other than the positional order BBRHFSSData reads is BBR013 (C1).
+    A data row with the wrong number of fields is BBR013, the loader's code for a malformed row."""
     p = os.path.join(base, f"{stem}_Ephi={ephi}", name)
     try:
         df = pd.read_csv(p)
@@ -198,9 +200,17 @@ def _read_csv(base, stem, ephi, name, columns):
         raise ValueError(f"{'BBR001' if name == 'far_field.csv' else 'BBR002'}: {p}: cannot open") from None
     except pd.errors.EmptyDataError:
         raise ValueError(f"BBR013: {p}: empty, no header") from None
+    except pd.errors.ParserError as e:
+        raise ValueError(f"BBR013: {p}: a row has the wrong number of fields ({str(e).strip()})") from None
     if list(df.columns) != columns:
         raise ValueError(f"BBR013: {p}: header {list(df.columns)} differs from the columns "
                          f"BBRHFSSData reads {columns}")
+    # pandas takes the first field as an index when every data row has one field more than the
+    # header, and fills a short row with NaN; both are rows with the wrong number of fields
+    if not isinstance(df.index, pd.RangeIndex):
+        raise ValueError(f"BBR013: {p}: data rows have more fields than the header")
+    if df.isna().to_numpy().any():
+        raise ValueError(f"BBR013: {p}: a row lacks fields or holds an empty field")
     return df
 
 
@@ -237,6 +247,8 @@ def _describe_one(base, stem, ephi):
                         zip(rows_key, yz, (wg[FIELD_COLUMNS].to_numpy(float) == 0).all(axis=1)) if zero},
         "rows_key": rows_key,
         "keys": set(rows_key),
+        "ff_keys": {(round(float(p), 2), round(float(t), 2)) for p, t in
+                    ff[["IWavePhi", "IWaveTheta"]].itertuples(index=False)},
     }
 
 
@@ -317,12 +329,43 @@ def build_from_csvs(base, dataset_id, frequency_label, *, section, extent_mm, pr
     }
 
 
+INVARIANT_REL = 1e-9
+
+
 def invariant(sc):
-    """Canonical text of the frequency-independent blocks (BBRDatasetSidecar::invariant)."""
-    modes = {k: v for k, v in sc["modes"].items() if k != "propagating_count"}
-    blocks = {k: sc[k] for k in ("frames", "symmetry", "boundaries", "geometry")}
-    blocks.update(modes=modes, cross_section=sc["exit_field"]["cross_section"])
-    return json.dumps(blocks, sort_keys=True)
+    """The frequency-independent physics of a sidecar (BBRDatasetSidecar::invariant).
+
+    Every frequency of one dataset must share it, whichever writer or pose produced
+    each file: the frame mapping, symmetry, boundaries, geometry shape and extents,
+    the modes block without basis (recorded only) and propagating_count (per
+    frequency), and the exit cross-section. Descriptive and pose-dependent fields
+    (canonical text, pose_rule, face selectors, origins, bounding box) are left out.
+    """
+    fr, geo = sc["frames"], sc["geometry"]
+    return {
+        "frames": {k: fr[k] for k in ("hfss_global_axes_in_canonical", "exit_cs_axes_in_canonical")},
+        "symmetry": sc["symmetry"], "boundaries": sc["boundaries"],
+        "geometry": {k: geo[k] for k in ("shape", "extent_mm") if k in geo},
+        "modes": {k: v for k, v in sc["modes"].items() if k not in ("propagating_count", "basis")},
+        "cross_section": sc["exit_field"]["cross_section"],
+    }
+
+
+def _close(x, y):
+    """Objects over the keys both carry, lists element-wise, numbers to INVARIANT_REL, the rest exactly."""
+    if isinstance(x, dict) and isinstance(y, dict):
+        return all(_close(x[k], y[k]) for k in x.keys() & y.keys())
+    if isinstance(x, list) and isinstance(y, list):
+        return len(x) == len(y) and all(_close(a, b) for a, b in zip(x, y))
+    num = (int, float)
+    if isinstance(x, num) and isinstance(y, num) and not isinstance(x, bool) and not isinstance(y, bool):
+        return abs(x - y) <= INVARIANT_REL * max(abs(x), abs(y))
+    return x == y
+
+
+def same_invariant(a, b):
+    """True when two sidecars of one dataset carry the same frequency-independent physics."""
+    return _close(invariant(a), invariant(b))
 
 
 # --- checks --------------------------------------------------------------------
@@ -510,12 +553,17 @@ def _check_one(stem, d, sc, exempt):
     ff, xf = sc["far_field"], sc["exit_field"]
     if d["far_field"]["columns"] != ff["columns"] or d["exit_field"]["columns"] != xf["columns"]:
         raise ValueError(f"BBR013: {tag}: a CSV header differs from the sidecar's columns")              # C1
-    # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them, before the subset test
+    # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them; the waveguide keys must lie on the
+    # declared grid, and the far-field keys must equal them (BBR007 in BBRHFSSData too)
     phis = {round(float(v), 2) for v in sc["excitation"]["incident_phi_deg"]}
     thetas = {round(float(v), 2) for v in sc["excitation"]["incident_theta_deg"]}
     off = sorted(k for k in d["keys"] if k[0] not in phis or k[1] not in thetas)
     if off:
         raise ValueError(f"BBR007: {tag}: keys {off} are not on the declared incidence grid")
+    if d["ff_keys"] != d["keys"]:
+        raise ValueError(f"BBR007: {tag}: far_field.csv and waveguide.csv disagree on incidence keys "
+                         f"(far field only {sorted(d['ff_keys'] - d['keys'])}, "
+                         f"waveguide only {sorted(d['keys'] - d['ff_keys'])})")
     for name in ("theta_deg", "phi_deg"):                                                               # C3
         got, want = d["far_field"][name], ff[name]
         if got["count"] != want["count"] or got["min"] < want["min"] - 1e-9 or got["max"] > want["max"] + 1e-9:

@@ -1,5 +1,6 @@
 """bbrsim.sidecar: mode derivations, the schema checks and the CSV checks."""
 import copy
+import math
 import os
 
 import pytest
@@ -272,3 +273,116 @@ def test_check_csvs_outside_points(tmp_path, outside_points, field, ok):
     else:
         with pytest.raises(ValueError, match="^BBR025: .*outside the declared cross-section"):
             sidecar.check_csvs(base, stem, sc)
+
+
+# --- fix round 2: the physics-only invariant, the disc modes, load(), malformed CSVs -------------
+
+def built(tmp_path):
+    base = str(tmp_path)
+    return tiny_sidecar(base, write_tiny(base))
+
+
+def test_invariant_keys(tmp_path):
+    assert set(sidecar.invariant(built(tmp_path))) == {"frames", "symmetry", "boundaries", "geometry",
+                                                      "modes", "cross_section"}
+
+
+@pytest.mark.parametrize("edit", [
+    lambda s: s["frames"].update(canonical="p, l, g = propagation, long, gap (another writer's words)"),
+    lambda s: s["frames"].update(pose_rule="legacy"),
+    lambda s: s["frames"]["exit_cs"].update(origin_mm_global=[0.0, -5.0, 1.0]),
+    lambda s: s["excitation"].update(origin_mm_global=[0.0, -5.0, 0.0]),
+    lambda s: s["geometry"].update(bounding_box_mm=[-0.025, -10.0, 0.0, 0.025, 0.0, 1.0]),
+    lambda s: s["modes"].update(basis="closed ideal-PEC rectangular guide, worded by another writer"),
+    lambda s: s["modes"].update(propagating_count=1),
+    lambda s: s.update(provenance={"producer": "hand", "hand_written": True}),
+    lambda s: s.update(files={}),
+    lambda s: s["symmetry"].update(x_future=True),
+], ids=["canonical", "pose-rule", "exit-origin", "plane-wave-origin", "bounding-box", "basis",
+        "propagating-count", "provenance", "files", "extra-symmetry-key"])
+def test_same_invariant_ignores_descriptive_fields(tmp_path, edit):
+    a = built(tmp_path)
+    b = copy.deepcopy(a)
+    edit(b)
+    assert sidecar.same_invariant(a, b) and sidecar.same_invariant(b, a)
+
+
+@pytest.mark.parametrize("edit", [
+    lambda s: s["geometry"]["extent_mm"].update(p=4.0),
+    lambda s: s["exit_field"]["cross_section"].update(y_e_half_m=2.5e-3),
+    lambda s: s["symmetry"].update(rotational=True),
+    lambda s: s["boundaries"].update(walls="finite-conductivity"),
+    lambda s: s["modes"].update(cutoff_ghz=s["modes"]["cutoff_ghz"] * (1 + 1e-6)),
+    lambda s: s["modes"].update(gap_family_onsets=s["modes"]["gap_family_onsets"][:-1]),
+], ids=["extent", "cross-section", "symmetry-flag", "walls", "cutoff-1e-6", "onsets-shorter"])
+def test_same_invariant_detects_physics(tmp_path, edit):
+    a = built(tmp_path)
+    b = copy.deepcopy(a)
+    edit(b)
+    assert not sidecar.same_invariant(a, b) and not sidecar.same_invariant(b, a)
+
+
+def test_same_invariant_numbers_to_1e9(tmp_path):
+    """The two writers' cutoffs differ by about 2e-11 relative: the same."""
+    a = built(tmp_path)
+    b = copy.deepcopy(a)
+    b["modes"]["cutoff_ghz"] *= 1 + 1e-12
+    assert sidecar.same_invariant(a, b)
+
+
+def test_modes_for_disc():
+    r = 5e-05
+    m = sidecar.modes_for({"shape": "disc", "radius_m": r}, 2000.0)
+    cut = sidecar.X11_PRIME * sidecar.C / (2 * math.pi * r) / 1e9
+    assert m["mode"] == "TE11" and m["cutoff_ghz"] == pytest.approx(cut, rel=1e-12)
+    assert m["polarization_filter_limit_ghz"] == m["cutoff_ghz"]
+    assert m["basis"].startswith("closed ideal-PEC circular guide, R = 5e-05 m")
+    mode, low, filt = sidecar.lowest_mode({"shape": "disc", "radius_m": r})
+    assert mode == m["mode"] and low == pytest.approx(m["cutoff_ghz"], rel=1e-12)
+    assert filt == pytest.approx(m["polarization_filter_limit_ghz"], rel=1e-12)
+
+
+def test_load_accepts_bom(tmp_path):
+    base = str(tmp_path)
+    with open(sidecar.path_for(base, "c_500GHz"), "wb") as fh:
+        fh.write(b'\xef\xbb\xbf{"schema_version": "1.0"}\r\n')
+    assert sidecar.load(base, "c_500GHz") == {"schema_version": "1.0"}
+
+
+def test_load_missing(tmp_path):
+    with pytest.raises(ValueError, match=r"^BBR024: .*c_500GHz\.dataset\.json: missing"):
+        sidecar.load(str(tmp_path), "c_500GHz")
+
+
+def test_load_invalid_json(tmp_path):
+    base = str(tmp_path)
+    with open(sidecar.path_for(base, "c_500GHz"), "w") as fh:
+        fh.write('{"schema_version": ')
+    with pytest.raises(ValueError, match=r"^BBR024: .*: not valid JSON"):
+        sidecar.load(base, "c_500GHz")
+
+
+def test_check_csvs_far_field_key_off_grid(tmp_path):
+    """A key in far_field.csv only (two rows, so the per-key count holds): BBR007, as BBRHFSSData."""
+    base = str(tmp_path)
+    stem = write_tiny(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 0, "far_field.csv",
+            lambda t: t + "".join(f"500GHz,0,45,135,0,{th},0.1,0.0,0.2,0.05\n" for th in (60, 120)))
+    with pytest.raises(ValueError, match=r"^BBR007: c_500GHz_Ephi=0: far_field.csv and waveguide.csv "
+                                         r"disagree .*far field only \[\(45.0, 135.0\)\]"):
+        sidecar.check_csvs(base, stem, sc)
+
+
+@pytest.mark.parametrize("transform,match", [
+    (lambda t: t + "500GHz,1,0,180,0,90,0.1,0.0,0.2,0.05,7\n", "wrong number of fields"),   # 2nd row long
+    (lambda t: t.replace(",0.05\n", ",0.05,7\n"), "more fields than the header"),            # every row long
+    (lambda t: t + "500GHz,1,0,180,0\n", "lacks fields"),                                     # short row
+], ids=["one-row-long", "every-row-long", "short-row"])
+def test_check_csvs_malformed_row(tmp_path, transform, match):
+    base = str(tmp_path)
+    stem = write_tiny(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, "far_field.csv", transform)
+    with pytest.raises(ValueError, match=f"^BBR013: .*Ephi=1.*far_field.csv: .*{match}"):
+        sidecar.check_csvs(base, stem, sc)
