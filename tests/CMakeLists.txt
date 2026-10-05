@@ -74,7 +74,7 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         err_bad_number real_data_smoke transmittance_coherent real_data_diagonal_key
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 bbrsim_add_test_program(testSidecar LABEL unit
-  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only f12_fits_solid)
+  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only field_types f12_fits_solid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
   CASES selection_grid5 token_verbatim discovery_errors unreadable_root concurrent_first_load)

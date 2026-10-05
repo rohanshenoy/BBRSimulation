@@ -13,7 +13,9 @@
 
 #include <algorithm>
 #include <array>
+#include <climits>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -80,8 +82,12 @@ struct Reader {
   }
   int Int(const json& j, const std::string& key, const std::string& where) const {
     const json& v = At(j, key, where);
-    if (!v.is_number_integer()) Fail("BBR024", path, where + key + " must be an integer");
-    return v.get<int>();
+    // Range-checked before narrowing: a count beyond int is malformed, not wrapped.
+    const bool inRange = v.is_number_unsigned() ? v.get<std::uint64_t>() <= std::uint64_t(INT_MAX)
+                       : v.is_number_integer() ? (v.get<std::int64_t>() >= INT_MIN && v.get<std::int64_t>() <= INT_MAX)
+                                               : false;
+    if (!inRange) Fail("BBR024", path, where + key + " must be an integer within the int range");
+    return static_cast<int>(v.get<std::int64_t>());
   }
   bool Bool(const json& j, const std::string& key, const std::string& where) const {
     const json& v = At(j, key, where);
@@ -108,14 +114,19 @@ struct Reader {
     }
     return out;
   }
-  std::vector<std::string> Strs(const json& j, const std::string& key, const std::string& where) const {
+  // A CSV column list: not an array is a mistyped field (BBR024); an array that is
+  // not exactly `want`, non-string entries included, is BBR025, as in the Python check.
+  std::vector<std::string> Columns(const json& j, const std::string& key, const std::string& where,
+                                   const std::vector<std::string>& want) const {
     const json& v = At(j, key, where);
-    if (!v.is_array()) Fail("BBR024", path, where + key + " must be an array of strings");
+    if (!v.is_array()) Fail("BBR024", path, where + key + " must be an array of column names");
     std::vector<std::string> out;
     for (const auto& x : v) {
-      if (!x.is_string()) Fail("BBR024", path, where + key + " must be an array of strings");
+      if (!x.is_string()) break;
       out.push_back(x.get<std::string>());
     }
+    if (out.size() != v.size() || out != want)
+      Fail("BBR025", path, where + key + " differ from the positional order BBRHFSSData reads");
     return out;
   }
   BBRAxisRange Range(const json& j, const std::string& key, const std::string& where) const {
@@ -125,7 +136,7 @@ struct Reader {
     out.min = Num(r, "min", w);
     out.max = Num(r, "max", w);
     out.count = Int(r, "count", w);
-    if (out.count < 1 || out.max < out.min) Fail("BBR024", path, w + " needs min <= max and count >= 1");
+    if (out.count < 1 || out.max < out.min) Fail("BBR024", path, where + key + " needs min <= max and count >= 1");
     return out;
   }
   void Expect(const std::string& got, const std::string& want, const std::string& field) const {
@@ -248,9 +259,7 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
   sc.farFieldTheta = r.Range(ff, "theta_deg", "far_field.");
   sc.farFieldPhi = r.Range(ff, "phi_deg", "far_field.");
   sc.farFieldPointsPerKey = r.Int(ff, "points_per_key", "far_field.");
-  sc.farFieldColumns = r.Strs(ff, "columns", "far_field.");
-  if (sc.farFieldColumns != kFarFieldColumns)
-    Fail("BBR025", path, "far_field.columns differ from the positional order BBRHFSSData reads");
+  sc.farFieldColumns = r.Columns(ff, "columns", "far_field.", kFarFieldColumns);
 
   // F7: exit field.
   const json& xf = r.At(j, "exit_field", "");
@@ -268,9 +277,7 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
   if (outside != "none" && outside != "omitted" && outside != "zero")
     Fail("BBR024", path, "exit_field.outside_points must be none, omitted or zero");
   sc.outsidePoints = outside;
-  sc.exitFieldColumns = r.Strs(xf, "columns", "exit_field.");
-  if (sc.exitFieldColumns != kExitColumns)
-    Fail("BBR025", path, "exit_field.columns differ from the positional order BBRHFSSData reads");
+  sc.exitFieldColumns = r.Columns(xf, "columns", "exit_field.", kExitColumns);
 
   // F8: cross-section.
   const json& cs = r.At(xf, "cross_section", "exit_field.");
@@ -305,6 +312,7 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
                                                           "and serves both ends from one table");
   r.Bool(sym, "rotational", "symmetry.");
   const json& boundaries = r.At(j, "boundaries", "");
+  if (!boundaries.is_object()) Fail("BBR024", path, "boundaries must be an object");
 
   // F11: geometry (compared with the placed solid by BBRCrackLibrary; info only).
   const json& geo = r.At(j, "geometry", "");
@@ -375,6 +383,7 @@ bool Close(const json& a, const json& b) {
 }  // namespace
 
 G4bool BBRDatasetSidecar::SameInvariant(const BBRDatasetSidecar& other) const {
+  if (invariant.empty() || other.invariant.empty()) return false;   // not produced by Parse
   return Close(json::parse(invariant), json::parse(other.invariant));
 }
 
