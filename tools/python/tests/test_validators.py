@@ -5,6 +5,7 @@ validation/Scripts/tests/make_bad_output.py: a clean file passes, and each seede
 violation fails, including a photon starting in copper when the legend lacks
 the copper code (a NaN decode must not pass as "not a metal").
 """
+import os
 import subprocess
 import sys
 
@@ -109,3 +110,27 @@ def test_mock_generator_needs_source_sidecar(repo_root, tmp_path):
     assert r.returncode == 2, r.stdout + r.stderr
     assert f"source sidecar: BBR024: {missing.resolve()}: missing" in r.stdout
     assert not dst.exists()
+
+
+def test_mock_round_gap(repo_root, tmp_path, data_root):
+    gen = repo_root / "validation/Scripts/make_mock_round_gap.py"
+    real = os.path.join(data_root, "waveguides")
+    r = run(gen, "--real", real, "--dst", tmp_path / "rg", cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    base = str(tmp_path / "rg" / "waveguides")
+    sc = sidecar.check_full(base, "RoundGap_r50um", "RoundGap_r50um_2000GHz", 2000.0)
+    assert sc["modes"]["mode"] == "TE11" and sc["modes"]["propagating_count"] == 1
+    assert sc["exit_field"]["outside_points"] == "omitted" and sc["symmetry"]["rotational"] is True
+    ds = hfss.load_dataset("RoundGap_r50um_2000GHz", base)
+    assert ds[(0.0, 180.0)].T0 == pytest.approx(0.8) and ds[(0.0, 180.0)].T1 == pytest.approx(0.6)
+    assert abs(ds[(45.0, 180.0)].rho.real) > 0.1 and ds[(0.0, 180.0)].rho == 0
+    import pandas as pd
+    wg = pd.read_csv(os.path.join(base, "RoundGap_r50um_2000GHz_Ephi=1", "waveguide.csv"))
+    assert np.hypot(wg.Y, wg.Z).max() == pytest.approx(5e-5, rel=1e-12)    # rim points kept
+    rim = np.isclose(np.hypot(wg.Y, wg.Z), 5e-5, rtol=1e-12, atol=0.0)
+    per_key = wg.assign(rim=rim).groupby(["IWavePhi", "IWaveTheta"]).rim.sum()
+    assert (per_key == 20).all() and sc["exit_field"]["points_per_key_retained"] == 1961
+    assert os.path.islink(os.path.join(base, "InfParallelPlate_crack1Rohan_500GHz_Ephi=0"))
+    assert os.path.isfile(sidecar.path_for(base, "InfParallelPlate_crack2_500GHz"))
+    r = run(gen, "--real", real, "--dst", os.path.join(data_root, "rg"), cwd=tmp_path)
+    assert r.returncode == 2 and "refusing" in r.stdout
