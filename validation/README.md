@@ -145,6 +145,89 @@ mkdir -p run/transmit && cd run/transmit
 conda run -n bbrsim python <repo>/validation/check_crack_transmittance.py output/bbr.root
 ```
 
+## Dataset sidecars
+
+**Placement and timing.** Every `<id>_<freq>GHz_Ephi={0,1}` directory pair
+under `waveguides/` has a sidecar `<id>_<freq>GHz.dataset.json` beside it
+(JSON, schema 1.x, agreed with Blackbody-Simulations on 2026-10-05). BBRsim
+reads it when it discovers the dataset, and checks every placed crack at the
+first `/run/beamOn`, before any event. A missing or inconsistent sidecar is the
+fatal `BBR024`; a convention BBRsim does not implement, or a declared
+cross-section that does not fit the crack solid, is the fatal `BBR025`. The
+frequency-independent blocks are repeated in every frequency's file, so a
+copied frequency stays self-describing, and all frequencies of one ID must
+agree on them (`modes.propagating_count`, the only per-frequency field of
+`modes`, excepted).
+
+**Frames.** Canonical (p, l, g) = (propagation from entrance to exit, long,
+gap), p × l = g, which is the Geant4 crack-local (x, y, z). The sampler
+implements one frame: HFSS global (X, Y, Z) = (−g, +l, +p), incidence angles
+of the arrival direction (k = −r), and the exit CS (Z, Y, −X) = (p, l, g). A
+sidecar that declares any other frame is rejected (F4).
+
+**Fields (schema 1.0).**
+
+| Block | Fields |
+|---|---|
+| top level | `schema_version`, `dataset_id`, `frequency_ghz`, `frequency_label` (the CSV `Freq` token; the directory token plus `GHz`) |
+| `provenance` | `producer`, `hand_written`, `git_commit`, `created_utc`, `job_id`, `manifest_sha256`, `aedt_version`, `project`, `design`, `object`, `pyaedt_version`, `project_sha256`, `run_design`, `material`, `model_units` |
+| `frames` | `canonical`; `hfss_global_axes_in_canonical` {x, y, z}; `entrance_face` and `exit_face` {axis, side}; `exit_cs` {name, origin, x, y, z, origin_mm_global}, all in HFSS global; `exit_cs_axes_in_canonical` {x, y, z}; `pose_rule`; `entrance_outward_normal_global`; `exit_outward_normal_global` |
+| `excitation` | `coordinate_system`, `incidence_convention`, `normal_entry_theta_deg`, `incident_phi_deg`, `incident_theta_deg`, `ei_v_per_m`, `incoming_power_w`, `polarization_convention` (verbatim `"Ephi=0: E_theta=1; Ephi=1: E_phi=1"`), `plane_wave_origin`, `origin_mm_global` |
+| `far_field` | `coordinate_system`, `definition`, `component_basis`, `theta_deg` and `phi_deg` {min, max, count, step}, `columns`, `radiation_surface`, `points_per_key` |
+| `exit_field` | `coordinate_system`, `points_in_si`, `field_in_ref_cs`, `field_components_frame`, `plane`, `resolution_mm`, `grid` {y_e, z_e}, `cross_section`, `outside_points`, `bounds_method`, `rim_points`, `points_per_key_retained`, `columns` |
+| `exit_field.cross_section` | `{"shape": "rectangle", "y_e_half_m", "z_e_half_m"}`, `{"shape": "disc", "radius_m"}`, or `{"shape": "polygon", "vertices_m": [[y, z], ...]}` |
+| `transmittance` | `definition`, `outgoing_power`, `incoming_includes_cos_theta` |
+| `symmetry` | `mirror_l`, `mirror_g`, `end_to_end`, `rotational` |
+| `boundaries` | `entrance`, `exit`, `walls` |
+| `modes` (required for rectangle and disc; Rohan 2026-10-04: computed, no nulls; **final**, agreed with the HFSS session 2026-10-05) | `cutoff_ghz` and `mode`: the lowest mode, which `BBR026` compares against. `basis`: the closed-PEC model string, numbers as Python repr in metres; recorded only. `list_limit_ghz` = 20000.0, inclusive. `polarization_filter_limit_ghz`: TE01 = c/(2b) for a rectangle, the TE11 cutoff for a disc. For a rectangle, `gap_family_onsets` [{n, mode, cutoff_ghz}] (n = 0 is TE10, then TE0k at k·c/(2b)) plus `mode_count_below_limit`. For a disc, `cutoffs` [{mode, cutoff_ghz, degeneracy}], ascending. `propagating_count`: entries with cutoff ≤ this file's `frequency_ghz`, the only per-frequency field. Index pairs are counted once each (TE and TM separately; disc degeneracy not doubled). Axes: a = 2·y_e_half_m with m along l, b = 2·z_e_half_m with n along g; the lowest mode is TE10 if a ≥ b, else TE01. Ties within 1e-12 relative go TE before TM, then by index. Labels are `TE{n}{p}` when both indices are below 10, otherwise `TE{n},{p}`. All derived from the declared solid; omitted for a polygon |
+| `geometry` | `shape`, `extent_mm` {p, l, g}, `bounding_box_mm` (HFSS global, [xmin, ymin, zmin, xmax, ymax, zmax]) |
+| `files` | keyed by the path relative to the sidecar, e.g. `"<dataset_id>_<label>_Ephi=0/waveguide.csv"`, each {sha256, bytes, rows} |
+
+**Checks.** A field that is missing or has the wrong JSON type is `BBR024`. A
+later 1.x sidecar may carry fields this version does not know; they are
+ignored. At discovery and initialization, sidecar only (no CSV is read):
+
+- F1 `schema_version`: the major version is 1 (`BBR024`).
+- F2 `dataset_id`: equals the directory ID and the stripped physical-volume name (`BBR024`).
+- F3 `frequency_label`, `frequency_ghz`: the label equals the directory token plus `GHz`; `frequency_ghz` and the label's parsed value are within 0.1 % of the directory frequency (`BBR024`).
+- F4 `frames`: `hfss_global_axes_in_canonical` is a right-handed orthonormal basis, `exit_cs.z` = x × y, `exit_cs` mapped through it equals `exit_cs_axes_in_canonical`, the exit and entrance outward normals map to +p and −p, and the frame is the one the sampler implements (`BBR025`).
+- F5 `excitation`: `"global"`, `"arrival_direction"`, `normal_entry_theta_deg` 180 and the verbatim polarization string (`BBR025`); the incidence lists are non-empty lists of numbers (`BBR024`).
+- F6 `far_field`: `"exit_cs"`, `"Theta-Phi"`, `"spherical_in_exit_cs"`, and `columns` in the positional order `BBRHFSSData` reads (`BBR025`).
+- F7 `exit_field`: `"exit_cs"`, `points_in_si` true, `"x_e=0"`, `columns` in the order `BBRHFSSData` reads, and `field_in_ref_cs` agreeing with `field_components_frame` (false with `"hfss_global"`, true with `"exit_cs"`; the frame is otherwise recorded only, because BBRsim uses the components only through \|E\|² and Σ E₀·E₁*) (`BBR025`); `outside_points` is `none`, `omitted` or `zero` (`BBR024`).
+- F8 `exit_field.cross_section`: `rectangle` or `disc` with positive dimensions (`BBR024` for an unknown shape or a dimension ≤ 0); `polygon` is reserved and not supported yet (`BBR025`).
+- F9 `transmittance`: the supported `definition` string and `incoming_includes_cos_theta` false (`BBR025`).
+- F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`).
+- F11 `geometry.extent_mm`: p, l, g > 0 (`BBR024`); compared with the placed solid's bounding limits along local x, y, z, printed as one `[BBR]` info line and stored in `metadata.json` (info only, not a warning).
+- F12 `exit_field.cross_section` against the placed solid, at the first `/run/beamOn`, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset, is strictly inside the solid. With `rim_points` `"included"`, the recorded Geant4 margin is what makes this pass (`BBR025`).
+- F13 `modes.mode`, `.cutoff_ghz`, `.polarization_filter_limit_ghz`: re-derived from `cross_section` to 1e-6 relative with closed forms (rectangle f_mn = (c/2)·√((m/a)² + (n/b)²), c = 299792458 m/s; disc TE11 with x′₁₁ = 1.8411837813). The full lists are re-derived only by the Python validator, with scipy (`BBR025`).
+
+At the CSV load, per frequency, in `BBRHFSSData`:
+
+- C1 the CSV headers equal `far_field.columns` and `exit_field.columns` (`BBR013`).
+- C2 every incidence key of the CSVs lies on the declared `incident_phi_deg` × `incident_theta_deg` grid. This is a subset check, not an equality: HFSS grids are complete, test grids may be sparse (`BBR007`).
+- C3 per key, the far-field row count equals `points_per_key` and every Phi and Theta lies in the declared [min, max]; over the whole file the distinct Phi and Theta counts equal the declared counts. The `step` is checked by the Python validator only (`BBR012`).
+- C4 X = 0 on every exit row; the exit rows per key and polarization equal `points_per_key_retained`; every Y and Z lies in the declared `grid` range, and the distinct counts equal the declared counts (`BBR012`).
+- C5 every exit point, at any key and either polarization, lies inside the declared cross-section; the message gives the count and an offending point (`BBR025`). C5 checks the data against the sidecar, F12 the sidecar against the geometry; together they put every exit point inside the placed solid.
+
+The containment tolerance is 1e-6 relative (the HFSS runner's own; never use a
+stricter one). Grid and angle comparisons use 1e-9 (degrees for angles,
+relative to the largest declared |value| for exit coordinates).
+
+At run time, `BBR026` (a `JustWarning`, once per dataset and direction) fires
+when a photon's frequency and the grid frequency serving it lie on opposite
+sides of `modes.cutoff_ghz`; the runner tolerates it only where it is expected.
+
+Recorded but not checked: `provenance`, `boundaries`, `geometry.shape`,
+`geometry.bounding_box_mm`, `symmetry.rotational`, `pose_rule` and the origins
+are copied into `<stem>.metadata.json`. The `files` checksums are verified by
+the runner's `check_dataset_sidecars.py`; BBRsim itself does not verify them.
+
+**Tools.** `validation/check_dataset_sidecars.py` re-derives the full mode
+lists (scipy) and the CSV checksums. `bbrsim.sidecar` (`tools/python`) is the
+Python twin of the C++ checks and holds the builders the mock generators use.
+`validation/Scripts/write_legacy_sidecars.py` wrote the sidecars of the two
+500 GHz datasets.
+
 ## Mock HFSS tree
 
 `Validation_CrackFrequency.mac` tests the frequency-keyed HFSS lookup against a

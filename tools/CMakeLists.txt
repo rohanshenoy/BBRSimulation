@@ -6,6 +6,7 @@ set(bbrsim_PYTHON
   ${CMAKE_CURRENT_SOURCE_DIR}/python/bbrsim/paths.py
   ${CMAKE_CURRENT_SOURCE_DIR}/python/bbrsim/physics.py
   ${CMAKE_CURRENT_SOURCE_DIR}/python/bbrsim/select.py
+  ${CMAKE_CURRENT_SOURCE_DIR}/python/bbrsim/sidecar.py
   )
 set(bbrsim_PLOTS
   ${CMAKE_CURRENT_SOURCE_DIR}/plot_crack_angular.py
