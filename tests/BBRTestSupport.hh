@@ -163,17 +163,22 @@ inline std::string Num(double v) {
 namespace bbrtest {
 
 // Runs f and requires a G4Exception with the given code (and, if given, an
-// origin containing originPart). Any other outcome is a failure.
+// origin containing originPart and a message containing messagePart, so a case
+// pins the check it means to reach, not merely one with the same code that
+// fires earlier). Any other outcome is a failure.
 template <class F>
-void ExpectG4Exception(const std::string& code, F&& f, const std::string& originPart = "") {
+void ExpectG4Exception(const std::string& code, F&& f, const std::string& originPart = "",
+                       const std::string& messagePart = "") {
+  const std::string containing = messagePart.empty() ? "" : " containing \"" + messagePart + "\"";
   try {
     f();
-    Report(false, __FILE__, __LINE__, "expected G4Exception " + code + ", none raised");
+    Report(false, __FILE__, __LINE__, "expected G4Exception " + code + containing + ", none raised");
   } catch (const G4ExceptionCaught& e) {
     const bool originOk = originPart.empty() || e.origin.find(originPart) != std::string::npos;
-    Report(e.code == code && originOk, __FILE__, __LINE__,
-           "expected " + code + (originPart.empty() ? "" : " from *" + originPart + "*") +
-             ", got " + e.code + " from " + e.origin);
+    const bool messageOk = messagePart.empty() || std::string(e.what()).find(messagePart) != std::string::npos;
+    Report(e.code == code && originOk && messageOk, __FILE__, __LINE__,
+           "expected " + code + (originPart.empty() ? "" : " from *" + originPart + "*") + containing +
+             ", got " + e.code + " from " + e.origin + (messagePart.empty() ? "" : std::string(": ") + e.what()));
   } catch (const std::exception& e) {
     Report(false, __FILE__, __LINE__,
            "expected G4Exception " + code + ", got C++ exception: " + e.what());

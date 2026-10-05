@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <cmath>
 #include <complex>
@@ -74,15 +75,27 @@ bool FieldCountOK(const std::vector<std::string>& v, std::size_t n, const G4Stri
   return false;
 }
 
-// C1: the CSV header must list exactly the sidecar's columns.
-void CheckHeader(const std::string& header, const std::vector<std::string>& want, const G4String& path)
+// C1: the CSV header must list exactly the sidecar's columns. One leading UTF-8
+// byte-order mark is dropped first (SplitCSV drops a trailing CR), as the Python
+// check, which reads the header through pandas, does: the consumer is never
+// stricter than the producer's validator.
+void CheckHeader(std::string header, const std::vector<std::string>& want, const G4String& path,
+                 const std::string& sidecarPath)
 {
-  if (SplitCSV(header) != want) {
-    G4ExceptionDescription ed;
-    ed << "Header of " << path << " differs from the columns its sidecar declares "
-          "(BBRHFSSData reads the columns by position).";
-    G4Exception("BBRHFSSData::Load", "BBR013", FatalException, ed);
-  }
+  if (header.compare(0, 3, "\xEF\xBB\xBF") == 0) header.erase(0, 3);
+  const std::vector<std::string> got = SplitCSV(header);
+  if (got == want) return;
+  G4ExceptionDescription ed;
+  ed << "Header of " << path << " differs from the columns its sidecar " << sidecarPath << " declares";
+  std::size_t i = 0;
+  while (i < got.size() && i < want.size() && got[i] == want[i]) ++i;
+  if (i < got.size() && i < want.size())
+    ed << ": column " << i << " is '" << got[i] << "', the sidecar declares '" << want[i] << "'";
+  if (got.size() != want.size())
+    ed << (i < got.size() && i < want.size() ? ";" : ":") << " the header has " << got.size()
+       << " columns, the sidecar declares " << want.size();
+  ed << " (BBRHFSSData reads the columns by position).";
+  G4Exception("BBRHFSSData::Load", "BBR013", FatalException, ed);
 }
 
 bool Within(G4double v, G4double lo, G4double hi, G4double tol) { return v >= lo - tol && v <= hi + tol; }
@@ -211,7 +224,7 @@ void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag, const BBRDat
 
   std::string line;
   std::getline(f, line); // skip header
-  if (sc) CheckHeader(line, sc->farFieldColumns, path);
+  if (sc) CheckHeader(line, sc->farFieldColumns, path, sc->path);
 
   // Row counter per key: the Ephi=1 rows of a key are paired with its Ephi=0
   // FarFieldPoints by position, and each pair must share (Phi, Theta) (BBR012).
@@ -290,7 +303,7 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
 
   std::string line;
   std::getline(f, line); // skip header
-  if (sc) CheckHeader(line, sc->exitFieldColumns, path);
+  if (sc) CheckHeader(line, sc->exitFieldColumns, path, sc->path);
 
   // Ephi=1 exit points are paired with the Ephi=0 ones by position and must
   // sit at the same (X, Y, Z) (BBR012), as for the far field.
@@ -389,8 +402,18 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
     ed << "Dataset " << dirStem << " disagrees with its sidecar " << sc.path << ": " << what;
     G4Exception("BBRHFSSData::CheckAgainstSidecar", code, FatalException, ed);
   };
-  auto num = [](G4double v) { std::ostringstream s; s << v; return s.str(); };   // 1e-12, not to_string's 0.000000
+  // The shortest text that reads back as the same double, as Python's repr: a value
+  // just past a bound (Theta = 180.000001) must not print as the bound itself, and
+  // X = 1e-12 must not print as to_string's 0.000000.
+  auto num = [](G4double v) {
+    char buf[64];
+    const auto r = std::to_chars(buf, buf + sizeof buf, v, std::chars_format::general);
+    return std::string(buf, r.ptr);
+  };
   auto fmt = [&](G4double a, G4double b) { return "(" + num(a) + ", " + num(b) + ")"; };
+  auto range = [&](const char* name, const BBRAxisRange& r) {
+    return std::string(name) + " in [" + num(r.min) + ", " + num(r.max) + "]";
+  };
   auto declared = [](G4double v, const std::vector<G4double>& list) {
     for (const G4double d : list) if (RoundDeg(d) == v) return true;
     return false;
@@ -414,7 +437,8 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
       if (!Within(fp.phi_deg, sc.farFieldPhi.min, sc.farFieldPhi.max, 1e-9) ||
           !Within(fp.theta_deg, sc.farFieldTheta.min, sc.farFieldTheta.max, 1e-9))
         fail("BBR012", "far-field row (Phi, Theta) = " + fmt(fp.phi_deg, fp.theta_deg) + " of key " + k +
-                       " lies outside the declared ranges");
+                       " lies outside the declared ranges " + range("Phi", sc.farFieldPhi) + ", " +
+                       range("Theta", sc.farFieldTheta) + " deg");
       phis.insert(fp.phi_deg);
       thetas.insert(fp.theta_deg);
     }
@@ -422,7 +446,8 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
       if (std::abs(ep.x) > 1e-12)
         fail("BBR012", "an exit point of key " + k + " has X = " + num(ep.x) + " m; the sidecar declares x_e = 0");
       if (!Within(ep.y, sc.exitY.min, sc.exitY.max, yTol) || !Within(ep.z, sc.exitZ.min, sc.exitZ.max, zTol))
-        fail("BBR012", "exit point (Y, Z) = " + fmt(ep.y, ep.z) + " m of key " + k + " lies outside the declared grid");
+        fail("BBR012", "exit point (Y, Z) = " + fmt(ep.y, ep.z) + " m of key " + k + " lies outside the declared grid " +
+                       range("Y", sc.exitY) + ", " + range("Z", sc.exitZ) + " m");
       ys.insert(ep.y);
       zs.insert(ep.z);
       if (!sc.crossSection.Contains(ep.y, ep.z)) {
@@ -430,7 +455,10 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
         const bool noField = ep.Ex_re_0 == 0. && ep.Ex_im_0 == 0. && ep.Ey_re_0 == 0. && ep.Ey_im_0 == 0. &&
                              ep.Ez_re_0 == 0. && ep.Ez_im_0 == 0. && ep.Ex_re_1 == 0. && ep.Ex_im_1 == 0. &&
                              ep.Ey_re_1 == 0. && ep.Ey_im_1 == 0. && ep.Ez_re_1 == 0. && ep.Ez_im_1 == 0.;
-        if (!(sc.outsidePoints == "zero" && noField)) { ++outside; outY = ep.y; outZ = ep.z; }
+        if (!(sc.outsidePoints == "zero" && noField)) {
+          if (outside == 0) { outY = ep.y; outZ = ep.z; }   // the first offender, as the Python check reports
+          ++outside;
+        }
       }
     }
   }

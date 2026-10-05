@@ -27,19 +27,6 @@ std::string Edit(std::string text, const std::string& from, const std::string& t
   if (p == std::string::npos) throw std::runtime_error("Edit: '" + from + "' not in the sidecar text");
   return text.replace(p, from.size(), to);
 }
-// Parse(text) must stop with `code` and a message containing `what`, so each case
-// pins the check it is meant to reach, not merely one that fires earlier.
-void ExpectFail(const std::string& code, const std::string& what, const std::string& text) {
-  try {
-    Parse(text);
-    Report(false, __FILE__, __LINE__, "expected " + code + " (" + what + "), none raised");
-  } catch (const G4ExceptionCaught& e) {
-    Report(e.code == code && e.origin == "BBRDatasetSidecar" && std::string(e.what()).find(what) != std::string::npos,
-           __FILE__, __LINE__, "expected " + code + " containing \"" + what + "\", got " + e.code + " from " + e.origin + ": " + e.what());
-  } catch (const std::exception& e) {
-    Report(false, __FILE__, __LINE__, "expected " + code + ", got C++ exception: " + e.what());
-  }
-}
 G4VSolid* Tube(double radius) {   // a G4Tubs turned so its axis is local x, as the wrapper needs
   G4RotationMatrix ry;
   ry.rotateY(90. * deg);
@@ -96,18 +83,19 @@ int main(int argc, char** argv) {
       const std::string hfssAxes = "{\"x\": [0, 0, -1], \"y\": [0, 1, 0], \"z\": [1, 0, 0]}";
       const std::string exitAxes = "\"exit_cs_axes_in_canonical\": {\"x\": [1, 0, 0], \"y\": [0, 1, 0], \"z\": [0, 0, 1]}";
       // A left-handed HFSS axis map.
-      ExpectFail("BBR025", "not a right-handed orthonormal basis",
-                 Edit(Valid(), hfssAxes, "{\"x\": [0, 0, 1], \"y\": [0, 1, 0], \"z\": [1, 0, 0]}"));
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), hfssAxes, "{\"x\": [0, 0, 1], \"y\": [0, 1, 0], \"z\": [1, 0, 0]}")); },
+                        "BBRDatasetSidecar", "not a right-handed orthonormal basis");
       // Inconsistent exit_cs mapping: the HFSS axes rotated 180 degrees about p, exit_cs_axes_in_canonical left as is.
       const std::string rotated = Edit(Valid(), hfssAxes, "{\"x\": [0, 0, 1], \"y\": [0, -1, 0], \"z\": [1, 0, 0]}");
-      ExpectFail("BBR025", "exit_cs_axes_in_canonical disagrees", rotated);
+      ExpectG4Exception("BBR025", [&] { Parse(rotated); }, "BBRDatasetSidecar", "exit_cs_axes_in_canonical disagrees");
       // The same rotation labelled consistently (the registry's first version): a proper,
       // self-consistent frame, but not the one the sampler implements.
-      ExpectFail("BBR025", "the frames differ from the one the sampler implements",
-                 Edit(rotated, exitAxes, "\"exit_cs_axes_in_canonical\": {\"x\": [1, 0, 0], \"y\": [0, -1, 0], \"z\": [0, 0, -1]}"));
-      ExpectFail("BBR025", "is not x cross y", Edit(Valid(), "\"z\": [-1, 0, 0]}", "\"z\": [1, 0, 0]}"));
-      ExpectFail("BBR025", "outward normal must map to +p",
-                 Edit(Valid(), "\"exit_outward_normal_global\": [0, 0, 1]", "\"exit_outward_normal_global\": [0, 0, -1]"));
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(rotated, exitAxes, "\"exit_cs_axes_in_canonical\": {\"x\": [1, 0, 0], \"y\": [0, -1, 0], \"z\": [0, 0, -1]}")); },
+                        "BBRDatasetSidecar", "the frames differ from the one the sampler implements");
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), "\"z\": [-1, 0, 0]}", "\"z\": [1, 0, 0]}")); },
+                        "BBRDatasetSidecar", "is not x cross y");
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), "\"exit_outward_normal_global\": [0, 0, 1]", "\"exit_outward_normal_global\": [0, 0, -1]")); },
+                        "BBRDatasetSidecar", "outward normal must map to +p");
     }},
     {"f5_f10_conventions", [] {
       ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"arrival_direction\"", "\"propagation_direction\"")); }, "BBRDatasetSidecar");
@@ -162,29 +150,31 @@ int main(int argc, char** argv) {
     {"field_types", [] {
       // Mistyped fields are BBR024; a column list that is an array but not the
       // positional order (non-string entries included) is BBR025, as in bbrsim.sidecar.check.
-      ExpectFail("BBR024", "boundaries must be an object",
-                 Edit(Valid(), "\"boundaries\": {\"entrance\": \"radiation\", \"exit\": \"radiation\", \"walls\": \"PEC\"}",
-                      "\"boundaries\": \"PEC\""));
-      ExpectFail("BBR024", "far_field.points_per_key must be an integer",
-                 Edit(Valid(), "\"points_per_key\": 1", "\"points_per_key\": 4294967297"));
-      ExpectFail("BBR024", "far_field.points_per_key must be an integer",
-                 Edit(Valid(), "\"points_per_key\": 1", "\"points_per_key\": -4294967297"));
-      ExpectFail("BBR024", "far_field.points_per_key must be an integer",
-                 Edit(Valid(), "\"points_per_key\": 1", "\"points_per_key\": 1.5"));
-      ExpectFail("BBR024", "far_field.theta_deg.count must be an integer",
-                 Edit(Valid(), "\"count\": 1", "\"count\": 2147483648"));
-      ExpectFail("BBR024", "far_field.theta_deg needs min <= max",
-                 Edit(Valid(), "\"count\": 1", "\"count\": 0"));
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), "\"boundaries\": {\"entrance\": \"radiation\", \"exit\": \"radiation\", \"walls\": \"PEC\"}",
+                                                   "\"boundaries\": \"PEC\"")); },
+                        "BBRDatasetSidecar", "boundaries must be an object");
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), "\"points_per_key\": 1", "\"points_per_key\": 4294967297")); },
+                        "BBRDatasetSidecar", "far_field.points_per_key must be an integer");
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), "\"points_per_key\": 1", "\"points_per_key\": -4294967297")); },
+                        "BBRDatasetSidecar", "far_field.points_per_key must be an integer");
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), "\"points_per_key\": 1", "\"points_per_key\": 1.5")); },
+                        "BBRDatasetSidecar", "far_field.points_per_key must be an integer");
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), "\"count\": 1", "\"count\": 2147483648")); },
+                        "BBRDatasetSidecar", "far_field.theta_deg.count must be an integer");
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), "\"count\": 1", "\"count\": 0")); },
+                        "BBRDatasetSidecar", "far_field.theta_deg needs min <= max");
       const std::string ffCols = "\"columns\": [\"Freq\", \"Ephi\", \"IWavePhi\", \"IWaveTheta\", \"Phi\"";
       const std::string xfCols = "\"columns\": [\"Freq\", \"Ephi\", \"IWavePhi\", \"IWaveTheta\", \"OutgoingPower\"";
-      ExpectFail("BBR024", "far_field.columns must be an array", Edit(Valid(), ffCols, "\"columns\": \"Freq\", \"x\": [\"Phi\""));
-      ExpectFail("BBR024", "exit_field.columns must be an array", Edit(Valid(), xfCols, "\"columns\": {}, \"x\": [\"OutgoingPower\""));
-      ExpectFail("BBR025", "far_field.columns differ from the positional order",
-                 Edit(Valid(), ffCols, "\"columns\": [1, \"Ephi\", \"IWavePhi\", \"IWaveTheta\", \"Phi\""));
-      ExpectFail("BBR025", "exit_field.columns differ from the positional order",
-                 Edit(Valid(), xfCols, "\"columns\": [\"Freq\", null, \"IWavePhi\", \"IWaveTheta\", \"OutgoingPower\""));
-      ExpectFail("BBR025", "exit_field.columns differ from the positional order",
-                 Edit(Valid(), xfCols, "\"columns\": [\"Freq\", \"IWavePhi\", \"Ephi\", \"IWaveTheta\", \"OutgoingPower\""));
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), ffCols, "\"columns\": \"Freq\", \"x\": [\"Phi\"")); },
+                        "BBRDatasetSidecar", "far_field.columns must be an array");
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), xfCols, "\"columns\": {}, \"x\": [\"OutgoingPower\"")); },
+                        "BBRDatasetSidecar", "exit_field.columns must be an array");
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), ffCols, "\"columns\": [1, \"Ephi\", \"IWavePhi\", \"IWaveTheta\", \"Phi\"")); },
+                        "BBRDatasetSidecar", "far_field.columns differ from the positional order");
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), xfCols, "\"columns\": [\"Freq\", null, \"IWavePhi\", \"IWaveTheta\", \"OutgoingPower\"")); },
+                        "BBRDatasetSidecar", "exit_field.columns differ from the positional order");
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), xfCols, "\"columns\": [\"Freq\", \"IWavePhi\", \"Ephi\", \"IWaveTheta\", \"OutgoingPower\"")); },
+                        "BBRDatasetSidecar", "exit_field.columns differ from the positional order");
     }},
     {"f12_fits_solid", [] {
       const auto box = Parse(Valid());                  // section 4.5 mm x 25 um

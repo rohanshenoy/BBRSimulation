@@ -16,6 +16,15 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBRT01", [] {
         G4Exception("testSupport", "BBRT01", FatalException, "fatal on purpose");
       }, "testSupport");
+      ExpectG4Exception("BBRT01", [] {
+        G4Exception("testSupport", "BBRT01", FatalException, "fatal on purpose");
+      }, "testSupport", "on purpose");
+    }},
+    // Registered WILL_FAIL: the right code and origin with a message lacking messagePart.
+    {"message_mismatch_fails", [] {
+      ExpectG4Exception("BBRT01", [] {
+        G4Exception("testSupport", "BBRT01", FatalException, "fatal on purpose");
+      }, "testSupport", "not in the message");
     }},
     {"handler_records_warning", [] {
       G4Exception("testSupport", "BBRT02", JustWarning, "warning on purpose");
