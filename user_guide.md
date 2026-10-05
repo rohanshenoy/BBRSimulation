@@ -280,8 +280,9 @@ output (default `output/bbr.root` in the current directory) through the
 | `check_crack_wall_reflection.py` | reflection off a crack's side wall flips only p_z |
 | `check_crack_oblique.py` | 45° incidence: 138 checks against the HFSS tables and the Python model |
 | `check_crack_frequency.py` | dataset choice per photon on the mock five-frequency tree: 89 checks (`--data-dir`) |
+| `check_round_gap.py` | the opt-in straight round gap at 2000 GHz on its mock dataset: transmittance per polarization, exit positions inside the HFSS radius, the radial exit profile per polarization and the mean exit direction, 42 checks over eight runs (`--data-dir`) |
 | `check_invariants.py` | no photon ever travels inside a metal, and every photon death is labelled correctly (`--allow-no-crossings` for a run that crosses no boundary) |
-| `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the mock tree): every dataset is a complete trio with a valid schema-1 sidecar (full mode lists, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
+| `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the two mock trees): every dataset is a complete trio with a valid schema-1 sidecar (full mode lists, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
 
 **Validator run by hand**, because it needs a large run:
 `check_cu_absorptance.py` (`planck_5M.mac`), shown above.

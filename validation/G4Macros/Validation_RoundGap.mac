@@ -1,0 +1,63 @@
+# Validation_RoundGap.mac - the straight round gap (opt-in /bbr/testworld/roundGap)
+# against the mock dataset RoundGap_r50um_2000GHz (validation/Scripts/
+# make_mock_round_gap.py). Run from an empty directory whose parent holds
+# mock_round_gap/ (the runner links it). Eight fixed-gun runs at 2000 GHz, one
+# ROOT file each; check_round_gap.py reads them in this order. Every beam reaches
+# the hole centre (0, 0, -80) mm at x = 0.
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+/bbr/dataDir ../mock_round_gap
+/bbr/testworld/roundGap true
+/random/setSeeds 2718 28
+/run/initialize
+/bbr/gun/mode true
+/bbr/gun/energy_eV 8.271335e-03
+/bbr/gun/posX -20.0
+/bbr/gun/posY 0.0
+/bbr/gun/posZ -80.0
+/bbr/gun/dirX 1.0
+/bbr/gun/dirY 0.0
+/bbr/gun/dirZ 0.0
+# r00 normal, E across g (the Ephi=0 table)
+/bbr/gun/pol 0 0 1
+/analysis/setFileName output/bbr_round_r00
+/run/beamOn 4000
+# r01 normal, E along l (the Ephi=1 table)
+/bbr/gun/pol 0 1 0
+/analysis/setFileName output/bbr_round_r01
+/run/beamOn 4000
+# r02 normal, random polarization
+/bbr/gun/pol 0 0 0
+/analysis/setFileName output/bbr_round_r02
+/run/beamOn 4000
+# r03 45 deg toward +l
+/bbr/gun/dirX 0.70710678
+/bbr/gun/dirY 0.70710678
+/bbr/gun/posY -20.0
+/analysis/setFileName output/bbr_round_r03
+/run/beamOn 4000
+# r04 45 deg toward -l
+/bbr/gun/dirY -0.70710678
+/bbr/gun/posY 20.0
+/analysis/setFileName output/bbr_round_r04
+/run/beamOn 4000
+# r05 45 deg toward +g
+/bbr/gun/dirY 0.0
+/bbr/gun/posY 0.0
+/bbr/gun/dirZ 0.70710678
+/bbr/gun/posZ -100.0
+/analysis/setFileName output/bbr_round_r05
+/run/beamOn 4000
+# r06 45 deg toward -g
+/bbr/gun/dirZ -0.70710678
+/bbr/gun/posZ -60.0
+/analysis/setFileName output/bbr_round_r06
+/run/beamOn 4000
+# r07 diagonal (IWavePhi 45: the cross term is active)
+/bbr/gun/dirY 0.5
+/bbr/gun/dirZ 0.5
+/bbr/gun/posY -14.142136
+/bbr/gun/posZ -94.142136
+/analysis/setFileName output/bbr_round_r07
+/run/beamOn 4000

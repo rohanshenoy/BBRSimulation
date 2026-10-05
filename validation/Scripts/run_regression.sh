@@ -25,11 +25,11 @@
 # 1c. Runs the C++ tests (ctest), the Python tests (pytest, on the installed
 #    bbrsim) and validation/Scripts/tests/test_env.sh (the env scripts).
 # 2. Builds the mock HFSS tree (each mock frequency with its dataset sidecar)
-#    when needed, checks that the real
-#    data/waveguides holds only 500 GHz (leak guard), runs the ten cases in
+#    and the mock round-gap tree when needed, checks that the real
+#    data/waveguides holds only 500 GHz (leak guard), runs the eleven cases in
 #    parallel with a pinned Geant4 thread count (BBR_THREADS, default 8), each
 #    in BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the
-#    installed env script): the six validation/G4Macros fixtures and four
+#    installed env script): the seven validation/G4Macros fixtures and four
 #    example macros (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
 #    their command lines are pinned by drift_guards.sh). Scans every log for
 #    GeomNav / G4Exception / BBR0xx / LP002 messages, and checks that the
@@ -273,6 +273,20 @@ if [ ! -d "$MOCK/waveguides" ] || \
 fi
 ln -s "$MOCK" "$REG/mock_hfss"
 
+# Mock round-gap tree for the round case: the RoundGap_r50um dataset plus links to
+# the real cracks (BBRsim validates every placed crack). Small; rebuilt when stale.
+MOCKRG="$BUILD/mock_round_gap"
+if [ ! -d "$MOCKRG/waveguides" ] || \
+   [ -n "$(find "$REPO/data/waveguides" "$VAL/Scripts/make_mock_round_gap.py" "$REPO/tools/python/bbrsim/sidecar.py" \
+            -newer "$MOCKRG/waveguides" -print -quit 2>/dev/null)" ]; then
+  rm -rf "$MOCKRG" "$MOCKRG.tmp"
+  if ! $PY "$VAL/Scripts/make_mock_round_gap.py" --real "$REPO/data/waveguides" --dst "$MOCKRG.tmp" \
+         >"$BUILD/mock_round_gap.log" 2>&1 || ! mv "$MOCKRG.tmp" "$MOCKRG"; then
+    rm -rf "$MOCKRG.tmp"; echo "MOCK ROUND-GAP GENERATION FAILED:"; tail -5 "$BUILD/mock_round_gap.log"; exit 2
+  fi
+fi
+ln -s "$MOCKRG" "$REG/mock_round_gap"
+
 # The real tree must stay single-frequency: catches mock data written into data/.
 # Run with -c: conda run does not forward stdin, so a heredoc would never execute
 # and the guard could never fail. Run from / so the CWD cannot shadow the
@@ -306,7 +320,7 @@ scan_log() {  # case-dir [tolerated-code]
   echo $(( n_geom + n_lp + (n_start - n_tol) + n_bbr ))
 }
 # refl, planck, config_mt and lp run the example macros themselves, pinned by the
-# drift guard "regression macros pinned"; the other six are validation-only fixtures.
+# drift guard "regression macros pinned"; the other seven are validation-only fixtures.
 run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
 run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
 run_macro config_mt "$TESTWORLD" "$REPO/examples/testworld/G4Macros/config_mt.mac"   &
@@ -315,10 +329,11 @@ run_macro exit      "$TESTWORLD" "$VM/Validation_WorldExit.mac"       &
 run_macro transmit  "$TESTWORLD" "$VM/Validation_CrackTransmit.mac"   &
 run_macro oblique   "$TESTWORLD" "$VM/Validation_CrackOblique.mac"    &
 run_macro frequency "$TESTWORLD" "$VM/Validation_CrackFrequency.mac"  &
+run_macro round     "$TESTWORLD" "$VM/Validation_RoundGap.mac"    &
 run_macro lp        "$LIGHTPIPE" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac"   &
 run_macro lp_cad    "$LIGHTPIPE" "$VM/Validation_LightPipeCAD.mac"    &
 wait
-for d in refl planck config_mt wall exit transmit oblique frequency lp lp_cad; do
+for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_cad; do
   code=$(cat "$REG/$d/exit.code")
   tol=""; [ "$d" = "frequency" ] && tol="BBR008"   # expected clamp warnings
   nbad=$(scan_log "$d" "$tol")
@@ -435,10 +450,22 @@ for f in "$REG"/frequency/output/bbr_freq_r*.root; do
 done
 if [ "$frq_n" -gt 0 ] && [ "$frq_bad" -eq 0 ]; then line PASS "frequency invariants" "[frequency] check_invariants on $frq_n per-run files"; pass=$((pass+1))
 else fail=$((fail+frq_bad)); [ "$frq_n" -eq 0 ] && { line FAIL "frequency invariants" "[frequency] no per-run files found"; fail=$((fail+1)); }; fi
+out=$($PY "$VAL/check_round_gap.py" "$REG/round/output" --data-dir "$REG/mock_round_gap" 2>&1); rc=$?
+res=$(echo "$out" | grep -E "^RESULT" | tail -1)
+if [ $rc -eq 0 ]; then line PASS check_round_gap.py "[round] $res"; pass=$((pass+1))
+else line FAIL check_round_gap.py "[round] $res"; fail=$((fail+1)); echo "$out" | grep -E "^  FAIL" | head -8 | sed 's/^/       /'; fi
+rg_bad=0; rg_n=0
+for f in "$REG"/round/output/bbr_round_r*.root; do
+  [ -f "$f" ] || continue
+  rg_n=$((rg_n+1))
+  out=$($PY "$VAL/check_invariants.py" "$f" 2>&1) || { rg_bad=$((rg_bad+1)); line FAIL check_invariants.py "[round/$(basename "$f")] $(echo "$out" | grep -E "^RESULT" | tail -1)"; }
+done
+if [ "$rg_n" -gt 0 ] && [ "$rg_bad" -eq 0 ]; then line PASS "round invariants" "[round] check_invariants on $rg_n per-run files"; pass=$((pass+1))
+else fail=$((fail+rg_bad)); [ "$rg_n" -eq 0 ] && { line FAIL "round invariants" "[round] no per-run files found"; fail=$((fail+1)); }; fi
 check -        check_cu_serov.py
 # Every HFSS dataset, real and mock, carries a valid schema-1 sidecar: checks,
 # full mode lists, CSV checksums, C1-C5 (validation/README.md, Dataset sidecars).
-check -        check_dataset_sidecars.py "$REPO/data/waveguides" "$MOCK/waveguides"
+check -        check_dataset_sidecars.py "$REPO/data/waveguides" "$MOCK/waveguides" "$MOCKRG/waveguides"
 
 # BBR_PIN=1 (for refactors that must not change behaviour): the three fixed-seed
 # numbers must equal the committed Scripts/numbers.baseline exactly.

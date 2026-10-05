@@ -3,12 +3,12 @@
 Fixed-seed fixtures and PASS/FAIL validators that gate every change to BBRsim.
 
 ```
-G4Macros/Validation_*.mac   the six validation-only fixtures
-check_*.py                  the 13 validators
+G4Macros/Validation_*.mac   the seven validation-only fixtures
+check_*.py                  the 14 validators
 Scripts/run_regression.sh   build + fixtures + validators, one command
 Scripts/drift_guards.sh     source-tree consistency checks (run by the runner, or alone)
 Scripts/make_mock_hfss_frequencies.py   the mock HFSS tree for Validation_CrackFrequency
-Scripts/make_mock_round_gap.py          the mock RoundGap_r50um dataset at 2000 GHz, with links to the real crack datasets
+Scripts/make_mock_round_gap.py          the mock RoundGap_r50um dataset at 2000 GHz for Validation_RoundGap, with links to the real crack datasets
 Scripts/consumer_smoke/     external find_package(BBRsim) + link smoke test
 Scripts/numbers.baseline    the three fixed-seed numbers that BBR_PIN=1 compares
 Scripts/tests/              make_bad_output.py (synthetic outputs for the validator negative tests),
@@ -28,11 +28,11 @@ consumer smoke test and the `bbrsim data default` and `version stamp` checks,
 then step 1c: the C++
 tests (`ctest`), the Python tests (`pytest`, from `/` on the installed
 `bbrsim`; pytest must be installed, `pip install -e "tools/python[test]"`) and
-`Scripts/tests/test_env.sh` (`env scripts`). It runs the ten cases in parallel,
+`Scripts/tests/test_env.sh` (`env scripts`). It runs the eleven cases in parallel,
 each in `BUILD_DIR/regression/<case>/`, with `G4FORCENUMBEROFTHREADS` pinned to
 8 (`BBR_THREADS` overrides; Geant4 warns when a run has more threads than the
 square root of its events, and the log scan would fail on a many-core machine),
-and runs the validators on their output. Six cases run the fixtures here; four
+and runs the validators on their output. Seven cases run the fixtures here; four
 run example macros directly (see [Regression inputs](#regression-inputs)).
 Last come two rows: `installed examples` (both examples installed into
 `BUILD_DIR/expfx`, never the prefix, run without `BBRSIMDATA` or
@@ -60,9 +60,10 @@ fingerprint stays fixed; pytest also exercises real redirected output and per-re
 | `transmit` | `Validation_CrackTransmit.mac` | `bbrsimTestWorld` | `check_crack_transmittance.py` on run 1 (`bbr.root`); `check_crack_ratio.py` on run 2 (`bbr_ratio.root`); `check_invariants.py` on both (one row) |
 | `oblique` | `Validation_CrackOblique.mac` | `bbrsimTestWorld` | `check_crack_oblique.py` on `output/`; `check_invariants.py` on each of the 16 `bbr_oblique_rNN.root` |
 | `frequency` | `Validation_CrackFrequency.mac` | `bbrsimTestWorld` | `check_crack_frequency.py --data-dir mock_hfss` on `output/`; `check_invariants.py` on each of the 16 `bbr_freq_rNN.root` |
+| `round` | `Validation_RoundGap.mac` | `bbrsimTestWorld` | `check_round_gap.py --data-dir mock_round_gap` on `output/`; `check_invariants.py` on each of the 8 `bbr_round_rNN.root` |
 | `lp` | `examples/lightpipe/G4Macros/lightpipe.mac` | `bbrsimLightPipe` | `check_invariants.py` |
 | `lp_cad` | `Validation_LightPipeCAD.mac` | `bbrsimLightPipe` | `check_invariants.py` (cad mode, the bundled `box_sample.stl` through `BBRSIMDATA`) |
-| — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL); `check_dataset_sidecars.py` on `data/waveguides` and `BUILD_DIR/mock_hfss/waveguides` |
+| — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL); `check_dataset_sidecars.py` on `data/waveguides`, `BUILD_DIR/mock_hfss/waveguides` and `BUILD_DIR/mock_round_gap/waveguides` |
 
 A case passes when the binary exits 0, writes its ROOT output, and its log
 holds no `GeomNav`, `G4Exception`, `BBR0xx` or `LP002` line (the frequency case
@@ -99,9 +100,10 @@ not installed is skipped) and exits with its FAIL count.
 - `check_crack_transmittance.py` — T_obs within 3 σ (binomial) of 0.50 and no tangential exits.
 - `check_crack_ratio.py` — the crack2/crack1 entry ratio is within 3 σ (Poisson) of the aperture ratio A2/A1 = 1.962.
 - `check_crack_oblique.py`, `check_crack_frequency.py` — all 138 and 89 checks respectively.
+- `check_round_gap.py` — all 42 checks over the eight runs of `Validation_RoundGap.mac` (2000 GHz, against the mock `RoundGap_r50um` table): one gap entry per event along the gun direction; T_obs within 3 σ (binomial) of the `bbrsim.hfss` prediction; every exit on the exit face and within the 50 µm HFSS radius, although the Geant4 hole is 51 µm; for the two fixed polarizations, the share of exits inside R/2 within 4 σ of the table's prediction, which tells the Ephi=0 and Ephi=1 radial profiles apart; and the mean exit direction within 4 standard errors of the prediction in each component.
 - `check_invariants.py` — both invariants, each printed in its own section: no photons in metal (no crossing starts inside a `Cu_RRR*` or `BBR_Perfect*` material, and the file holds at least one crossing; `--allow-no-crossings` waives only the latter, for the world-exit fixture), and termination labels (the file holds at least one `abspoints` row, no `unknown` label, every world exit is `WorldExit`, every absorption has a volume, and the `BBRAbsorb` counts agree between the two ntuples). A code with no legend entry fails the section that reads that column (`legend lacks code(s) …`), so a legend gap cannot make a check pass vacuously.
 - `check_cu_serov.py` — full-Drude loss for the `OF_Cu` (RRR 3) and `HP_Cu` (RRR 6) aliases within ±10 % of Serov et al. (2016). **XFAIL:** `HP_Cu` comes out 13 % low at 230 GHz, because RRR 6 was derived with Hagen-Rubens. Whether to move `HP_Cu` to RRR 5 or accept a wider tolerance is an open decision; the runner reports the check as XFAIL, and as XPASS (a failure) if it starts passing.
-- `check_dataset_sidecars.py` — every dataset in the real tree (`data/waveguides`) and the mock tree (`BUILD_DIR/mock_hfss/waveguides`) has a complete trio and a sidecar that passes `bbrsim.sidecar.check_full` (checks, full mode lists, CSV checksums, C1-C5), and the frequencies of each ID agree on the frequency-independent blocks; each directory must hold at least one dataset. See [Dataset sidecars](#dataset-sidecars).
+- `check_dataset_sidecars.py` — every dataset in the real tree (`data/waveguides`) and the two mock trees (`BUILD_DIR/mock_hfss/waveguides`, `BUILD_DIR/mock_round_gap/waveguides`) has a complete trio and a sidecar that passes `bbrsim.sidecar.check_full` (checks, full mode lists, CSV checksums, C1-C5), and the frequencies of each ID agree on the frequency-independent blocks; each directory must hold at least one dataset. See [Dataset sidecars](#dataset-sidecars).
 
 One validator needs an output the fixtures do not produce, so it is run by
 hand: `check_cu_absorptance.py` (0.3 < A_obs/A_theory < 3 against the
@@ -124,11 +126,11 @@ command, or trailing whitespace, changes the hash although Geant4 ignores it.
 Change such a macro only together with its validators, then update its pin in
 `Scripts/drift_guards.sh`.
 
-The other six cases run the `Validation_*.mac` fixtures, which exist only
+The other seven cases run the `Validation_*.mac` fixtures, which exist only
 here. Their validators rely on the seeds and event counts too, and
-`check_crack_oblique.py` and `check_crack_frequency.py` index the runs by
-position, so change a fixture only together with its validators. Every
-`Validation_*.mac` must also be called by the runner (drift guard
+`check_crack_oblique.py`, `check_crack_frequency.py` and `check_round_gap.py`
+index the runs by position, so change a fixture only together with its
+validators. Every `Validation_*.mac` must also be called by the runner (drift guard
 `every fixture is run`).
 
 The library install copies this directory to `<prefix>/validation`
@@ -295,6 +297,31 @@ rewritten, so the tree passes BBRsim's discovery checks and
 `tools/python/bbrsim/sidecar.py` (about 1.3 GB), and links it into the
 regression directory, where the fixture's `/bbr/dataDir ../mock_hfss` finds it.
 The fixture header gives the by-hand recipe.
+
+## Mock round-gap tree
+
+`Validation_RoundGap.mac` turns on the opt-in straight round gap
+(`/bbr/testworld/roundGap true`: `RoundGap_r50um`, a 51 µm-radius `vacuum_wg`
+hole along x through a 0.4 mm Cu plate at z = −80 mm) and feeds it the mock
+dataset `RoundGap_r50um_2000GHz` that `Scripts/make_mock_round_gap.py` writes:
+a 50 µm disc in sidecar schema 1.0 with synthetic tables whose transmittance
+and radial exit profile differ between the two polarizations and whose
+far-field lobe moves with the incidence key, so each mapping is visible to
+`check_round_gap.py`. The test world places both slab cracks as well and
+BBRsim checks every placed crack before the first event, so the tree also links the real crack datasets of
+`data/waveguides`, with copies of their sidecars. The script refuses to write
+inside the data tree it links. The runner builds the tree (a few MB) in
+`BUILD_DIR/mock_round_gap` when it is missing or older than the data, the
+script or `tools/python/bbrsim/sidecar.py`, and links it into the regression
+directory, where the fixture's `/bbr/dataDir ../mock_round_gap` finds it. By
+hand:
+
+```bash
+conda run -n bbrsim python validation/Scripts/make_mock_round_gap.py \
+    --real data/waveguides --dst D/../mock_round_gap
+cd D && bbrsimTestWorld <repo>/validation/G4Macros/Validation_RoundGap.mac
+conda run -n bbrsim python <repo>/validation/check_round_gap.py output --data-dir ../mock_round_gap
+```
 
 ## Leak guard
 
