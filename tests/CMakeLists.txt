@@ -26,6 +26,8 @@ function(bbrsim_add_test_program name)
   cmake_parse_arguments(T "NEEDS_ENSDF" "LABEL" "CASES;ENV;ENVMOD;WILL_FAIL" ${ARGN})
   add_executable(${name} ${name}.cc BBRTestSupport.hh)
   target_link_libraries(${name} PRIVATE BBRsim)
+  # The vendored nlohmann/json, which the library keeps PRIVATE; tests are never installed.
+  target_include_directories(${name} SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/library/src/external)
   target_compile_options(${name} PRIVATE -Wall -Wextra)
   set(env ${T_ENV})
   if(T_NEEDS_ENSDF)
@@ -76,12 +78,14 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         sidecar_c4_exit_rows sidecar_c5_outside_section sidecar_c5_zero_outside sidecar_real_data
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 bbrsim_add_test_program(testSidecar LABEL unit
-  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only invariant_diff field_types f12_fits_solid)
+  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only invariant_diff field_types
+        recorded_fields f12_fits_solid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
   CASES selection_grid5 token_verbatim discovery_errors discovery_missing_far_field discovery_missing_waveguide
         dataset_id_of unreadable_root concurrent_first_load
-        sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok)
+        sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok
+        placed_cracks_json)
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
   CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget snap_and_rotation

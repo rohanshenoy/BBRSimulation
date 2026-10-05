@@ -13,7 +13,12 @@
 #include "G4Transform3D.hh"
 #include "G4Tubs.hh"
 
+#include <nlohmann/json.hpp>
+
+#include <map>
+
 using namespace bbrtest;
+using json = nlohmann::json;
 
 namespace {
 const std::string kStem = "crack_500GHz";
@@ -202,6 +207,40 @@ int main(int argc, char** argv) {
                         "BBRDatasetSidecar", "exit_field.columns differ from the positional order");
       ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), xfCols, "\"columns\": [\"Freq\", \"IWavePhi\", \"Ephi\", \"IWaveTheta\", \"OutgoingPower\"")); },
                         "BBRDatasetSidecar", "exit_field.columns differ from the positional order");
+    }},
+    {"recorded_fields", [] {
+      // The recorded-only fields, copied verbatim for metadata.json; absent ones are null.
+      const auto r = json::parse(Parse(Valid()).recorded);
+      CHECK(r.at("frames").at("pose_rule") == "canonical-z");
+      CHECK(r.at("geometry").at("shape") == "box");
+      CHECK(r.at("symmetry").at("rotational") == false);
+      CHECK(r.at("excitation").at("origin_mm_global").is_array() && r.at("excitation").at("origin_mm_global").size() == 3);
+      CHECK(r.at("frames").at("exit_cs_origin_mm_global").is_array() && r.at("frames").at("exit_cs_origin_mm_global").size() == 3);
+      CHECK(r.at("geometry").at("bounding_box_mm").is_array() && r.at("geometry").at("bounding_box_mm").size() == 6);
+      const json source = json::parse(Valid());
+      CHECK(r.at("provenance") == source.at("provenance") && r.at("boundaries") == source.at("boundaries"));
+      const std::map<std::string, std::vector<std::string>> keys = {
+          {"provenance", {}}, {"boundaries", {}}, {"geometry", {"shape", "bounding_box_mm"}},
+          {"symmetry", {"rotational"}}, {"frames", {"pose_rule", "exit_cs_origin_mm_global"}},
+          {"excitation", {"origin_mm_global"}}};
+      CHECK(r.is_object() && r.size() == keys.size());
+      for (const auto& [block, fields] : keys) {
+        CHECK(r.contains(block));
+        if (!fields.empty()) CHECK(r.at(block).is_object() && r.at(block).size() == fields.size());
+        for (const auto& f : fields) CHECK(r.at(block).contains(f));
+      }
+      // Fields the sidecar lacks become null; an unknown provenance field is copied verbatim.
+      std::string t = Edit(Valid(), ", \"pose_rule\": \"canonical-z\"", "");
+      t = Edit(t, ",\n    \"bounding_box_mm\": [-0.026, -5, 0, 0.026, 5, 4]", "");
+      t = Edit(t, "\"provenance\": {", "\"provenance\": {\"x_future\": {\"a\": [1, 2]}, ");
+      const auto m = json::parse(Parse(t).recorded);
+      CHECK(m.at("frames").at("pose_rule").is_null());
+      CHECK(m.at("geometry").at("bounding_box_mm").is_null());
+      CHECK(m.at("geometry").at("shape") == "box");
+      CHECK(m.at("provenance").at("x_future") == json::parse("{\"a\": [1, 2]}"));
+      // An absent parent object gives null too, and Parse does not fail on it.
+      const auto n = json::parse(Parse(Edit(Valid(), "\"provenance\": {\"producer\": \"tests/HFSSFixture.hh\"},\n", "")).recorded);
+      CHECK(n.at("provenance").is_null() && n.at("frames").at("pose_rule") == "canonical-z");
     }},
     {"f12_fits_solid", [] {
       const auto box = Parse(Valid());                  // section 4.5 mm x 25 um

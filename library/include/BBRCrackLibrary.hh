@@ -58,6 +58,11 @@ class BBRCrackLibrary
   // process by BBSimOpBoundaryProcess::BuildPhysicsTable; later calls return.
   void ValidatePlacedCracks();
 
+  // JSON array, one object per crack ValidatePlacedCracks checked, in its order:
+  // volume, dataset_id, geant4_extent_mm, hfss_extent_mm and each frequency's
+  // label, value, sidecar file and recorded fields; "[]" before it ran.
+  std::string PlacedCracksJson() const;
+
  private:
   BBRCrackLibrary() = default;
 
@@ -77,9 +82,15 @@ class BBRCrackLibrary
   // Scans the waveguide directory for this id. The caller must hold the lock.
   FrequencySet& Discover(const G4String& datasetId);
 
+  struct PlacedCrack {
+    G4String volume, datasetId;
+    G4double extent_mm[3];                // solid's BoundingLimits extent along local x, y, z
+  };
+
   G4String fWaveguidesDir;                  // <data root>/waveguides, resolved once
   std::map<G4String, FrequencySet> fSets;
   G4bool fValidated = false;                // ValidatePlacedCracks ran
+  std::vector<PlacedCrack> fPlaced;         // the cracks it checked, in its order
 };
 
 #endif

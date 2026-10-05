@@ -8,6 +8,8 @@
 #include "G4NistManager.hh"
 #include "G4PVPlacement.hh"
 #include "G4SystemOfUnits.hh"
+#include <nlohmann/json.hpp>
+
 #include <cmath>
 #include <set>
 #include <thread>
@@ -171,6 +173,45 @@ int main(int argc, char** argv) {
       new G4PVPlacement(nullptr, {0, 0, 10 * mm}, thin, "gap:2", wlv, false, 0);
       BBRCrackLibrary::Instance().ValidatePlacedCracks();
       CHECK_NEAR(Pick("gap", 500), 500, 0);
+    }},
+    {"placed_cracks_json", [] {
+      // One record per validated placement, in visiting order, with every grid frequency's sidecar.
+      TempDir d; Grid(d.path(), "gap", {"50", "500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      CHECK(BBRCrackLibrary::Instance().PlacedCracksJson() == "[]");
+      auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
+      auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
+      new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
+      auto* a = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* b = new G4LogicalVolume(new G4Box("gapB", 2.5 * mm, 5.5 * mm, 0.03 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      new G4PVPlacement(nullptr, {0, 0, -10 * mm}, a, "gap:1", wlv, false, 0);
+      new G4PVPlacement(nullptr, {0, 0, 10 * mm}, b, "gap:2", wlv, false, 0);
+      CHECK(BBRCrackLibrary::Instance().PlacedCracksJson() == "[]");   // not validated yet
+      BBRCrackLibrary::Instance().ValidatePlacedCracks();
+      const auto arr = nlohmann::json::parse(BBRCrackLibrary::Instance().PlacedCracksJson());
+      CHECK(arr.is_array() && arr.size() == 2);
+      if (!arr.is_array() || arr.size() != 2) return;
+      const std::vector<std::pair<std::string, std::vector<double>>> want = {
+          {"gap:1", {4., 10., 0.052}}, {"gap:2", {5., 11., 0.06}}};
+      for (std::size_t i = 0; i < 2; ++i) {
+        const auto& c = arr[i];
+        CHECK(c.at("volume") == want[i].first);
+        CHECK(c.at("dataset_id") == "gap");
+        CHECK(c.at("geant4_extent_mm").is_array() && c.at("geant4_extent_mm").size() == 3);
+        for (std::size_t k = 0; k < 3; ++k) CHECK_NEAR(c.at("geant4_extent_mm").at(k).get<double>(), want[i].second[k], 1e-9);
+        CHECK(c.at("hfss_extent_mm") == nlohmann::json::parse("{\"p\": 4, \"l\": 10, \"g\": 0.052}"));
+        const auto& fs = c.at("frequencies");
+        CHECK(fs.is_array() && fs.size() == 2);
+        if (!fs.is_array() || fs.size() != 2) continue;
+        const char* labels[] = {"50GHz", "500GHz"};
+        const double values[] = {50., 500.};
+        for (std::size_t k = 0; k < 2; ++k) {
+          CHECK(fs[k].at("label") == labels[k]);
+          CHECK_NEAR(fs[k].at("frequency_ghz").get<double>(), values[k], 0);
+          CHECK(fs[k].at("sidecar") == "gap_" + std::string(labels[k]) + ".dataset.json");
+          CHECK(fs[k].at("recorded").is_object() && fs[k].at("recorded").at("frames").at("pose_rule") == "canonical-z");
+        }
+      }
     }},
   });
 }

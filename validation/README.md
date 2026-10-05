@@ -212,7 +212,7 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 - F8 `exit_field.cross_section`: `rectangle` or `disc` with positive dimensions (`BBR024` for an unknown shape or a dimension ≤ 0); `polygon` is reserved and not supported yet (`BBR025`).
 - F9 `transmittance`: the supported `definition` string and `incoming_includes_cos_theta` false (`BBR025`).
 - F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`).
-- F11 `geometry.extent_mm`: p, l, g > 0 (`BBR024`); compared with the placed solid's bounding limits along local x, y, z, printed as one `[BBR]` info line and stored in `metadata.json` (info only, not a warning).
+- F11 `geometry.extent_mm`: p, l, g > 0 (`BBR024`); compared with the placed solid's bounding limits along local x, y, z, printed as one `[BBR]` info line and stored as `hfss_extent_mm` and `geant4_extent_mm` in `data.hfss_datasets` of each `<stem>.metadata.json` (info only, not a warning).
 - F12 `exit_field.cross_section` against the placed solid, at the first run initialization, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset, is strictly inside the solid. With `rim_points` `"included"`, the recorded Geant4 margin is what makes this pass (`BBR025`).
 - F13 `modes.mode`, `.cutoff_ghz`, `.polarization_filter_limit_ghz`: re-derived from `cross_section` to 1e-6 relative with closed forms (rectangle f_mn = (c/2)·√((m/a)² + (n/b)²), c = 299792458 m/s; disc TE11 with x′₁₁ = 1.8411837813). The full lists are re-derived only by the Python validator, with scipy (`BBR025`).
 
@@ -242,8 +242,15 @@ Recorded but not checked against the conventions BBRsim implements (of these,
 only `boundaries`, `geometry.shape` and `symmetry.rotational` enter the
 agreement across frequencies): `provenance`, `boundaries`, `geometry.shape`,
 `geometry.bounding_box_mm`, `symmetry.rotational`, `pose_rule` and the origins
-are copied into `<stem>.metadata.json`. The `files` checksums are verified by
-the runner's `check_dataset_sidecars.py`; BBRsim itself does not verify them.
+(`frames.exit_cs.origin_mm_global`, `excitation.origin_mm_global`) are copied
+verbatim into `<stem>.metadata.json`, a missing one as `null`. They go in
+`data.hfss_datasets`, one entry per placed crack volume in the order they were
+validated: `volume`, `dataset_id`, `geant4_extent_mm` (the placed solid's
+extent along local x, y, z), `hfss_extent_mm` (`geometry.extent_mm`) and
+`frequencies`, each with its `label`, `frequency_ghz`, `sidecar` file name and
+`recorded` fields. A geometry without cracks records `[]`. The `files`
+checksums are verified by the runner's `check_dataset_sidecars.py`; BBRsim
+itself does not verify them.
 
 **Tools.** `validation/check_dataset_sidecars.py <waveguides-dir> [...]`
 (default: `waveguides/` under the data root of `bbrsim.paths.data_dir()`)

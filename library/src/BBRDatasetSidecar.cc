@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <sstream>
 #include <stdexcept>
 
@@ -356,6 +357,25 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
   inv["modes"] = m;
   inv["cross_section"] = cs;
   sc.invariant = inv.dump();
+
+  // Recorded only, never checked: an absent field or parent object is null.
+  const auto field = [&j](std::initializer_list<const char*> keys) -> json {
+    const json* v = &j;
+    for (const char* k : keys) {
+      if (!v->is_object() || !v->contains(k)) return nullptr;
+      v = &v->at(k);
+    }
+    return *v;
+  };
+  json rec;
+  rec["provenance"] = field({"provenance"});
+  rec["boundaries"] = field({"boundaries"});
+  rec["geometry"] = {{"shape", field({"geometry", "shape"})}, {"bounding_box_mm", field({"geometry", "bounding_box_mm"})}};
+  rec["symmetry"] = {{"rotational", field({"symmetry", "rotational"})}};
+  rec["frames"] = {{"pose_rule", field({"frames", "pose_rule"})},
+                   {"exit_cs_origin_mm_global", field({"frames", "exit_cs", "origin_mm_global"})}};
+  rec["excitation"] = {{"origin_mm_global", field({"excitation", "origin_mm_global"})}};
+  sc.recorded = rec.dump(-1, ' ', false, json::error_handler_t::replace);
   return sc;
 }
 

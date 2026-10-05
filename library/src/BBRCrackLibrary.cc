@@ -11,6 +11,8 @@
 #include "G4VSolid.hh"
 #include "G4ios.hh"
 
+#include "nlohmann/json.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -235,9 +237,34 @@ void BBRCrackLibrary::ValidatePlacedCracks()
     for (const auto& e : set.entries) e.sidecar->CheckFitsSolid(solid, name);
     G4ThreeVector lo, hi;
     solid.BoundingLimits(lo, hi);
+    const G4ThreeVector extent = (hi - lo) / mm;
+    fPlaced.push_back({name, DatasetIdOf(name), {extent.x(), extent.y(), extent.z()}});
     const auto& sc = *set.entries.front().sidecar;
     G4cout << "[BBR] crack " << name << ": HFSS (p, l, g) = (" << sc.extentP_mm << ", " << sc.extentL_mm << ", "
-           << sc.extentG_mm << ") mm, Geant4 (x, y, z) = (" << (hi - lo).x() / mm << ", " << (hi - lo).y() / mm << ", "
-           << (hi - lo).z() / mm << ") mm; " << set.entries.size() << " sidecar(s) fit" << G4endl;
+           << sc.extentG_mm << ") mm, Geant4 (x, y, z) = (" << extent.x() << ", " << extent.y() << ", "
+           << extent.z() << ") mm; " << set.entries.size() << " sidecar(s) fit" << G4endl;
   }
+}
+
+std::string BBRCrackLibrary::PlacedCracksJson() const
+{
+  using json = nlohmann::json;
+  G4AutoLock lock(&cacheMutex);
+  json out = json::array();
+  for (const auto& p : fPlaced) {
+    const FrequencySet& set = fSets.at(p.datasetId);   // discovered by ValidatePlacedCracks
+    const auto& first = *set.entries.front().sidecar;
+    json frequencies = json::array();
+    for (const auto& e : set.entries)
+      frequencies.push_back({{"label", e.sidecar->frequencyLabel},
+                             {"frequency_ghz", e.freq_GHz},
+                             {"sidecar", e.dirStem + ".dataset.json"},
+                             {"recorded", e.sidecar->recorded.empty() ? json() : json::parse(e.sidecar->recorded)}});
+    out.push_back({{"volume", std::string(p.volume)},
+                   {"dataset_id", std::string(p.datasetId)},
+                   {"geant4_extent_mm", {p.extent_mm[0], p.extent_mm[1], p.extent_mm[2]}},
+                   {"hfss_extent_mm", {{"p", first.extentP_mm}, {"l", first.extentL_mm}, {"g", first.extentG_mm}}},
+                   {"frequencies", frequencies}});
+  }
+  return out.dump(-1, ' ', false, json::error_handler_t::replace);
 }

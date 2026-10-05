@@ -1,6 +1,7 @@
 #include "BBRAnalysis.hh"
 
 #include "BBRConfigManager.hh"
+#include "BBRCrackLibrary.hh"
 #include "G4AnalysisManager.hh"
 #include "G4Material.hh"
 #include "G4LogicalVolume.hh"
@@ -276,6 +277,9 @@ void BBRAnalysis::BeginRun(const G4Run* run, G4bool master) {
       }
       fGeometry = geometry.str();
     }
+    // The placed cracks and their sidecars: validated before the first run begins
+    // (at /run/initialize, or in a sequential run manager's first BeamOn).
+    if (fHfssDatasets.empty()) fHfssDatasets = BBRCrackLibrary::Instance().PlacedCracksJson();
     if (fDataFingerprint.empty())
       fDataFingerprint = DataFingerprint(BBRConfigManager::GetDataDir());
     std::ostringstream random;
@@ -316,6 +320,7 @@ void BBRAnalysis::WriteMetadata(const G4Run* run) const {
      << ", \"geant4\": " << JsonString(G4Version) << "},\n  \"data\": {\"directory\": "
      << JsonString(std::filesystem::absolute(std::string(BBRConfigManager::GetDataDir())).string())
      << ", \"fingerprint\": " << JsonString(fDataFingerprint)
+     << ", \"hfss_datasets\": " << fHfssDatasets
      << "},\n  \"legend\": {\n  \"status\": ";
   dumpMap(fStatusCodes);
   js << ",\n  \"event_type\": {\"0\": \"transmission\", \"1\": \"reflection\", \"2\": \"absorption\", \"3\": \"other\"},\n  \"volume\": ";

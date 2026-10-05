@@ -70,6 +70,7 @@ class BBRAnalysis {
   G4String fGeometry;
   G4String fRandomState;
   G4String fDataFingerprint;
+  G4String fHfssDatasets;       // BBRCrackLibrary::PlacedCracksJson(), raw JSON
   std::map<G4String, G4int> fStatusCodes;
   std::map<G4String, G4int> fVolumeCodes;
   std::map<G4String, G4int> fMaterialCodes;

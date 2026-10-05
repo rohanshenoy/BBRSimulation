@@ -82,6 +82,13 @@ struct BBRDatasetSidecar {
   // dataset from different writers or poses still agree. Compare with
   // SameInvariant, never as text.
   std::string invariant;
+  // Compact JSON text of the recorded-only fields, copied verbatim and never
+  // checked, for <stem>.metadata.json (BBRCrackLibrary::PlacedCracksJson):
+  // {"provenance", "boundaries", "geometry": {"shape", "bounding_box_mm"},
+  //  "symmetry": {"rotational"}, "frames": {"pose_rule", "exit_cs_origin_mm_global"
+  //  (frames.exit_cs.origin_mm_global)}, "excitation": {"origin_mm_global"}}.
+  // A field the sidecar lacks is null.
+  std::string recorded;
 
   // The top-level invariant blocks on which this and other differ, in the order
   // frames, symmetry, boundaries, geometry, modes, cross_section: objects
