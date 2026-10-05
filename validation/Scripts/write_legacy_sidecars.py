@@ -7,7 +7,10 @@ hash and the far-field steps were confirmed against InfParallelPlate.aedt on
 2026-10-05. Only the PEC side walls remain inferred.
 
 The script refuses to run if any CSV differs from the checksums recorded here,
-so it cannot write a sidecar for changed data. Run from the repository root:
+so it cannot write a sidecar for changed data. It verifies every dataset's
+checksums and checks every built sidecar in memory before it writes any, so a
+refusal (on stderr, exit code 2) leaves the sidecars in data/ untouched.
+Run from the repository root:
   conda run -n bbrsim python validation/Scripts/write_legacy_sidecars.py
 """
 import os
@@ -39,13 +42,24 @@ LEGACY = {   # id: (design, run_design, object, renamed design, gap [m], length 
     "InfParallelPlate_crack2": ("crack2", "crack2_500GHz", "crack2", "parallel_plate_gap_100um", 1e-04, 1.5),
 }
 
-for dataset_id, (design, run_design, obj, renamed, gap, length) in LEGACY.items():
+
+def refuse(msg):
+    print(f"refusing: {msg}; nothing written", file=sys.stderr)
+    sys.exit(2)
+
+
+# Every dataset's checksums first, so a mismatch anywhere leaves every sidecar untouched.
+for dataset_id in LEGACY:
     stem = f"{dataset_id}_500GHz"
     got = {k: v["sha256"] for k, v in sidecar.file_entries(BASE, stem).items()}
     want = {k: v for k, v in EXPECTED_SHA256.items() if k.startswith(stem + "_")}
     if got != want:
-        print(f"refusing: the CSVs of {stem} differ from the recorded checksums")
-        sys.exit(2)
+        refuse(f"the CSVs of {stem} differ from the recorded checksums")
+
+# Then build and check every sidecar in memory before any is written.
+built = []
+for dataset_id, (design, run_design, obj, renamed, gap, length) in LEGACY.items():
+    stem = f"{dataset_id}_500GHz"
     gap_mm = gap * 1e3
     sc = sidecar.build_from_csvs(
         BASE, dataset_id, "500GHz",
@@ -56,6 +70,14 @@ for dataset_id, (design, run_design, obj, renamed, gap, length) in LEGACY.items(
         exit_origin_mm=[gap_mm / 2, 0.0, length], plane_wave_origin_mm=[gap_mm / 2, 0.0, 0.0],
         bounding_box_mm=[0.0, -5.0, 0.0, gap_mm, 5.0, length],
         pose_rule="legacy", resolution_mm=[0.0, 0.1, 0.001])
+    try:
+        sidecar.check(sc, dataset_id, stem, 500.0)
+        sidecar.check_csvs(BASE, stem, sc)
+    except ValueError as e:
+        refuse(f"the sidecar built for {stem} fails its check: {e}")
+    built.append((dataset_id, stem, sc))
+
+for dataset_id, stem, sc in built:
     path = sidecar.write(BASE, stem, sc)
-    sidecar.check_full(BASE, dataset_id, stem, 500.0)
+    sidecar.check_full(BASE, dataset_id, stem, 500.0)     # the written file, read back
     print(f"wrote {os.path.relpath(path)}")

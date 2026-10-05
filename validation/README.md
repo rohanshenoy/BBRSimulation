@@ -238,19 +238,25 @@ the runner's `check_dataset_sidecars.py`; BBRsim itself does not verify them.
 
 **Tools.** `validation/check_dataset_sidecars.py <waveguides-dir> [...]`
 (default: `waveguides/` under the data root of `bbrsim.paths.data_dir()`)
-checks every `<id>_<freq>GHz_Ephi=0` dataset in the given directories with
+checks every dataset in the given directories. A dataset `<id>_<freq>GHz` is
+the trio `<stem>_Ephi=0/`, `<stem>_Ephi=1/` and `<stem>.dataset.json`; other
+files (a tree manifest, `SHA256SUMS`) are ignored, and a stem missing any part
+of the trio fails. A complete dataset is checked with
 `bbrsim.sidecar.check_full`: F1-F11 and F13, the full mode lists re-derived
 with scipy, the sha256, size and row count of the four CSVs, and C1-C5 on both
-polarizations. It also checks that the frequencies of one ID agree on the
-frequency-independent blocks. It prints one `PASS` or `FAIL` line per dataset,
-then `RESULT: PASS` or `RESULT: FAIL`, and exits 0 or 1 (FAIL when no dataset
-is found). `bbrsim.sidecar` (`tools/python`) is the Python twin of the C++
+polarizations. The frequencies of one ID in one directory must also agree on
+the frequency-independent blocks (`bbrsim.sidecar.invariant_diff` names the
+blocks that differ). It prints one `PASS` or `FAIL` line per dataset, after the
+agreement check, and a `FAIL` line for a directory argument that cannot be
+listed or holds no dataset; then the count and `RESULT: PASS` or
+`RESULT: FAIL`, and exits 0 or 1. `bbrsim.sidecar` (`tools/python`) is the Python twin of the C++
 checks and holds the builders the mock generators use.
 `validation/Scripts/write_legacy_sidecars.py` wrote the sidecars of the two
 500 GHz datasets in `data/waveguides/` from their CSVs and the Blackbody-Simulations
 reference configs; only `boundaries.walls` (PEC) is inferred, as
 `provenance.inferred` records. It refuses to write when a CSV differs from the
-checksums it records.
+checksums it records; it verifies every checksum and checks every built
+sidecar before it writes any, so a refusal leaves `data/` untouched.
 
 ## Mock HFSS tree
 

@@ -436,3 +436,127 @@ def test_legacy_sidecars_validator(repo_root, data_root):
     r = subprocess.run([sys.executable, str(repo_root / "validation/check_dataset_sidecars.py"),
                         os.path.join(data_root, "waveguides")], capture_output=True, text=True)
     assert r.returncode == 0 and r.stdout.strip().endswith("RESULT: PASS"), r.stdout + r.stderr
+    assert "2 dataset(s) checked, 0 failing" in r.stdout.splitlines(), r.stdout
+    base = os.path.join(data_root, "waveguides")
+    assert [l for l in r.stdout.splitlines() if l.startswith("  ")] == [f"  PASS {base}/{s}" for s in LEGACY]
+
+
+# --- invariant_diff and the validator on tiny trees ------------------------------
+
+@pytest.mark.parametrize("edit,blocks", [
+    (lambda s: s["geometry"]["extent_mm"].update(p=4.0), ["geometry"]),
+    (lambda s: s["symmetry"].update(rotational=True), ["symmetry"]),
+    (lambda s: s["boundaries"].update(walls="finite-conductivity"), ["boundaries"]),
+    (lambda s: s["modes"].update(cutoff_ghz=s["modes"]["cutoff_ghz"] * (1 + 1e-6)), ["modes"]),
+    (lambda s: (s["boundaries"].update(walls="x"), s["exit_field"]["cross_section"].update(y_e_half_m=2.5e-3)),
+     ["boundaries", "cross_section"]),
+    (lambda s: s["frames"].update(pose_rule="legacy"), []),
+    (lambda s: s["modes"].update(propagating_count=1), []),
+], ids=["geometry", "symmetry", "boundaries", "modes", "two-blocks", "pose-rule", "propagating-count"])
+def test_invariant_diff_names_blocks(tmp_path, edit, blocks):
+    a = built(tmp_path)
+    b = copy.deepcopy(a)
+    edit(b)
+    assert sidecar.invariant_diff(a, b) == blocks and sidecar.invariant_diff(b, a) == blocks
+    assert sidecar.same_invariant(a, b) == (not blocks)
+
+
+def tiny_dataset(base, label="500GHz", dataset_id="c", edit=None):
+    """A complete tiny dataset (both Ephi directories and a passing sidecar) under base."""
+    os.makedirs(base, exist_ok=True)
+    stem = write_tiny(base, dataset_id=dataset_id, label=label)
+    sc = tiny_sidecar(base, stem, dataset_id=dataset_id, label=label)
+    if edit:
+        edit(sc)
+    sidecar.write(base, stem, sc)
+    return stem
+
+
+def run_validator(repo_root, *dirs):
+    import subprocess, sys
+    r = subprocess.run([sys.executable, str(repo_root / "validation/check_dataset_sidecars.py"), *map(str, dirs)],
+                       capture_output=True, text=True)
+    assert not r.stderr, r.stderr                  # no traceback, whatever the input
+    lines = r.stdout.splitlines()
+    return r.returncode, [l for l in lines if l.startswith("  ")], lines[-2:]
+
+
+def test_validator_tiny_tree_passes_and_ignores_other_files(tmp_path, repo_root):
+    base = tmp_path / "wg"
+    tiny_dataset(str(base))
+    tiny_dataset(str(base), label="600GHz")
+    (base / "SHA256SUMS").write_text("x\n")
+    (base / "manifest.json").write_text("{}\n")
+    (base / "notes_Ephi=0").write_text("a file, not a directory\n")
+    rc, rows, tail = run_validator(repo_root, base)
+    assert rc == 0 and rows == [f"  PASS {base}/c_500GHz", f"  PASS {base}/c_600GHz"]
+    assert tail == ["2 dataset(s) checked, 0 failing", "RESULT: PASS"]
+
+
+@pytest.mark.parametrize("orphan,missing", [
+    (lambda b: os.makedirs(b / "c_600GHz_Ephi=1"), "c_600GHz_Ephi=0/, c_600GHz.dataset.json"),
+    (lambda b: os.makedirs(b / "c_600GHz_Ephi=0"), "c_600GHz_Ephi=1/, c_600GHz.dataset.json"),
+    (lambda b: (b / "c_600GHz.dataset.json").write_text("{}\n"), "c_600GHz_Ephi=0/, c_600GHz_Ephi=1/"),
+], ids=["orphan-ephi1", "orphan-ephi0", "orphan-sidecar"])
+def test_validator_fails_an_incomplete_dataset(tmp_path, repo_root, orphan, missing):
+    base = tmp_path / "wg"
+    tiny_dataset(str(base))
+    orphan(base)
+    rc, rows, tail = run_validator(repo_root, base)
+    assert rc == 1 and rows == [f"  PASS {base}/c_500GHz",
+                                f"  FAIL {base}/c_600GHz: ValueError: incomplete dataset: missing {missing}"]
+    assert tail == ["2 dataset(s) checked, 1 failing", "RESULT: FAIL"]
+
+
+def test_validator_fails_a_missing_sidecar(tmp_path, repo_root):
+    base = tmp_path / "wg"
+    tiny_dataset(str(base))
+    write_tiny(str(base), label="600GHz")
+    rc, rows, _ = run_validator(repo_root, base)
+    assert rc == 1 and rows[1] == f"  FAIL {base}/c_600GHz: ValueError: incomplete dataset: missing c_600GHz.dataset.json"
+
+
+def test_validator_cross_frequency_disagreement_names_the_block(tmp_path, repo_root):
+    base = tmp_path / "wg"
+    tiny_dataset(str(base))
+    tiny_dataset(str(base), label="600GHz", edit=lambda s: s["boundaries"].update(walls="finite-conductivity"))
+    rc, rows, tail = run_validator(repo_root, base)
+    assert rc == 1 and rows == [
+        f"  PASS {base}/c_500GHz",
+        f"  FAIL {base}/c_600GHz: disagrees with c_500GHz on the frequency-independent block(s) boundaries"]
+    assert tail == ["2 dataset(s) checked, 1 failing", "RESULT: FAIL"]
+
+
+def test_validator_empty_or_missing_directory_argument(tmp_path, repo_root):
+    good, empty, absent = tmp_path / "wg", tmp_path / "empty", tmp_path / "absent"
+    tiny_dataset(str(good))
+    empty.mkdir()
+    rc, rows, tail = run_validator(repo_root, good, empty, absent)
+    assert rc == 1 and rows[:2] == [f"  PASS {good}/c_500GHz", f"  FAIL {empty}: no dataset found"]
+    assert rows[2].startswith(f"  FAIL {absent}: cannot list the directory (FileNotFoundError: ") and len(rows) == 3
+    assert tail == ["1 dataset(s) checked, 0 failing; 2 directory argument(s) failing", "RESULT: FAIL"]
+
+
+def test_validator_malformed_stem_and_bad_sidecar_do_not_hide_the_rest(tmp_path, repo_root):
+    base = tmp_path / "wg"
+    for part in ("a_Ephi=0", "a_Ephi=1"):
+        (base / part).mkdir(parents=True)
+    (base / "a.dataset.json").write_text("{}\n")
+    stem = tiny_dataset(str(base), dataset_id="b")
+    (base / f"{stem}.dataset.json").write_text("[1, 2\n")        # not JSON
+    tiny_dataset(str(base))
+    rc, rows, tail = run_validator(repo_root, base)
+    assert rc == 1 and rows[0] == f"  FAIL {base}/a: ValueError: stem 'a' is not <id>_<freq>GHz"
+    assert rows[1].startswith(f"  FAIL {base}/b_500GHz: ValueError: BBR024: ") and "not valid JSON" in rows[1]
+    assert rows[2] == f"  PASS {base}/c_500GHz" and len(rows) == 3
+    assert tail == ["3 dataset(s) checked, 2 failing", "RESULT: FAIL"]
+
+
+def test_validator_fails_a_tampered_checksum(tmp_path, repo_root):
+    base = tmp_path / "wg"
+    stem = tiny_dataset(str(base))
+    with open(base / f"{stem}_Ephi=0" / "waveguide.csv", "a") as fh:
+        fh.write("\n")
+    rc, rows, tail = run_validator(repo_root, base)
+    assert rc == 1 and rows[0].startswith(f"  FAIL {base}/c_500GHz: ValueError: BBR024: ") and "sha256" in rows[0]
+    assert tail[-1] == "RESULT: FAIL"

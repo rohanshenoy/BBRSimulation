@@ -9,7 +9,7 @@ script use. The schema (agreed with Blackbody-Simulations on 2026-10-05) is desc
 in validation/README.md, Dataset sidecars. Errors are ValueError whose message
 starts with the C++ code. invariant() and same_invariant() hold what every
 frequency of one ID must share: physics only, numbers to 1e-9 relative, over the
-fields both sidecars carry.
+fields both sidecars carry; invariant_diff() names the blocks that differ.
 
 Frames: canonical (p, l, g) = (propagation, long, gap), p x l = g, equal to the
 Geant4 crack-local (x, y, z). The sampler implements one frame: the HFSS global
@@ -366,6 +366,13 @@ def _close(x, y):
 def same_invariant(a, b):
     """True when two sidecars of one dataset carry the same frequency-independent physics."""
     return _close(invariant(a), invariant(b))
+
+
+def invariant_diff(a, b):
+    """The top-level invariant() blocks on which two sidecars differ, in invariant() order;
+    empty exactly when same_invariant(a, b) holds."""
+    ia, ib = invariant(a), invariant(b)
+    return [k for k in ia if not _close(ia[k], ib[k])]
 
 
 # --- checks --------------------------------------------------------------------
