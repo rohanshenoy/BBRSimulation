@@ -11,12 +11,14 @@ Conventions (standard crack geometry; crack-local axes = world axes):
     normal_hat = +x   exit-face normal / propagation direction
     theta_hat  = +y   long dimension of the gap
     phi_hat    = +z   gap (short) dimension
-HFSS incoming frame: z_i = normal_hat, x_i = phi_hat, y_i = -theta_hat.
+HFSS global frame in these axes: X = -phi_hat, Y = +theta_hat, Z = +normal_hat.
+HFSS incidence angles are the spherical angles of the arrival direction r = -k:
     IWaveTheta = acos(-k . normal)                (180 deg = normal incidence)
     IWavePhi   = atan2(-k . theta_hat, k . phi_hat), folded into [0, 90] deg
                  by mirroring theta_hat (sign sy) and phi_hat (sign sx).
-Outgoing frame (far_field.csv Theta, Phi), with theta_f = sy*theta_hat and
-phi_f = sx*phi_hat:
+The exit coordinate system (x_e, y_e, z_e) = (Z, Y, -X) equals (normal,
+theta_hat, phi_hat), so far_field.csv (Theta, Phi) and waveguide.csv (Y, Z) need
+no transform. With theta_f = sy*theta_hat and phi_f = sx*phi_hat:
     dir_out = sinT cosP normal + sinT sinP theta_f + cosT phi_f
 
 Every formula here has a named counterpart in library/src/BBSimOpBoundaryProcess.cc
