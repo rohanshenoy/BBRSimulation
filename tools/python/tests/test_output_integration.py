@@ -100,3 +100,12 @@ def test_multirun_metadata_captures_configuration_and_json_escaping(binaries, tm
     # The crack records are read once per process; a later run must carry the same ones.
     assert len(first["data"]["hfss_datasets"]) == 2
     assert second["data"]["hfss_datasets"] == first["data"]["hfss_datasets"]
+
+
+def test_round_gap_switch_is_refused_after_initialize(binaries, tmp_path):
+    # The round gap changes the geometry, which is built at /run/initialize: the
+    # switch is PreInit only, and a batch run fails on the refused command.
+    result = run_macro(binaries[0], tmp_path, "/run/initialize\n/bbr/testworld/roundGap true\n")
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "Illegal application state </bbr/testworld/roundGap true>" in output

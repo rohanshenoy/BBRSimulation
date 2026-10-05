@@ -77,13 +77,14 @@ G4VPhysicalVolume* TestWorldDetectorConstruction::Construct()
   // Radius 51 um = HFSS 50 um + 1 um, so the exit grid's rim points lie strictly
   // inside (the recorded deviation, like the 52/102 um slab gaps).
   if (fRoundGap) {
-    const G4double length = 0.4 * mm, radius = 0.051 * mm;
-    auto* plate = new G4Box("solid-RoundGapPlate", 0.5 * length, 5. * mm, 5. * mm);
+    const G4double length = kRoundGapLength, halfWidth = kRoundGapPlateHalfWidth;
+    auto* plate = new G4Box("solid-RoundGapPlate", 0.5 * length, halfWidth, halfWidth);
     auto* plateLV = new G4LogicalVolume(plate, cuMat, "logic-RoundGapPlate");
-    new G4PVPlacement(nullptr, G4ThreeVector(0.5 * length, 0., -80. * mm),
+    new G4PVPlacement(nullptr, G4ThreeVector(0.5 * length, 0., kRoundGapPlateZ),
                       plateLV, "RoundGapPlate", worldLogical, false, 0, true);
     const G4String kId = "RoundGap_r50um";
-    auto* tube = new G4Tubs("solid-" + kId + "-tube", 0., radius, 0.5 * length, 0., CLHEP::twopi);
+    auto* tube = new G4Tubs("solid-" + kId + "-tube", 0., kRoundGapRadius, 0.5 * length, 0.,
+                            CLHEP::twopi);
     G4RotationMatrix ry;
     ry.rotateY(90. * deg);
     auto* gap = new G4DisplacedSolid(kId, tube, G4Transform3D(ry, G4ThreeVector()));
