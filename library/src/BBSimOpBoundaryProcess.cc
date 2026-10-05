@@ -22,6 +22,12 @@ BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
   : G4WrapperProcess(name)
 {}
 
+void BBSimOpBoundaryProcess::BuildPhysicsTable(const G4ParticleDefinition& particle)
+{
+  G4WrapperProcess::BuildPhysicsTable(particle);
+  BBRCrackLibrary::Instance().ValidatePlacedCracks();
+}
+
 // PostStepDoIt — intercept steps that ENTER a vacuum_wg crack volume (HFSS
 // diffraction) or a material carrying a REFLECTIVITY table (tabulated
 // reflectance); fall through to the stock process otherwise. Geometries with

@@ -79,7 +79,8 @@ bbrsim_add_test_program(testSidecar LABEL unit
   CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only field_types f12_fits_solid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
-  CASES selection_grid5 token_verbatim discovery_errors unreadable_root concurrent_first_load)
+  CASES selection_grid5 token_verbatim discovery_errors unreadable_root concurrent_first_load
+        sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok)
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
   CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget snap_and_rotation
@@ -88,7 +89,7 @@ bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
 
 bbrsim_add_test_program(testPhysicsList LABEL regression NEEDS_ENSDF
   CASES wrapped_once_at_stock_index registered_twice_is_fatal wrong_order_is_fatal event_loop_fatal
-  ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
+        missing_sidecar_stops_before_events section_wider_than_crack_stops_before_events)
 
 # testPassthrough: stock vs wrapped boundary optics, byte for byte. The program
 # takes <mode> <nEvents> <outfile>, so it is registered by hand: four producer
@@ -147,7 +148,10 @@ target_compile_definitions(testConfig PRIVATE "BBRSIM_TEST_PREFIX=\"${CMAKE_INST
 set_tests_properties(testConfig.datadir_env testConfig.datadir_env_late PROPERTIES ENVIRONMENT_MODIFICATION "${BBRSIM_TEST_HERMETIC};BBRSIMDATA=set:/env/data")
 
 # The event-loop fatal on a worker thread aborts the process; ExpectAbort.cmake
-# checks the abort and the code. Same environment as the testPhysicsList cases.
-bbrsim_add_abort_test(testPhysicsList.event_loop_fatal_mt testPhysicsList event_loop_fatal_mt BBR011)
+# checks the abort and the code. Same environment as the testPhysicsList cases,
+# and its own working directory, where the case writes its HFSS data root.
+bbrsim_add_abort_test(testPhysicsList.event_loop_fatal_mt testPhysicsList event_loop_fatal_mt BBR001)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/work/testPhysicsList.event_loop_fatal_mt)
 set_tests_properties(testPhysicsList.event_loop_fatal_mt PROPERTIES LABELS regression
-  ENVIRONMENT "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data;G4ENSDFSTATEDATA=${Geant4_DATASET_G4ENSDFSTATE_PATH}")
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/work/testPhysicsList.event_loop_fatal_mt
+  ENVIRONMENT "G4ENSDFSTATEDATA=${Geant4_DATASET_G4ENSDFSTATE_PATH}")

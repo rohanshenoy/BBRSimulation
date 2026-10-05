@@ -2,6 +2,12 @@
 #include "HFSSFixture.hh"
 #include "BBRConfigManager.hh"
 #include "BBRCrackLibrary.hh"
+#include "BBRMaterials.hh"
+#include "G4Box.hh"
+#include "G4LogicalVolume.hh"
+#include "G4NistManager.hh"
+#include "G4PVPlacement.hh"
+#include "G4SystemOfUnits.hh"
 #include <cmath>
 #include <set>
 #include <thread>
@@ -89,6 +95,52 @@ int main(int argc, char** argv) {
       for (auto& t : ts) t.join();
       std::set<const void*> distinct(seen.begin(), seen.end());
       CHECK(distinct.size() == 3);
+    }},
+    {"sidecar_required", [] {
+      // One frequency of two lacks its sidecar: discovery stops even for a photon served by the other.
+      TempDir d; Grid(d.path(), "two", {"50", "500"});
+      std::filesystem::remove(d.path() / "waveguides" / "two_500GHz.dataset.json");
+      BBRConfigManager::SetDataDir(d.path().string());
+      ExpectG4Exception("BBR024", [] { Pick("two", 50); }, "BBRDatasetSidecar",
+                        "two_500GHz.dataset.json: cannot be opened");
+    }},
+    {"sidecar_blocks_agree", [] {
+      TempDir d; Grid(d.path(), "mix", {"50", "500"});
+      auto p = hfssfix::SidecarFrom("mix_500GHz", hfssfix::Mini500());
+      p.yHalf = 4.0e-3;   // another exit section at one frequency
+      bbrtest::WriteFile(d.path() / "waveguides" / "mix_500GHz.dataset.json", hfssfix::SidecarJson(p));
+      BBRConfigManager::SetDataDir(d.path().string());
+      ExpectG4Exception("BBR024", [] { Pick("mix", 50); }, "BBRCrackLibrary::Discover",
+                        "disagree on their frequency-independent physics");
+    }},
+    {"validate_placed_cracks", [] {
+      // Two placements of one id ("gap:1", "gap:2") with different solids: each is checked.
+      TempDir d; Grid(d.path(), "gap", {"500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
+      auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
+      new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
+      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* thin = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 5 * mm, 0.020 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      new G4PVPlacement(nullptr, {0, 0, -10 * mm}, ok, "gap:1", wlv, false, 0);
+      new G4PVPlacement(nullptr, {0, 0, 10 * mm}, thin, "gap:2", wlv, false, 0);
+      ExpectG4Exception("BBR025", [] { BBRCrackLibrary::Instance().ValidatePlacedCracks(); }, "BBRDatasetSidecar",
+                        "does not fit strictly inside crack volume gap:2");
+    }},
+    {"validate_placed_cracks_ok", [] {
+      TempDir d; Grid(d.path(), "gap", {"50", "500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
+      auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
+      new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
+      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      new G4PVPlacement(nullptr, {}, ok, "gap", wlv, false, 0);
+      BBRCrackLibrary::Instance().ValidatePlacedCracks();
+      // Once per process: the second call is a no-op, so a crack placed since is not checked.
+      auto* thin = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 5 * mm, 0.020 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      new G4PVPlacement(nullptr, {0, 0, 10 * mm}, thin, "gap:2", wlv, false, 0);
+      BBRCrackLibrary::Instance().ValidatePlacedCracks();
+      CHECK_NEAR(Pick("gap", 500), 500, 0);
     }},
   });
 }

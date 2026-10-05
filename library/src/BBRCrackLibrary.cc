@@ -3,6 +3,12 @@
 
 #include "G4AutoLock.hh"
 #include "G4Exception.hh"
+#include "G4LogicalVolume.hh"
+#include "G4Material.hh"
+#include "G4PhysicalVolumeStore.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4VPhysicalVolume.hh"
+#include "G4VSolid.hh"
 #include "G4ios.hh"
 
 #include <algorithm>
@@ -84,7 +90,7 @@ BBRCrackLibrary::FrequencySet& BBRCrackLibrary::Discover(const G4String& dataset
     const double f = std::strtod(token.c_str(), &end);
     if (token.empty() || end == nullptr || *end != '\0' || !(f > 0.)) continue;
 
-    set.entries.push_back({f, prefix + token + "GHz", nullptr});
+    set.entries.push_back({f, prefix + token + "GHz", nullptr, nullptr});
   }
 
   std::sort(set.entries.begin(), set.entries.end(),
@@ -111,6 +117,20 @@ BBRCrackLibrary::FrequencySet& BBRCrackLibrary::Discover(const G4String& dataset
        << ". Set /bbr/dataDir <root> (root contains waveguides/) or BBRSIMDATA "
        << "(currently " << (env ? env : "unset") << ").";
     G4Exception("BBRCrackLibrary::Discover", "BBR011", FatalException, ed);
+  }
+
+  // Every frequency's sidecar (fail closed), then the frequency-independent blocks must agree.
+  for (auto& e : set.entries)
+    e.sidecar = std::make_unique<BBRDatasetSidecar>(
+        BBRDatasetSidecar::Load(fWaveguidesDir, datasetId, e.dirStem, e.freq_GHz));
+  for (std::size_t i = 1; i < set.entries.size(); ++i) {
+    if (!set.entries[i].sidecar->SameInvariant(*set.entries[0].sidecar)) {
+      G4ExceptionDescription ed;
+      ed << "The sidecars of dataset " << datasetId << " disagree on their frequency-independent physics "
+         << "(frame mapping, symmetry, boundaries, geometry, modes or cross-section): "
+         << set.entries[0].sidecar->path << " and " << set.entries[i].sidecar->path << ".";
+      G4Exception("BBRCrackLibrary::Discover", "BBR024", FatalException, ed);
+    }
   }
 
   G4cout << "[BBR] HFSS dataset " << datasetId << ": " << set.entries.size()
@@ -167,8 +187,31 @@ const BBRHFSSData& BBRCrackLibrary::Lookup(const G4String& datasetId, G4double n
   }
 
   if (!E[k].data)
-    E[k].data = std::make_unique<BBRHFSSData>(fWaveguidesDir, E[k].dirStem, E[k].freq_GHz);
+    E[k].data = std::make_unique<BBRHFSSData>(fWaveguidesDir, E[k].dirStem, E[k].freq_GHz, E[k].sidecar.get());
 
   chosen_GHz = E[k].freq_GHz;
   return *E[k].data;
+}
+
+void BBRCrackLibrary::ValidatePlacedCracks()
+{
+  G4AutoLock lock(&cacheMutex);
+  if (fValidated) return;
+  fValidated = true;
+  for (const G4VPhysicalVolume* pv : *G4PhysicalVolumeStore::GetInstance()) {
+    const G4LogicalVolume* lv = pv->GetLogicalVolume();
+    const G4Material* mat = lv ? lv->GetMaterial() : nullptr;
+    if (!mat || mat->GetName() != "vacuum_wg") continue;
+    const G4String name = pv->GetName();
+    const G4String id = name.substr(0, name.find(':'));
+    FrequencySet& set = Discover(id);
+    const G4VSolid& solid = *lv->GetSolid();
+    for (const auto& e : set.entries) e.sidecar->CheckFitsSolid(solid, name);
+    G4ThreeVector lo, hi;
+    solid.BoundingLimits(lo, hi);
+    const auto& sc = *set.entries.front().sidecar;
+    G4cout << "[BBR] crack " << name << ": HFSS (p, l, g) = (" << sc.extentP_mm << ", " << sc.extentL_mm << ", "
+           << sc.extentG_mm << ") mm, Geant4 (x, y, z) = (" << (hi - lo).x() / mm << ", " << (hi - lo).y() / mm << ", "
+           << (hi - lo).z() / mm << ") mm; " << set.entries.size() << " sidecar(s) fit" << G4endl;
+  }
 }

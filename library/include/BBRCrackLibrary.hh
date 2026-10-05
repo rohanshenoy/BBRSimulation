@@ -1,6 +1,7 @@
 #ifndef BBRCrackLibrary_hh
 #define BBRCrackLibrary_hh
 
+#include "BBRDatasetSidecar.hh"
 #include "BBRHFSSData.hh"
 #include "G4String.hh"
 
@@ -18,6 +19,10 @@
 // first Lookup, and each frequency's CSVs are loaded on first selection.
 // Adding a crack still requires only placing a new vacuum_wg volume whose name
 // matches a dataset directory — no code changes.
+//
+// Discovery also loads every frequency's sidecar <id>_<freq>GHz.dataset.json
+// (F1-F11, F13; fatal BBR024 or BBR025); the frequencies must agree on the
+// frequency-independent blocks (BBR024).
 //
 // The cache is shared mutable state with synchronized lazy initialization, not
 // an immutable singleton: discovery, selection, loading and the one-time clamp
@@ -38,13 +43,21 @@ class BBRCrackLibrary
   const BBRHFSSData& Lookup(const G4String& datasetId, G4double nu_GHz,
                             G4double& chosen_GHz);
 
+  // Validates every vacuum_wg volume of the geometry before the first event:
+  // discovers its dataset (sidecars included) and checks that each sidecar's
+  // exit cross-section fits strictly inside the volume's solid (F12, fatal
+  // BBR025). Prints each crack's HFSS and Geant4 extents (F11). Called once per
+  // process by BBSimOpBoundaryProcess::BuildPhysicsTable; later calls return.
+  void ValidatePlacedCracks();
+
  private:
   BBRCrackLibrary() = default;
 
   struct FrequencyEntry {
-    G4double freq_GHz;                  // parsed from dirStem
-    std::string dirStem;                // "<id>_<token>GHz", token kept verbatim
-    std::unique_ptr<BBRHFSSData> data;  // loaded on first selection
+    G4double freq_GHz;                              // parsed from dirStem
+    std::string dirStem;                            // "<id>_<token>GHz", token kept verbatim
+    std::unique_ptr<BBRDatasetSidecar> sidecar;     // parsed at discovery (F1-F11, F13)
+    std::unique_ptr<BBRHFSSData> data;              // loaded on first selection
   };
 
   struct FrequencySet {
@@ -58,6 +71,7 @@ class BBRCrackLibrary
 
   G4String fWaveguidesDir;                  // <data root>/waveguides, resolved once
   std::map<G4String, FrequencySet> fSets;
+  G4bool fValidated = false;                // ValidatePlacedCracks ran
 };
 
 #endif

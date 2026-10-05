@@ -24,6 +24,13 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4VParticleChange* PostStepDoIt(const G4Track& aTrack,
                                   const G4Step& aStep) override;
 
+  // Forwards to the wrapped process, then runs
+  // BBRCrackLibrary::ValidatePlacedCracks() (once per process), so a missing or
+  // wrong HFSS dataset, or a crack too small for its exit grid, stops the run at
+  // the first /run/beamOn, before any event. A geometry without vacuum_wg
+  // volumes sees nothing new.
+  void BuildPhysicsTable(const G4ParticleDefinition& particle) override;
+
   // What the wrapper itself did on the last PostStepDoIt invocation.
   // kBBRNone means the step was passed through to the stock process, whose
   // own GetStatus() is then the authoritative status.
