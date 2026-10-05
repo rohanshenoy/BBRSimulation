@@ -386,3 +386,53 @@ def test_check_csvs_malformed_row(tmp_path, transform, match):
     rewrite(base, stem, 1, "far_field.csv", transform)
     with pytest.raises(ValueError, match=f"^BBR013: .*Ephi=1.*far_field.csv: .*{match}"):
         sidecar.check_csvs(base, stem, sc)
+
+
+LEGACY = ["InfParallelPlate_crack1Rohan_500GHz", "InfParallelPlate_crack2_500GHz"]
+
+
+@pytest.mark.parametrize("stem", LEGACY)
+def test_legacy_sidecar_passes_full_check(data_root, stem):
+    base = os.path.join(data_root, "waveguides")
+    sc = sidecar.check_full(base, stem.rsplit("_", 1)[0], stem, 500.0)
+    assert sc["modes"]["mode"] == "TE10" and sc["modes"]["propagating_count"] == 33
+    assert sc["frames"]["pose_rule"] == "legacy" and sc["provenance"]["inferred"] == ["boundaries.walls"]
+
+
+# The HFSS writer's frequency-independent values for the two cracks (Blackbody-Simulations run_job on the
+# crack base geometries, 2026-10-05). A frequency from that writer must agree with the legacy 500 GHz
+# sidecar (same_invariant), or a tree that mixes them is refused (BBR024).
+HFSS_WRITER = {
+    "InfParallelPlate_crack1Rohan": dict(extent={"g": 0.05, "l": 10.0, "p": 1.0}, z_half=2.5e-05,
+                                         filter=2997.92458, onsets=7, count=13970),
+    "InfParallelPlate_crack2": dict(extent={"g": 0.1, "l": 10.0, "p": 1.5}, z_half=5e-05,
+                                    filter=1498.96229, onsets=14, count=28061),
+}
+
+
+@pytest.mark.parametrize("stem", LEGACY)
+def test_legacy_invariant_matches_hfss_writer(data_root, stem):
+    w = HFSS_WRITER[stem.rsplit("_", 1)[0]]
+    legacy = sidecar.load(os.path.join(data_root, "waveguides"), stem)
+    onsets = [{"n": 0, "mode": "TE10", "cutoff_ghz": 14.9896229}] + [
+        {"n": k, "mode": sidecar.mode_label("TE", 0, k), "cutoff_ghz": k * w["filter"]} for k in range(1, w["onsets"])]
+    writer = {
+        "frames": {"hfss_global_axes_in_canonical": {"x": [0.0, 0.0, -1.0], "y": [0.0, 1.0, 0.0], "z": [1.0, 0.0, 0.0]},
+                   "exit_cs_axes_in_canonical": {"x": [1.0, 0.0, 0.0], "y": [0.0, 1.0, 0.0], "z": [0.0, 0.0, 1.0]}},
+        "symmetry": {"end_to_end": True, "mirror_g": True, "mirror_l": True, "rotational": False},
+        "boundaries": {"entrance": "radiation", "exit": "radiation", "walls": "PEC"},
+        "geometry": {"shape": "box", "extent_mm": w["extent"]},
+        "exit_field": {"cross_section": {"shape": "rectangle", "y_e_half_m": 0.005, "z_e_half_m": w["z_half"]}},
+        "modes": {"mode": "TE10", "cutoff_ghz": 14.9896229, "list_limit_ghz": 20000.0,
+                  "polarization_filter_limit_ghz": w["filter"], "gap_family_onsets": onsets,
+                  "mode_count_below_limit": w["count"], "propagating_count": 33, "basis": "the HFSS writer's wording"},
+    }
+    assert sidecar.same_invariant(legacy, writer)
+    assert legacy["frames"]["canonical"] == "p,l,g; p x l = g; Geant4 crack-local (x,y,z) = (p,l,g)"
+
+
+def test_legacy_sidecars_validator(repo_root, data_root):
+    import subprocess, sys
+    r = subprocess.run([sys.executable, str(repo_root / "validation/check_dataset_sidecars.py"),
+                        os.path.join(data_root, "waveguides")], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip().endswith("RESULT: PASS"), r.stdout + r.stderr

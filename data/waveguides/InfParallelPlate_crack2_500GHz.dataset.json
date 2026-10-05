@@ -1,0 +1,353 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "InfParallelPlate_crack2",
+  "frequency_ghz": 500.0,
+  "frequency_label": "500GHz",
+  "provenance": {
+    "producer": "legacy bbsim1freq.py",
+    "hand_written": true,
+    "written_by": "validation/Scripts/write_legacy_sidecars.py",
+    "git_commit": null,
+    "created_utc": null,
+    "job_id": null,
+    "manifest_sha256": null,
+    "aedt_version": "2023 R2",
+    "pyaedt_version": null,
+    "project": "InfParallelPlate.aedt",
+    "project_sha256": "a264705100ab80ff2a3b2315b0529a8505c2903b996c98cd0d65d7144097482f",
+    "material": null,
+    "model_units": "mm",
+    "inferred": [
+      "boundaries.walls"
+    ],
+    "design": "crack2",
+    "run_design": "crack2_500GHz",
+    "object": "crack2",
+    "renamed_to": {
+      "design": "parallel_plate_gap_100um",
+      "object": "gap"
+    }
+  },
+  "frames": {
+    "canonical": "p,l,g; p x l = g; Geant4 crack-local (x,y,z) = (p,l,g)",
+    "pose_rule": "legacy",
+    "hfss_global_axes_in_canonical": {
+      "x": [
+        0,
+        0,
+        -1
+      ],
+      "y": [
+        0,
+        1,
+        0
+      ],
+      "z": [
+        1,
+        0,
+        0
+      ]
+    },
+    "entrance_face": {
+      "axis": "z",
+      "side": "min"
+    },
+    "exit_face": {
+      "axis": "z",
+      "side": "max"
+    },
+    "entrance_outward_normal_global": [
+      0,
+      0,
+      -1
+    ],
+    "exit_outward_normal_global": [
+      0,
+      0,
+      1
+    ],
+    "exit_cs": {
+      "name": "outgoing_cs",
+      "origin": "exit_face_center",
+      "origin_mm_global": [
+        0.05,
+        0.0,
+        1.5
+      ],
+      "x": [
+        0,
+        0,
+        1
+      ],
+      "y": [
+        0,
+        1,
+        0
+      ],
+      "z": [
+        -1,
+        0,
+        0
+      ]
+    },
+    "exit_cs_axes_in_canonical": {
+      "x": [
+        1,
+        0,
+        0
+      ],
+      "y": [
+        0,
+        1,
+        0
+      ],
+      "z": [
+        0,
+        0,
+        1
+      ]
+    }
+  },
+  "excitation": {
+    "coordinate_system": "global",
+    "incidence_convention": "arrival_direction",
+    "normal_entry_theta_deg": 180.0,
+    "incident_phi_deg": [
+      0.0,
+      45.0,
+      90.0
+    ],
+    "incident_theta_deg": [
+      0.0,
+      45.0,
+      90.0,
+      135.0,
+      180.0
+    ],
+    "ei_v_per_m": 1.0,
+    "incoming_power_w": 1.327209364894271e-09,
+    "polarization_convention": "Ephi=0: E_theta=1; Ephi=1: E_phi=1",
+    "plane_wave_origin": "entrance_face_center",
+    "origin_mm_global": [
+      0.05,
+      0.0,
+      0.0
+    ]
+  },
+  "far_field": {
+    "coordinate_system": "exit_cs",
+    "definition": "Theta-Phi",
+    "component_basis": "spherical_in_exit_cs",
+    "radiation_surface": "exit_face",
+    "theta_deg": {
+      "min": 0.0,
+      "max": 180.0,
+      "count": 37,
+      "step": 5.0
+    },
+    "phi_deg": {
+      "min": -90.0,
+      "max": 89.66977331622667,
+      "count": 524,
+      "step": 0.3435368514650605
+    },
+    "points_per_key": 19388,
+    "columns": [
+      "Freq",
+      "Ephi",
+      "IWavePhi",
+      "IWaveTheta",
+      "Phi",
+      "Theta",
+      "rEphi_real",
+      "rEphi_imag",
+      "rEtheta_real",
+      "rEtheta_imag"
+    ]
+  },
+  "exit_field": {
+    "coordinate_system": "exit_cs",
+    "points_in_si": true,
+    "field_in_ref_cs": false,
+    "field_components_frame": "hfss_global",
+    "plane": "x_e=0",
+    "resolution_mm": [
+      0.0,
+      0.1,
+      0.001
+    ],
+    "grid": {
+      "y_e": {
+        "min": -0.005,
+        "max": 0.005,
+        "count": 101
+      },
+      "z_e": {
+        "min": -5e-05,
+        "max": 4.999999999999999e-05,
+        "count": 101
+      }
+    },
+    "cross_section": {
+      "shape": "rectangle",
+      "y_e_half_m": 0.005,
+      "z_e_half_m": 5e-05
+    },
+    "outside_points": "none",
+    "bounds_method": "vertices",
+    "rim_points": "included",
+    "points_per_key_retained": 10201,
+    "columns": [
+      "Freq",
+      "Ephi",
+      "IWavePhi",
+      "IWaveTheta",
+      "OutgoingPower",
+      "IngoingPower",
+      "X",
+      "Y",
+      "Z",
+      "Ex_real",
+      "Ey_real",
+      "Ez_real",
+      "Ex_imag",
+      "Ey_imag",
+      "Ez_imag"
+    ]
+  },
+  "transmittance": {
+    "definition": "outgoing_power_w / incoming_power_w, first row per key",
+    "outgoing_power": "integral |Re S| over exit face",
+    "incoming_includes_cos_theta": false
+  },
+  "symmetry": {
+    "mirror_l": true,
+    "mirror_g": true,
+    "end_to_end": true,
+    "rotational": false
+  },
+  "boundaries": {
+    "entrance": "radiation",
+    "exit": "radiation",
+    "walls": "PEC"
+  },
+  "geometry": {
+    "shape": "box",
+    "extent_mm": {
+      "p": 1.5,
+      "l": 10.0,
+      "g": 0.1
+    },
+    "bounding_box_mm": [
+      0.0,
+      -5.0,
+      0.0,
+      0.1,
+      5.0,
+      1.5
+    ]
+  },
+  "modes": {
+    "cutoff_ghz": 14.9896229,
+    "mode": "TE10",
+    "list_limit_ghz": 20000.0,
+    "polarization_filter_limit_ghz": 1498.96229,
+    "gap_family_onsets": [
+      {
+        "n": 0,
+        "mode": "TE10",
+        "cutoff_ghz": 14.9896229
+      },
+      {
+        "n": 1,
+        "mode": "TE01",
+        "cutoff_ghz": 1498.96229
+      },
+      {
+        "n": 2,
+        "mode": "TE02",
+        "cutoff_ghz": 2997.92458
+      },
+      {
+        "n": 3,
+        "mode": "TE03",
+        "cutoff_ghz": 4496.88687
+      },
+      {
+        "n": 4,
+        "mode": "TE04",
+        "cutoff_ghz": 5995.84916
+      },
+      {
+        "n": 5,
+        "mode": "TE05",
+        "cutoff_ghz": 7494.81145
+      },
+      {
+        "n": 6,
+        "mode": "TE06",
+        "cutoff_ghz": 8993.77374
+      },
+      {
+        "n": 7,
+        "mode": "TE07",
+        "cutoff_ghz": 10492.73603
+      },
+      {
+        "n": 8,
+        "mode": "TE08",
+        "cutoff_ghz": 11991.69832
+      },
+      {
+        "n": 9,
+        "mode": "TE09",
+        "cutoff_ghz": 13490.66061
+      },
+      {
+        "n": 10,
+        "mode": "TE0,10",
+        "cutoff_ghz": 14989.6229
+      },
+      {
+        "n": 11,
+        "mode": "TE0,11",
+        "cutoff_ghz": 16488.58519
+      },
+      {
+        "n": 12,
+        "mode": "TE0,12",
+        "cutoff_ghz": 17987.54748
+      },
+      {
+        "n": 13,
+        "mode": "TE0,13",
+        "cutoff_ghz": 19486.50977
+      }
+    ],
+    "mode_count_below_limit": 28061,
+    "propagating_count": 33,
+    "basis": "closed ideal-PEC rectangular guide, a = 0.01 m along l, b = 0.0001 m along g; f_mn = (c/2) sqrt((m/a)^2 + (n/b)^2); no TEM mode"
+  },
+  "files": {
+    "InfParallelPlate_crack2_500GHz_Ephi=0/far_field.csv": {
+      "sha256": "bee4fe0f50272a37f43a488717f9404c54f3f784526eb083bc2350b4de42537f",
+      "bytes": 38836177,
+      "rows": 290820
+    },
+    "InfParallelPlate_crack2_500GHz_Ephi=0/waveguide.csv": {
+      "sha256": "98389c6d24fcdb4c12bdd214cccdfb72ef99d13adac04a2709b928a1d44be362",
+      "bytes": 36115170,
+      "rows": 153015
+    },
+    "InfParallelPlate_crack2_500GHz_Ephi=1/far_field.csv": {
+      "sha256": "212b3da02dd9f4885e75e9239ecae568c7a46f38a812fcf5fd9f05ecd4cb51e5",
+      "bytes": 38836394,
+      "rows": 290820
+    },
+    "InfParallelPlate_crack2_500GHz_Ephi=1/waveguide.csv": {
+      "sha256": "1e704751ba465cd7fafd8ead45af5c8087de760911b921fa8ebbfbd1a2fb54cd",
+      "bytes": 36141480,
+      "rows": 153015
+    }
+  }
+}

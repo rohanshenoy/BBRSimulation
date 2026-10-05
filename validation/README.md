@@ -236,11 +236,21 @@ agreement across frequencies): `provenance`, `boundaries`, `geometry.shape`,
 are copied into `<stem>.metadata.json`. The `files` checksums are verified by
 the runner's `check_dataset_sidecars.py`; BBRsim itself does not verify them.
 
-**Tools.** `validation/check_dataset_sidecars.py` re-derives the full mode
-lists (scipy) and the CSV checksums. `bbrsim.sidecar` (`tools/python`) is the
-Python twin of the C++ checks and holds the builders the mock generators use.
+**Tools.** `validation/check_dataset_sidecars.py <waveguides-dir> [...]`
+(default: `waveguides/` under the data root of `bbrsim.paths.data_dir()`)
+checks every `<id>_<freq>GHz_Ephi=0` dataset in the given directories with
+`bbrsim.sidecar.check_full`: F1-F11 and F13, the full mode lists re-derived
+with scipy, the sha256, size and row count of the four CSVs, and C1-C5 on both
+polarizations. It also checks that the frequencies of one ID agree on the
+frequency-independent blocks. It prints one `PASS` or `FAIL` line per dataset,
+then `RESULT: PASS` or `RESULT: FAIL`, and exits 0 or 1 (FAIL when no dataset
+is found). `bbrsim.sidecar` (`tools/python`) is the Python twin of the C++
+checks and holds the builders the mock generators use.
 `validation/Scripts/write_legacy_sidecars.py` wrote the sidecars of the two
-500 GHz datasets.
+500 GHz datasets in `data/waveguides/` from their CSVs and the Blackbody-Simulations
+reference configs; only `boundaries.walls` (PEC) is inferred, as
+`provenance.inferred` records. It refuses to write when a CSV differs from the
+checksums it records.
 
 ## Mock HFSS tree
 
