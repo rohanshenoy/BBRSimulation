@@ -352,7 +352,12 @@ for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_
     line PASS "run:$d" "exit 0, no GeomNav/G4Exception/BBR0xx/LP002${tol:+ (except $tol)}"; pass=$((pass+1))
   else
     line FAIL "run:$d" "exit $code, flagged log lines: $nbad"; fail=$((fail+1))
-    grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | head -3
+    # Show the first offenders, not the tolerated codes, which may fill the head.
+    if [ -n "$tol" ]; then
+      grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | grep -v -E "$tol" | head -3
+    else
+      grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | head -3
+    fi
   fi
 done
 # The clamp warning must fire exactly once per side for crack1 (runs 13 and 14
@@ -365,9 +370,15 @@ for side in low high; do
 done
 # BBR026 may fire in the Planck cases, at most once per dataset and direction.
 # Counted per case: each case is its own process with its own one-shot flags.
+# Fails closed: every BBR026 banner (the line scan_log subtracts) must have a
+# parsed description line, so a changed message format cannot pass unseen.
 c26=""
 for d in planck config_mt transmit frequency; do
-  c=$(grep -oE "BBR026 dataset=[A-Za-z0-9_]+ direction=(below|above)" "$REG/$d/run.log" | sort | uniq -c | awk '$1 > 1')
+  [ -f "$REG/$d/run.log" ] || { c26="$c26 [$d] no run.log;"; continue; }
+  n_ban=$(grep -c "G4Exception : BBR026" "$REG/$d/run.log" || true)
+  n_desc=$(grep -cE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) " "$REG/$d/run.log" || true)
+  [ "$n_ban" -ne "$n_desc" ] && c26="$c26 [$d] $n_ban BBR026 banners, $n_desc parsed descriptions;"
+  c=$(grep -oE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) " "$REG/$d/run.log" | sort | uniq -c | awk '$1 > 1')
   [ -n "$c" ] && c26="$c26 [$d] $c"
 done
 if [ -z "$c26" ]; then line PASS "cutoff warning once" "BBR026 at most once per dataset and direction per case"; pass=$((pass+1))

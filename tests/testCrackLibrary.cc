@@ -59,6 +59,12 @@ int main(int argc, char** argv) {
       CHECK_NEAR(Pick("lin", 200), 100, 0);
       CHECK_NEAR(Pick("one", 1), 500, 0); CHECK_NEAR(Pick("one", 1e7), 500, 0);
       CHECK(Handler().CountWarnings("BBR008") == 2);   // a one-point grid never warns
+      // The fixture's TE10 cutoff is 16.66 GHz. A photon clamped across it on a
+      // multi-point grid raises both BBR008 and BBR026 (g5's low clamps to 50 GHz:
+      // BBR008 at 20 GHz, BBR026 at 10 GHz, the one below the cutoff), and a
+      // one-point grid raises BBR026 though it never clamps (one at 1 GHz, served
+      // by 500 GHz). One per dataset and direction: 2.
+      CHECK(Handler().CountWarnings("BBR026") == 2);
     }},
     {"token_verbatim", [] {
       TempDir d; Grid(d.path(), "sci", {"1.5e3"});
