@@ -134,3 +134,77 @@ def test_mock_round_gap(repo_root, tmp_path, data_root):
     assert os.path.isfile(sidecar.path_for(base, "InfParallelPlate_crack2_500GHz"))
     r = run(gen, "--real", real, "--dst", os.path.join(data_root, "rg"), cwd=tmp_path)
     assert r.returncode == 2 and "refusing" in r.stdout
+    assert not os.path.exists(os.path.join(data_root, "rg"))      # data/ is never written
+
+
+def test_mock_round_gap_fixture_table(repo_root, tmp_path, data_root):
+    # The values Tasks 9 and 10 read: T0/T1 per IWaveTheta row and the far-field lobe.
+    gen = repo_root / "validation/Scripts/make_mock_round_gap.py"
+    r = run(gen, "--real", os.path.join(data_root, "waveguides"), "--dst", tmp_path / "rg", cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    ds = hfss.load_dataset("RoundGap_r50um_2000GHz", str(tmp_path / "rg" / "waveguides"))
+    table = {180.0: (0.8, 0.6), 135.0: (0.5, 0.3), 90.0: (0.1, 0.05), 45.0: (0.0, 0.0), 0.0: (0.0, 0.0)}
+    assert sorted(ds) == sorted((p, t) for p in (0.0, 45.0, 90.0) for t in table)
+    for (phi, theta), d in ds.items():
+        t0, t1 = table[theta]
+        assert d.T0 == pytest.approx(t0, abs=1e-12) and d.T1 == pytest.approx(t1, abs=1e-12), (phi, theta)
+        for pol in ((1.0, 0.0), (0.0, 1.0)):
+            w = hfss.direction_weights(d, *pol)
+            i = int(np.argmax(w))
+            lobe = (90.0, -30.0) if theta == 135.0 else (90.0, 0.0)
+            assert (d.theta_deg[i], d.phi_deg[i]) == lobe, ((phi, theta), pol)
+
+
+def test_mock_round_gap_radius(repo_root, tmp_path, data_root):
+    # --radius drives the lattice: a multiple of 2 um gives a valid tree with rim points,
+    # anything else exits 2 and writes nothing.
+    gen = repo_root / "validation/Scripts/make_mock_round_gap.py"
+    real = os.path.join(data_root, "waveguides")
+    for bad in ("5.1e-5", "0", "-5e-5", "nan"):
+        dst = tmp_path / f"bad{bad}"
+        r = run(gen, "--real", real, "--dst", dst, f"--radius={bad}", cwd=tmp_path)
+        assert r.returncode == 2 and "multiple of" in r.stdout, (bad, r.stdout + r.stderr)
+        assert not dst.exists()
+    r = run(gen, "--real", real, "--dst", tmp_path / "rg", "--radius", "3e-5", cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    base = str(tmp_path / "rg" / "waveguides")
+    sc = sidecar.check_full(base, "RoundGap_r50um", "RoundGap_r50um_2000GHz", 2000.0)
+    assert sc["exit_field"]["cross_section"] == {"shape": "disc", "radius_m": 3e-5}
+    import pandas as pd
+    wg = pd.read_csv(os.path.join(base, "RoundGap_r50um_2000GHz_Ephi=0", "waveguide.csv"))
+    r_exit = np.hypot(wg.Y, wg.Z)
+    assert (r_exit <= 3e-5 * (1 + 1e-12)).all()
+    rim = np.isclose(r_exit, 3e-5, rtol=1e-12, atol=0.0)
+    per_key = wg.assign(rim=rim).groupby(["IWavePhi", "IWaveTheta"])
+    assert (per_key.rim.sum() == 12).all()                        # (+-30, 0), (0, +-30), (+-18, +-24), (+-24, +-18) um
+    assert (per_key.size() == sc["exit_field"]["points_per_key_retained"]).all()
+    assert sc["exit_field"]["rim_points"] == "included"
+
+
+def test_mock_round_gap_real_without_sidecars(repo_root, tmp_path, data_root):
+    # --real naming the data root instead of its waveguides/ holds no sidecar: rc 2, nothing written.
+    gen = repo_root / "validation/Scripts/make_mock_round_gap.py"
+    dst = tmp_path / "rg"
+    r = run(gen, "--real", data_root, "--dst", dst, cwd=tmp_path)
+    assert r.returncode == 2 and "no *.dataset.json" in r.stdout, r.stdout + r.stderr
+    assert not dst.exists()
+
+
+def test_mock_round_gap_relinks(repo_root, tmp_path, data_root):
+    # A re-run with another --real repoints the crack links instead of keeping the old ones.
+    gen = repo_root / "validation/Scripts/make_mock_round_gap.py"
+    real = os.path.realpath(os.path.join(data_root, "waveguides"))
+    other = tmp_path / "other" / "waveguides"
+    other.mkdir(parents=True)
+    for name in os.listdir(real):
+        if name.endswith(".dataset.json"):
+            (other / name).write_bytes(open(os.path.join(real, name), "rb").read())
+        elif name.startswith("InfParallelPlate_"):
+            os.symlink(os.path.join(real, name), other / name)
+    dst = tmp_path / "rg"
+    assert run(gen, "--real", real, "--dst", dst, cwd=tmp_path).returncode == 0
+    link = dst / "waveguides" / "InfParallelPlate_crack2_500GHz_Ephi=1"
+    assert os.readlink(link) == os.path.join(real, link.name)
+    r = run(gen, "--real", other, "--dst", dst, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.readlink(link) == os.path.join(os.path.realpath(other), link.name)

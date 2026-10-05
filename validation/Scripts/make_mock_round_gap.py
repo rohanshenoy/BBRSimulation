@@ -14,12 +14,14 @@ The tables are synthetic, chosen so the validator can see each mapping:
   * polarization-specific radial exit profiles, Ephi=0 E = (1 - (r/R)^2, 0, 0) and
     Ephi=1 E = (0.3 (1 - (r/R)^2) at IWavePhi = 45 else 0, (r/R)^2, 0), so rho != 0
     at the diagonal keys and the cross term is active there;
-  * a 2 um exit lattice (1961 points per key) that keeps the twenty lattice
+  * a 2 um exit lattice (1961 points per key at the default R) keeping the twenty lattice
     points on r = R, the solutions of a^2 + b^2 = 25^2 such as (30, 40) um
-    (rim_points included), so the Geant4 radius needs its 1 um margin;
+    (rim_points included), so the Geant4 radius needs its 1 um margin; the lattice
+    spans +-R, so --radius must be a multiple of 2 um (exit 2 otherwise);
   * a far-field Gaussian lobe (sigma 25 deg) around (Theta, Phi) = (90, Phi0), with
     Phi0 = -30 deg at IWaveTheta = 135 and 0 elsewhere.
-Refuses to write inside the data tree that holds --real.
+Refuses to write inside the data tree that holds --real, and exits 2 when --real
+holds no *.dataset.json. A re-run repoints crack links that name another --real.
 """
 import argparse
 import math
@@ -43,15 +45,25 @@ out, data_root = os.path.join(dst, "waveguides"), os.path.dirname(real)
 if dst == data_root or dst.startswith(data_root.rstrip(os.sep) + os.sep):
     print(f"refusing: --dst {dst} lies inside the real data tree {data_root}")
     sys.exit(2)
+REAL_SIDECARS = sorted(n for n in os.listdir(real) if n.endswith(".dataset.json")) if os.path.isdir(real) else []
+if not REAL_SIDECARS:
+    print(f"error: --real {real} holds no *.dataset.json; pass the real waveguides directory (data/waveguides)")
+    sys.exit(2)
 
 R, L = args.radius, args.length
+STEP = 2e-6                                                # exit lattice step [m]
+N_HALF = round(R / STEP) if math.isfinite(R) and R > 0 else 0
+if N_HALF < 1 or abs(N_HALF * STEP - R) > 1e-12 * R:
+    print(f"error: --radius {R!r} m is not a positive multiple of the {STEP!r} m exit-lattice step; "
+          "the lattice must reach r = R so the rim points exist")
+    sys.exit(2)
 MU0 = 1.25663706212e-6
 INGOING = math.pi * R * R / (2 * sidecar.C * MU0)          # Ei = 1 V/m over the entrance disc
 PHIS, THETAS = [0.0, 45.0, 90.0], [0.0, 45.0, 90.0, 135.0, 180.0]
 T = {180.0: (0.8, 0.6), 135.0: (0.5, 0.3), 90.0: (0.1, 0.05), 45.0: (0.0, 0.0), 0.0: (0.0, 0.0)}
 FF_THETA = [15.0 * i for i in range(13)]                   # 0 .. 180
 FF_PHI = [-90.0 + 15.0 * i for i in range(12)]             # -90 .. 75
-LATTICE = [round(k * 1e-6, 12) for k in range(-50, 51, 2)]
+LATTICE = [round(2 * k * 1e-6, 12) for k in range(-N_HALF, N_HALF + 1)]   # 2 um step, +-R
 EXIT = [(y, z) for y in LATTICE for z in LATTICE if y * y + z * z <= R * R * (1 + sidecar.SECTION_REL)]
 label = f"{args.freq}GHz"
 stem = f"{args.id}_{label}"
@@ -101,15 +113,19 @@ for e in (0, 1):
                     fh.write(f"{label},{e},{phi},{theta},{outp!r},{INGOING!r},0.0,{y!r},{z!r},"
                              f"{ex!r},{ey!r},0.0,0.0,0.0,0.0\n")
 
-for name in sorted(os.listdir(real)):
-    if not name.endswith(".dataset.json"):
-        continue
+for name in REAL_SIDECARS:
     real_stem = name[: -len(".dataset.json")]
     shutil.copy2(os.path.join(real, name), os.path.join(out, name))
     for e in (0, 1):
-        link = os.path.join(out, f"{real_stem}_Ephi={e}")
-        if not os.path.lexists(link):
-            os.symlink(os.path.join(real, f"{real_stem}_Ephi={e}"), link)
+        link, target = os.path.join(out, f"{real_stem}_Ephi={e}"), os.path.join(real, f"{real_stem}_Ephi={e}")
+        if os.path.islink(link):
+            if os.readlink(link) == target:
+                continue
+            os.remove(link)                                # a link from an earlier --real: repoint it
+        elif os.path.lexists(link):
+            print(f"error: {link} exists and is not a symlink; remove it or choose another --dst")
+            sys.exit(2)
+        os.symlink(target, link)
 
 sc = sidecar.build_from_csvs(
     out, args.id, label, section={"shape": "disc", "radius_m": R},

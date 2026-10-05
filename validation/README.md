@@ -8,6 +8,7 @@ check_*.py                  the 13 validators
 Scripts/run_regression.sh   build + fixtures + validators, one command
 Scripts/drift_guards.sh     source-tree consistency checks (run by the runner, or alone)
 Scripts/make_mock_hfss_frequencies.py   the mock HFSS tree for Validation_CrackFrequency
+Scripts/make_mock_round_gap.py          the mock RoundGap_r50um dataset at 2000 GHz, with links to the real crack datasets
 Scripts/consumer_smoke/     external find_package(BBRsim) + link smoke test
 Scripts/numbers.baseline    the three fixed-seed numbers that BBR_PIN=1 compares
 Scripts/tests/              make_bad_output.py (synthetic outputs for the validator negative tests),
