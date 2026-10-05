@@ -3,6 +3,8 @@
 
 #include "G4VUserDetectorConstruction.hh"
 
+class TestWorldMessenger;
+
 // Test geometry: 50 cm world, 4 mm Cu slab at x=2 mm with two vacuum_wg crack
 // daughters. The Cu wall material is built from BBRConfigManager's CuRRR /
 // CuStageT_K at Construct() time via BBRMaterials::GetCopper(RRR, T_K).
@@ -11,11 +13,17 @@
 //   /bbr/det/setCuMaterial <OFHC_Cu|OF_Cu|HP_Cu>   named alias -> RRR
 //   /bbr/det/setCuRRR <N>                           direct integer RRR (>= 1)
 //   /bbr/det/setCuStageT <T> K                      temperature stage [K]
+//   /bbr/testworld/roundGap <bool>  (TestWorldMessenger)
 class TestWorldDetectorConstruction : public G4VUserDetectorConstruction {
  public:
-  TestWorldDetectorConstruction() = default;
-  ~TestWorldDetectorConstruction() override = default;
+  TestWorldDetectorConstruction();
+  ~TestWorldDetectorConstruction() override;
   G4VPhysicalVolume* Construct() override;
+  void SetRoundGap(G4bool on) { fRoundGap = on; }
+
+ private:
+  G4bool fRoundGap = false;
+  TestWorldMessenger* fMessenger = nullptr;
 };
 
 #endif

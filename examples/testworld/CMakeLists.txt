@@ -35,6 +35,7 @@ endif()
 set(testworld_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TestWorldActionInitialization.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TestWorldDetectorConstruction.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/TestWorldMessenger.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TestWorldPrimaryGeneratorAction.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TestWorldRunAction.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TestWorldSteppingAction.cc
