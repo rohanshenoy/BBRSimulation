@@ -97,3 +97,6 @@ def test_multirun_metadata_captures_configuration_and_json_escaping(binaries, tm
     assert first["configuration"] != second["configuration"]
     assert first["data"]["directory"] == str(data)
     assert first["geometry"] and first["random_engine_state"]
+    # The crack records are read once per process; a later run must carry the same ones.
+    assert len(first["data"]["hfss_datasets"]) == 2
+    assert second["data"]["hfss_datasets"] == first["data"]["hfss_datasets"]

@@ -232,13 +232,14 @@ void BBRCrackLibrary::ValidatePlacedCracks()
     const G4Material* mat = lv ? lv->GetMaterial() : nullptr;
     if (!mat || mat->GetName() != "vacuum_wg") continue;
     const G4String name = pv->GetName();
-    FrequencySet& set = Discover(DatasetIdOf(name));
+    const G4String id = DatasetIdOf(name);
+    FrequencySet& set = Discover(id);
     const G4VSolid& solid = *lv->GetSolid();
     for (const auto& e : set.entries) e.sidecar->CheckFitsSolid(solid, name);
     G4ThreeVector lo, hi;
     solid.BoundingLimits(lo, hi);
     const G4ThreeVector extent = (hi - lo) / mm;
-    fPlaced.push_back({name, DatasetIdOf(name), {extent.x(), extent.y(), extent.z()}});
+    fPlaced.push_back({name, id, {extent.x(), extent.y(), extent.z()}});
     const auto& sc = *set.entries.front().sidecar;
     G4cout << "[BBR] crack " << name << ": HFSS (p, l, g) = (" << sc.extentP_mm << ", " << sc.extentL_mm << ", "
            << sc.extentG_mm << ") mm, Geant4 (x, y, z) = (" << extent.x() << ", " << extent.y() << ", "

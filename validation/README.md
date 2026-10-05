@@ -248,9 +248,14 @@ verbatim into `<stem>.metadata.json`, a missing one as `null`. They go in
 validated: `volume`, `dataset_id`, `geant4_extent_mm` (the placed solid's
 extent along local x, y, z), `hfss_extent_mm` (`geometry.extent_mm`) and
 `frequencies`, each with its `label`, `frequency_ghz`, `sidecar` file name and
-`recorded` fields. A geometry without cracks records `[]`. The `files`
-checksums are verified by the runner's `check_dataset_sidecars.py`; BBRsim
-itself does not verify them.
+`recorded` fields. `recorded` is one object, `{"provenance", "boundaries",
+"geometry": {"shape", "bounding_box_mm"}, "symmetry": {"rotational"},
+"frames": {"pose_rule", "exit_cs_origin_mm_global"}, "excitation":
+{"origin_mm_global"}}`, each value taken from the sidecar field of the same
+path except `frames.exit_cs_origin_mm_global`, a flattened key holding the
+sidecar's `frames.exit_cs.origin_mm_global`. A geometry without cracks records
+`[]`. The `files` checksums are verified by the runner's
+`check_dataset_sidecars.py`; BBRsim itself does not verify them.
 
 **Tools.** `validation/check_dataset_sidecars.py <waveguides-dir> [...]`
 (default: `waveguides/` under the data root of `bbrsim.paths.data_dir()`)
