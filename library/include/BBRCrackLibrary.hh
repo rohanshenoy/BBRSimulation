@@ -51,16 +51,26 @@ class BBRCrackLibrary
   // BBR026 warning per (dataset, direction). The table is used unchanged; a
   // one-point grid warns too, because one point cannot cover both sides of a
   // cutoff.
-  // Fatal BBR011 if the data directory is unreadable or holds no
-  // <id>_<freq>GHz_Ephi=0 directory for this id.
+  // Fatal, from the discovery the first call for an id runs: BBR011 if the
+  // data directory is unreadable, holds no <id>_<freq>GHz_Ephi=0 directory for
+  // this id, a legacy <id>_Ephi=0 directory or two directories with the same
+  // frequency; BBR024 if a frequency lacks its <id>_<freq>GHz.dataset.json, if
+  // a sidecar is malformed, mistyped or names another dataset or frequency, or
+  // if the frequencies of one id disagree on the frequency-independent physics;
+  // BBR025 if a sidecar declares a frame, convention, section or mode BBRsim
+  // does not implement (F1-F11 and F13, validation/README.md, Dataset
+  // sidecars); BBR001 or BBR002 if far_field.csv or waveguide.csv is missing
+  // from either Ephi directory. Fatal, from the CSV load the first selection
+  // of a frequency runs: the BBRHFSSData codes, C1-C5 included (BBRHFSSData.hh).
   const BBRHFSSData& Lookup(const G4String& datasetId, G4double nu_GHz,
                             G4double& chosen_GHz);
 
   // Validates every vacuum_wg volume of the geometry before the first event:
   // discovers its dataset (sidecars and CSV presence included) and checks that
   // each sidecar's exit cross-section fits strictly inside the volume's solid
-  // (F12, fatal BBR025). Prints each crack's HFSS and Geant4 extents (F11). Called once per
-  // process by BBSimOpBoundaryProcess::BuildPhysicsTable; later calls return.
+  // (F12, fatal BBR025). Prints each crack's HFSS and Geant4 extents (F11).
+  // Called once per process by BBSimOpBoundaryProcess::BuildPhysicsTable; later
+  // calls return.
   void ValidatePlacedCracks();
 
   // JSON array, one object per crack ValidatePlacedCracks checked, in its order:

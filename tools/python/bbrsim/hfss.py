@@ -227,7 +227,11 @@ def fold_incidence(k, normal=(1., 0., 0.), theta_hat=(0., 1., 0.), phi_hat=(0., 
 
 
 def incoming_basis(inc):
-    """(e_theta_in, e_phi_in): HFSS incoming spherical basis in world frame."""
+    """(e_theta_in, e_phi_in) of HandleDiffractionBoundary in the world frame: exactly
+    (-e_theta, -e_phi) of the HFSS spherical basis at the arrival direction r = -k, written in
+    the folded frame (X, Y, Z) = (-phi_f, theta_f, normal). The common sign cancels in T, in the
+    cross term and in |E|^2 and flips pol_out only, which is the same state; the +sin(theta)
+    term is the -e_theta component, not a sign error."""
     th, ph = np.radians(inc.theta_deg), np.radians(inc.phi_deg)
     e_theta = (np.sin(th) * inc.normal
                - np.cos(th) * np.sin(ph) * inc.theta_f
