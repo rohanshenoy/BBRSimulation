@@ -78,7 +78,9 @@ def load_dataset(dir_stem, base_dir=None):
     same row count and no key of their own (BBR012); the two CSVs must have the
     same incidence keys (BBR007; BBR000 when neither has one); a key whose largest
     transmittance over linear polarizations exceeds 1 has T0 and T1 divided by it.
-    The C++ errors are raised here as ValueError naming the code.
+    The C++ errors are raised here as ValueError naming the code. No sidecar is
+    read: the Python-side sidecar checks (F1-F13, C1-C5) are bbrsim.sidecar and
+    validation/check_dataset_sidecars.py.
     """
     dataset_id = dir_stem   # local alias: the error messages below name the stem
     base = base_dir or default_base_dir()

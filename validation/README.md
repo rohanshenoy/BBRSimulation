@@ -279,7 +279,14 @@ blocks that differ). It prints one `PASS` or `FAIL` line per dataset, after the
 agreement check, and a `FAIL` line for a directory argument that cannot be
 listed or holds no dataset; then the count and `RESULT: PASS` or
 `RESULT: FAIL`, and exits 0 or 1. `bbrsim.sidecar` (`tools/python`) is the Python twin of the C++
-checks and holds the builders the mock generators use.
+checks and holds the builders the mock generators use. The Python-side sidecar
+checks live there and in `check_dataset_sidecars.py` only: the mirror loader
+`bbrsim.hfss.load_dataset`, from which `check_round_gap.py`,
+`check_crack_oblique.py` and `check_crack_frequency.py` predict, reads the two
+CSV pairs without a sidecar (it mirrors the constructor checks `BBR009`,
+`BBR013`, `BBR012`, `BBR007`, `BBR000`, not C1-C5). Every tree the validators
+read is covered by `check_dataset_sidecars.py` in the same runner run, and
+BBRsim itself refuses to run on a tree without valid sidecars.
 `validation/Scripts/write_legacy_sidecars.py` wrote the sidecars of the two
 500 GHz datasets in `data/waveguides/` from their CSVs and the Blackbody-Simulations
 reference configs; only `boundaries.walls` (PEC) is inferred, as

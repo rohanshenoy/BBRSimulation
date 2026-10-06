@@ -320,6 +320,40 @@ The fixtures these run on, and the runner, are described in
 `$BBRSIMDATA` at a directory containing `waveguides/`. The message names the
 path it tried.
 
+**`/run/initialize` aborts with `BBR024`** (`HFSS dataset sidecar ... cannot
+be opened`, or a sidecar field that is missing, mistyped or names another
+dataset or frequency): every `<id>_<freq>GHz_Ephi={0,1}` pair needs its
+`<id>_<freq>GHz.dataset.json` beside it, and an old data tree or a hand-copied
+dataset has none. Fetch the sidecar the HFSS runner wrote with the dataset, or
+write one (`bbrsim.sidecar.build_from_csvs`; the mock generators show how),
+then run `conda run -n bbrsim python validation/check_dataset_sidecars.py
+<dir>/waveguides` before the Geant4 run. The message names the absolute
+sidecar path and the field. See [Dataset
+sidecars](validation/README.md#dataset-sidecars).
+
+**`BBR025`**: the dataset declares a convention or a geometry BBRsim does not
+implement. The message names the field (a frame, incidence, far-field or
+polarization definition, or the modes block) and the one convention the
+sampler implements; or, at `/run/initialize`, it names the crack volume whose
+solid the declared exit cross-section does not fit strictly inside (make the
+Geant4 section larger than the HFSS one by a recorded margin, as the 52/102 µm
+test-world gaps are, and check that local x is the propagation axis: a bare
+`G4Tubs` has it on z); or, at the first CSV load of a frequency, it counts the
+exit points outside the declared cross-section. A dataset produced outside the
+canonical pose is rejected, not remapped. See [Dataset
+sidecars](validation/README.md#dataset-sidecars).
+
+**A `BBR026` banner in a Planck run**: a warning, not an error. A photon's
+frequency and the grid frequency serving it lie on opposite sides of the
+guide's lowest-mode cutoff (`modes.cutoff_ghz`), so the table was computed in
+the other propagation regime; the photon is served unchanged and the warning
+appears once per dataset and direction. Expected in a broadband run on a
+single-frequency grid (the 2000 GHz round gap is above its 1757 GHz cutoff,
+which is why it is for gun runs only); unexpected in a fixed-energy gun run
+whose energy was meant to match the dataset, where it signals the wrong
+dataset or frequency. The runner tolerates it only where it is expected
+([Dataset sidecars](validation/README.md#dataset-sidecars)).
+
 **No `[BBR] reflectance` lines**: expected with many threads; see
 [Copper reflectance](#3-copper-reflectance).
 
