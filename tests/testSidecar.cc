@@ -76,13 +76,21 @@ int main(int argc, char** argv) {
       CHECK(Parse("\xEF\xBB\xBF" + crlf).lowestMode == "TE10");
     }},
     {"f1_f3_identity", [] {
-      ExpectG4Exception("BBR024", [] { Parse(Edit(Valid(), "\"1.0\"", "\"2.0\"")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR024", [] { Parse(Edit(Valid(), "\"dataset_id\": \"crack\"", "\"dataset_id\": \"other\"")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR024", [] { Parse(Valid(), "crack_501GHz", 501.); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR024", [] { Parse(Edit(Valid(), "\"frequency_ghz\": 500", "\"frequency_ghz\": 520")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR024", [] { Parse(Edit(Valid(), "\"points_per_key\": 1", "\"points_per_key\": \"1\"")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR024", [] { Parse("{not json"); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR024", [] { BBRDatasetSidecar::Load("/nonexistent", "crack", kStem, 500.); }, "BBRDatasetSidecar");
+      // Each message substring pins the check the line names, so no case can pass on an earlier
+      // check that raises the same code.
+      ExpectG4Exception("BBR024", [] { Parse(Edit(Valid(), "\"1.0\"", "\"2.0\"")); }, "BBRDatasetSidecar",
+                        "schema_version 2.0: BBRsim reads 1.x");
+      ExpectG4Exception("BBR024", [] { Parse(Edit(Valid(), "\"dataset_id\": \"crack\"", "\"dataset_id\": \"other\"")); }, "BBRDatasetSidecar",
+                        "dataset_id \"other\", but the directory and crack volume say \"crack\"");
+      ExpectG4Exception("BBR024", [] { Parse(Valid(), "crack_501GHz", 501.); }, "BBRDatasetSidecar",
+                        "frequency_label \"500GHz\", but the directory says \"501GHz\"");
+      ExpectG4Exception("BBR024", [] { Parse(Edit(Valid(), "\"frequency_ghz\": 500", "\"frequency_ghz\": 520")); }, "BBRDatasetSidecar",
+                        "frequency_ghz 520 disagrees with the directory frequency 500 GHz (0.1 %)");
+      ExpectG4Exception("BBR024", [] { Parse(Edit(Valid(), "\"points_per_key\": 1", "\"points_per_key\": \"1\"")); }, "BBRDatasetSidecar",
+                        "far_field.points_per_key must be an integer within the int range");
+      ExpectG4Exception("BBR024", [] { Parse("{not json"); }, "BBRDatasetSidecar", "not valid JSON: ");
+      ExpectG4Exception("BBR024", [] { BBRDatasetSidecar::Load("/nonexistent", "crack", kStem, 500.); }, "BBRDatasetSidecar",
+                        "cannot be opened. Every HFSS dataset needs this sidecar");
     }},
     {"f4_frames", [] {
       const std::string hfssAxes = "{\"x\": [0, 0, -1], \"y\": [0, 1, 0], \"z\": [1, 0, 0]}";
@@ -103,12 +111,18 @@ int main(int argc, char** argv) {
                         "BBRDatasetSidecar", "outward normal must map to +p");
     }},
     {"f5_f10_conventions", [] {
-      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"arrival_direction\"", "\"propagation_direction\"")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"field_components_frame\": \"hfss_global\"", "\"field_components_frame\": \"exit_cs\"")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"shape\": \"rectangle\"", "\"shape\": \"polygon\"")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"incoming_includes_cos_theta\": false", "\"incoming_includes_cos_theta\": true")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"mirror_l\": true", "\"mirror_l\": false")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"Phi\", \"Theta\", \"rEphi_real\"", "\"Theta\", \"Phi\", \"rEphi_real\"")); }, "BBRDatasetSidecar");
+      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"arrival_direction\"", "\"propagation_direction\"")); }, "BBRDatasetSidecar",
+                        "excitation.incidence_convention is \"propagation_direction\"; BBRsim implements only \"arrival_direction\"");
+      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"field_components_frame\": \"hfss_global\"", "\"field_components_frame\": \"exit_cs\"")); }, "BBRDatasetSidecar",
+                        "exit_field.field_in_ref_cs and field_components_frame contradict each other");
+      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"shape\": \"rectangle\"", "\"shape\": \"polygon\"")); }, "BBRDatasetSidecar",
+                        "cross_section shape polygon is reserved; BBRsim does not support it yet");
+      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"incoming_includes_cos_theta\": false", "\"incoming_includes_cos_theta\": true")); }, "BBRDatasetSidecar",
+                        "transmittance.incoming_includes_cos_theta must be false");
+      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"mirror_l\": true", "\"mirror_l\": false")); }, "BBRDatasetSidecar",
+                        "symmetry.mirror_l is false; the sampler folds by both transverse mirrors");
+      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"Phi\", \"Theta\", \"rEphi_real\"", "\"Theta\", \"Phi\", \"rEphi_real\"")); }, "BBRDatasetSidecar",
+                        "far_field.columns differ from the positional order BBRHFSSData reads");
     }},
     {"f13_modes", [] {
       auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
@@ -120,10 +134,15 @@ int main(int argc, char** argv) {
       const auto disc = Parse(hfssfix::SidecarJson(p));
       CHECK(disc.lowestMode == "TE11");
       CHECK_NEAR(disc.cutoffGHz, 1756.98, 0.01);
-      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"mode\": \"TE10\"", "\"mode\": \"TE01\"")); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"cutoff_ghz\": ", "\"cutoff_ghz\": 1")); }, "BBRDatasetSidecar");
+      // The message prints the declared triple, then the re-derived one, so the substring names
+      // the field that was edited (the fixture's 9 mm x 50 um section: TE10, 16.655..., 2997.92458 GHz).
+      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"mode\": \"TE10\"", "\"mode\": \"TE01\"")); }, "BBRDatasetSidecar",
+                        "modes (TE01, 16.6551365556, 2997.92458 GHz) disagree with the cross-section (TE10, 16.6551365556, 2997.92458 GHz)");
+      ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"cutoff_ghz\": ", "\"cutoff_ghz\": 1")); }, "BBRDatasetSidecar",
+                        "modes (TE10, 116.655136556, 2997.92458 GHz) disagree with the cross-section (TE10, 16.6551365556, 2997.92458 GHz)");
       ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"polarization_filter_limit_ghz\": ",
-                                                  "\"polarization_filter_limit_ghz\": 1")); }, "BBRDatasetSidecar");
+                                                  "\"polarization_filter_limit_ghz\": 1")); }, "BBRDatasetSidecar",
+                        "modes (TE10, 16.6551365556, 12997.92458 GHz) disagree with the cross-section (TE10, 16.6551365556, 2997.92458 GHz)");
       // A section taller along g than along l: the lowest mode is TE01 at c/(2b), which is also the filter limit.
       auto q = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
       q.yHalf = 1e-5; q.zHalf = 2e-5;
@@ -245,18 +264,24 @@ int main(int argc, char** argv) {
     {"f12_fits_solid", [] {
       const auto box = Parse(Valid());                  // section 4.5 mm x 25 um
       box.CheckFitsSolid(G4Box("ok", 2 * mm, 5 * mm, 0.026 * mm), "ok");
-      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("thin", 2 * mm, 5 * mm, 0.025 * mm), "thin"); }, "BBRDatasetSidecar");
-      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("short", 2 * mm, 4 * mm, 0.026 * mm), "short"); }, "BBRDatasetSidecar");
+      // The fit message names the volume; the origin message is the other check of CheckFitsSolid.
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("thin", 2 * mm, 5 * mm, 0.025 * mm), "thin"); }, "BBRDatasetSidecar",
+                        "the declared exit cross-section does not fit strictly inside crack volume thin: ");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("short", 2 * mm, 4 * mm, 0.026 * mm), "short"); }, "BBRDatasetSidecar",
+                        "the declared exit cross-section does not fit strictly inside crack volume short: ");
       // A solid whose local origin is not inside it: the wrapper finds the exit face from the origin.
       G4DisplacedSolid off("off", new G4Box("b", 2 * mm, 5 * mm, 0.026 * mm), G4Transform3D(G4RotationMatrix(), G4ThreeVector(0, 0, 1 * mm)));
-      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(off, "off"); }, "BBRDatasetSidecar");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(off, "off"); }, "BBRDatasetSidecar",
+                        "the local origin of crack volume off is not inside its solid");
       auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
       p.disc = true; p.radius = 5e-5;
       const auto disc = Parse(hfssfix::SidecarJson(p));
       disc.CheckFitsSolid(*Tube(0.051 * mm), "tube51");
-      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(*Tube(0.050 * mm), "tube50"); }, "BBRDatasetSidecar");   // rim on the wall
+      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(*Tube(0.050 * mm), "tube50"); }, "BBRDatasetSidecar",   // rim on the wall
+                        "the declared exit cross-section does not fit strictly inside crack volume tube50: ");
       // A plain G4Tubs keeps its axis on local z, so local x is radial: rejected at startup.
-      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(G4Tubs("bare", 0., 0.051 * mm, 0.2 * mm, 0., CLHEP::twopi), "bare"); }, "BBRDatasetSidecar");
+      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(G4Tubs("bare", 0., 0.051 * mm, 0.2 * mm, 0., CLHEP::twopi), "bare"); }, "BBRDatasetSidecar",
+                        "the declared exit cross-section does not fit strictly inside crack volume bare: ");
     }},
   });
 }
