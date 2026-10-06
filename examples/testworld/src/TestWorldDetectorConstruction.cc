@@ -1,13 +1,24 @@
 #include "TestWorldDetectorConstruction.hh"
+#include "TestWorldMessenger.hh"
 #include "BBRConfigManager.hh"
 #include "BBRMaterials.hh"
 #include "G4Box.hh"
+#include "G4DisplacedSolid.hh"
 #include "G4LogicalVolume.hh"
 #include "G4MaterialPropertiesTable.hh"
 #include "G4NistManager.hh"
+#include "G4PhysicalConstants.hh"
 #include "G4PVPlacement.hh"
+#include "G4RotationMatrix.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
+#include "G4Transform3D.hh"
+#include "G4Tubs.hh"
+
+TestWorldDetectorConstruction::TestWorldDetectorConstruction()
+  : fMessenger(new TestWorldMessenger(this)) {}
+
+TestWorldDetectorConstruction::~TestWorldDetectorConstruction() { delete fMessenger; }
 
 G4VPhysicalVolume* TestWorldDetectorConstruction::Construct()
 {
@@ -55,6 +66,30 @@ G4VPhysicalVolume* TestWorldDetectorConstruction::Construct()
     auto* logical = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), kId);
     new G4PVPlacement(nullptr, G4ThreeVector(0., 0., 3.*mm),
                       logical, kId, cuLogical, false, 0, true);
+  }
+
+  // Straight round gap (HFSS cylindrical2: radius 50 um, length 0.4 mm), only
+  // with /bbr/testworld/roundGap true, so the default world and the pinned
+  // fixed-seed numbers are unchanged. Its 0.4 mm Cu plate sits at z = -80 mm,
+  // clear of the slab (|z| <= 25 mm). The vacuum_wg solid is a G4Tubs turned by
+  // Ry(+90 deg) inside a G4DisplacedSolid, so its local x is the axis, as
+  // BBSimOpBoundaryProcess requires (a bare G4Tubs has it on z: F12 refuses it).
+  // Radius 51 um = HFSS 50 um + 1 um, so the exit grid's rim points lie strictly
+  // inside (the recorded deviation, like the 52/102 um slab gaps).
+  if (fRoundGap) {
+    const G4double length = kRoundGapLength, halfWidth = kRoundGapPlateHalfWidth;
+    auto* plate = new G4Box("solid-RoundGapPlate", 0.5 * length, halfWidth, halfWidth);
+    auto* plateLV = new G4LogicalVolume(plate, cuMat, "logic-RoundGapPlate");
+    new G4PVPlacement(nullptr, G4ThreeVector(0.5 * length, 0., kRoundGapPlateZ),
+                      plateLV, "RoundGapPlate", worldLogical, false, 0, true);
+    const G4String kId = "RoundGap_r50um";
+    auto* tube = new G4Tubs("solid-" + kId + "-tube", 0., kRoundGapRadius, 0.5 * length, 0.,
+                            CLHEP::twopi);
+    G4RotationMatrix ry;
+    ry.rotateY(90. * deg);
+    auto* gap = new G4DisplacedSolid(kId, tube, G4Transform3D(ry, G4ThreeVector()));
+    auto* gapLV = new G4LogicalVolume(gap, BBRMaterials::GetVacuumWG(), kId);
+    new G4PVPlacement(nullptr, G4ThreeVector(), gapLV, kId, plateLV, false, 0, true);
   }
 
   return new G4PVPlacement(nullptr, G4ThreeVector(),

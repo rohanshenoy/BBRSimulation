@@ -2,6 +2,14 @@
 #include "HFSSFixture.hh"
 #include "BBRConfigManager.hh"
 #include "BBRCrackLibrary.hh"
+#include "BBRMaterials.hh"
+#include "G4Box.hh"
+#include "G4LogicalVolume.hh"
+#include "G4NistManager.hh"
+#include "G4PVPlacement.hh"
+#include "G4SystemOfUnits.hh"
+#include <nlohmann/json.hpp>
+
 #include <cmath>
 #include <set>
 #include <thread>
@@ -51,6 +59,12 @@ int main(int argc, char** argv) {
       CHECK_NEAR(Pick("lin", 200), 100, 0);
       CHECK_NEAR(Pick("one", 1), 500, 0); CHECK_NEAR(Pick("one", 1e7), 500, 0);
       CHECK(Handler().CountWarnings("BBR008") == 2);   // a one-point grid never warns
+      // The fixture's TE10 cutoff is 16.66 GHz. A photon clamped across it on a
+      // multi-point grid raises both BBR008 and BBR026 (g5's low clamps to 50 GHz:
+      // BBR008 at 20 GHz, BBR026 at 10 GHz, the one below the cutoff), and a
+      // one-point grid raises BBR026 though it never clamps (one at 1 GHz, served
+      // by 500 GHz). One per dataset and direction: 2.
+      CHECK(Handler().CountWarnings("BBR026") == 2);
     }},
     {"token_verbatim", [] {
       TempDir d; Grid(d.path(), "sci", {"1.5e3"});
@@ -70,8 +84,37 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR011", [] { Pick("dup", 500); }, "BBRCrackLibrary");
       ExpectG4Exception("BBR011", [] { Pick("junk", 500); }, "BBRCrackLibrary");
       ExpectG4Exception("BBR011", [] { Pick("nosuch", 500); }, "BBRCrackLibrary");
-      ExpectG4Exception("BBR001", [] { Pick("half", 500); }, "BBRHFSSData");        // Ephi=1 missing: at first selection
-      ExpectG4Exception("BBR001", [] { Pick("half", 500); }, "BBRHFSSData");        // and again (the lock was released)
+      // Ephi=1 missing: at discovery, before any CSV is read, and again (nothing was cached, the lock was released)
+      ExpectG4Exception("BBR001", [] { Pick("half", 500); }, "BBRCrackLibrary::Discover", "half_500GHz_Ephi=1/far_field.csv");
+      ExpectG4Exception("BBR001", [] { Pick("half", 500); }, "BBRCrackLibrary::Discover", "half_500GHz_Ephi=1/far_field.csv");
+    }},
+    {"discovery_missing_far_field", [] {
+      // One CSV of four missing, at the frequency a photon would not select: BBR001 at discovery.
+      TempDir d; Grid(d.path(), "ff", {"50", "500"});
+      const auto gone = d.path() / "waveguides" / "ff_500GHz_Ephi=0" / "far_field.csv";
+      std::filesystem::remove(gone);
+      BBRConfigManager::SetDataDir(d.path().string());
+      ExpectG4Exception("BBR001", [] { Pick("ff", 50); }, "BBRCrackLibrary::Discover",
+                        "Missing HFSS file " + std::filesystem::absolute(gone).string() +
+                          " (no such regular file): every frequency of dataset ff needs far_field.csv and "
+                          "waveguide.csv in both ff_500GHz_Ephi=0 and ff_500GHz_Ephi=1.");
+    }},
+    {"discovery_missing_waveguide", [] {
+      // A waveguide.csv that is a directory is no regular file either: BBR002 at discovery.
+      TempDir d; Grid(d.path(), "wg", {"500"});
+      const auto bad = d.path() / "waveguides" / "wg_500GHz_Ephi=1" / "waveguide.csv";
+      std::filesystem::remove(bad);
+      std::filesystem::create_directories(bad);
+      BBRConfigManager::SetDataDir(d.path().string());
+      ExpectG4Exception("BBR002", [] { Pick("wg", 500); }, "BBRCrackLibrary::Discover",
+                        "Missing HFSS file " + std::filesystem::absolute(bad).string() +
+                          " (no such regular file): every frequency of dataset wg needs far_field.csv and "
+                          "waveguide.csv in both wg_500GHz_Ephi=0 and wg_500GHz_Ephi=1.");
+    }},
+    {"dataset_id_of", [] {
+      CHECK(BBRCrackLibrary::DatasetIdOf("gap:1") == "gap");
+      CHECK(BBRCrackLibrary::DatasetIdOf("gap") == "gap");
+      CHECK(BBRCrackLibrary::DatasetIdOf("gap:1:2") == "gap");   // up to the first ':'
     }},
     {"unreadable_root", [] {
       BBRConfigManager::SetDataDir("/nonexistent/bbrsim-root");
@@ -89,6 +132,105 @@ int main(int argc, char** argv) {
       for (auto& t : ts) t.join();
       std::set<const void*> distinct(seen.begin(), seen.end());
       CHECK(distinct.size() == 3);
+    }},
+    {"sidecar_required", [] {
+      // One frequency of two lacks its sidecar: discovery stops even for a photon served by the other.
+      TempDir d; Grid(d.path(), "two", {"50", "500"});
+      std::filesystem::remove(d.path() / "waveguides" / "two_500GHz.dataset.json");
+      BBRConfigManager::SetDataDir(d.path().string());
+      ExpectG4Exception("BBR024", [] { Pick("two", 50); }, "BBRDatasetSidecar",
+                        "two_500GHz.dataset.json: cannot be opened");
+    }},
+    {"sidecar_blocks_agree", [] {
+      TempDir d; Grid(d.path(), "mix", {"50", "500"});
+      auto p = hfssfix::SidecarFrom("mix_500GHz", hfssfix::Mini500());
+      p.yHalf = 4.0e-3;   // another exit section at one frequency
+      bbrtest::WriteFile(d.path() / "waveguides" / "mix_500GHz.dataset.json", hfssfix::SidecarJson(p));
+      BBRConfigManager::SetDataDir(d.path().string());
+      // The exit section, and the modes it determines, are named as the differing blocks.
+      ExpectG4Exception("BBR024", [] { Pick("mix", 50); }, "BBRCrackLibrary::Discover",
+                        "disagree on their frequency-independent physics, in block(s) modes, cross_section: ");
+    }},
+    {"validate_placed_cracks", [] {
+      // Two placements of one id ("gap:1", "gap:2") with different solids: each is checked.
+      TempDir d; Grid(d.path(), "gap", {"500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
+      auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
+      new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
+      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* thin = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 5 * mm, 0.020 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      new G4PVPlacement(nullptr, {0, 0, -10 * mm}, ok, "gap:1", wlv, false, 0);
+      new G4PVPlacement(nullptr, {0, 0, 10 * mm}, thin, "gap:2", wlv, false, 0);
+      ExpectG4Exception("BBR025", [] { BBRCrackLibrary::Instance().ValidatePlacedCracks(); }, "BBRDatasetSidecar",
+                        "does not fit strictly inside crack volume gap:2");
+    }},
+    {"validate_placed_cracks_ok", [] {
+      TempDir d; Grid(d.path(), "gap", {"50", "500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
+      auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
+      new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
+      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      new G4PVPlacement(nullptr, {}, ok, "gap", wlv, false, 0);
+      BBRCrackLibrary::Instance().ValidatePlacedCracks();
+      // Once per process: the second call is a no-op, so a crack placed since is not checked.
+      auto* thin = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 5 * mm, 0.020 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      new G4PVPlacement(nullptr, {0, 0, 10 * mm}, thin, "gap:2", wlv, false, 0);
+      BBRCrackLibrary::Instance().ValidatePlacedCracks();
+      CHECK_NEAR(Pick("gap", 500), 500, 0);
+    }},
+    {"placed_cracks_json", [] {
+      // One record per validated placement, in visiting order, with every grid frequency's sidecar.
+      TempDir d; Grid(d.path(), "gap", {"50", "500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      CHECK(BBRCrackLibrary::Instance().PlacedCracksJson() == "[]");
+      auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
+      auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
+      new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
+      auto* a = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* b = new G4LogicalVolume(new G4Box("gapB", 2.5 * mm, 5.5 * mm, 0.03 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      new G4PVPlacement(nullptr, {0, 0, -10 * mm}, a, "gap:1", wlv, false, 0);
+      new G4PVPlacement(nullptr, {0, 0, 10 * mm}, b, "gap:2", wlv, false, 0);
+      CHECK(BBRCrackLibrary::Instance().PlacedCracksJson() == "[]");   // not validated yet
+      BBRCrackLibrary::Instance().ValidatePlacedCracks();
+      const auto arr = nlohmann::json::parse(BBRCrackLibrary::Instance().PlacedCracksJson());
+      CHECK(arr.is_array() && arr.size() == 2);
+      if (!arr.is_array() || arr.size() != 2) return;
+      const std::vector<std::pair<std::string, std::vector<double>>> want = {
+          {"gap:1", {4., 10., 0.052}}, {"gap:2", {5., 11., 0.06}}};
+      for (std::size_t i = 0; i < 2; ++i) {
+        const auto& c = arr[i];
+        CHECK(c.at("volume") == want[i].first);
+        CHECK(c.at("dataset_id") == "gap");
+        CHECK(c.at("geant4_extent_mm").is_array() && c.at("geant4_extent_mm").size() == 3);
+        for (std::size_t k = 0; k < 3; ++k) CHECK_NEAR(c.at("geant4_extent_mm").at(k).get<double>(), want[i].second[k], 1e-9);
+        CHECK(c.at("hfss_extent_mm") == nlohmann::json::parse("{\"p\": 4, \"l\": 10, \"g\": 0.052}"));
+        const auto& fs = c.at("frequencies");
+        CHECK(fs.is_array() && fs.size() == 2);
+        if (!fs.is_array() || fs.size() != 2) continue;
+        const char* labels[] = {"50GHz", "500GHz"};
+        const double values[] = {50., 500.};
+        for (std::size_t k = 0; k < 2; ++k) {
+          CHECK(fs[k].at("label") == labels[k]);
+          CHECK_NEAR(fs[k].at("frequency_ghz").get<double>(), values[k], 0);
+          CHECK(fs[k].at("sidecar") == "gap_" + std::string(labels[k]) + ".dataset.json");
+          CHECK(fs[k].at("recorded").is_object() && fs[k].at("recorded").at("frames").at("pose_rule") == "canonical-z");
+        }
+      }
+    }},
+    {"cutoff_warning", [] {
+      TempDir d; Grid(d.path(), "one", {"500"}); Grid(d.path(), "low", {"10", "500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      CHECK(Handler().CountWarnings("BBR026") == 0);
+      CHECK_NEAR(Pick("one", 10), 500, 0);    // photon below cutoff, served above it: warns (a one-point grid too)
+      CHECK_NEAR(Pick("one", 12), 500, 0);    // once per dataset and direction
+      CHECK_NEAR(Pick("one", 600), 500, 0);   // both above: silent
+      CHECK(Handler().CountWarnings("BBR026") == 1);
+      CHECK_NEAR(Pick("low", 12), 10, 0);     // both below: silent
+      CHECK_NEAR(Pick("low", 20), 10, 0);     // photon above, served by the 10 GHz point below: warns
+      CHECK(Handler().CountWarnings("BBR026") == 2);
+      CHECK(Handler().CountWarnings("BBR008") == 0);   // in-grid selections never clamp
     }},
   });
 }

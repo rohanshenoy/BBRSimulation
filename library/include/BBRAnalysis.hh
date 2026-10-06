@@ -5,6 +5,7 @@
 #include "G4OpBoundaryProcess.hh"
 #include "globals.hh"
 #include <map>
+#include <string>
 
 // Owns the G4Analysis ROOT output (output/bbr.root) for a run.
 // Ntuples: "crossings" (one row per optical-photon boundary crossing) and
@@ -35,6 +36,10 @@ class BBRAnalysis {
   // 2=absorption, 3=other.
   static G4String BoundaryStatusName(G4OpBoundaryProcessStatus status);
   static G4int EventTypeForStatus(const G4String& statusName);
+  // Fingerprint of the HFSS data under <dataRoot>/waveguides: FNV-1a over the
+  // top-level *.dataset.json sidecars only ("fnv1a64:" + 16 hex digits), else
+  // "no-sidecars" or "unavailable" (no readable waveguides/ directory).
+  static std::string DataFingerprint(const std::string& dataRoot);
 
   // Ntuple ids (assigned in the ctor; identical across threads).
   G4int fCrossingsId = -1;
@@ -65,6 +70,7 @@ class BBRAnalysis {
   G4String fGeometry;
   G4String fRandomState;
   G4String fDataFingerprint;
+  G4String fHfssDatasets;       // BBRCrackLibrary::PlacedCracksJson(), raw JSON
   std::map<G4String, G4int> fStatusCodes;
   std::map<G4String, G4int> fVolumeCodes;
   std::map<G4String, G4int> fMaterialCodes;

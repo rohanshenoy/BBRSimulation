@@ -7,8 +7,10 @@ For each id, frequency f (position i in --freqs) and Ephi in {0,1}, copies
   <src>/<id>_<source-freq>GHz_Ephi=<n>/{far_field,waveguide}.csv
 to
   <dst>/waveguides/<id>_<f>GHz_Ephi=<n>/
-applying two per-frequency signatures so that which dataset the simulation
-actually sampled is observable in the output:
+applying two per-frequency signatures (items 1 and 2) so that which dataset
+the simulation actually sampled is observable in the output, and writing a
+sidecar per mock frequency (item 3), which the C++ discovery and
+check_dataset_sidecars.py require but which leaves no trace in the output:
 
   1. transmittance  - waveguide.csv OutgoingPower scaled by --scales[i], so the
      crack transmittance differs per frequency;
@@ -16,7 +18,11 @@ actually sampled is observable in the output:
      Theta > 90 deg. Theta is measured from the gap axis, so a transmitted
      photon from those sets always exits with k_z >= 0, while even-i sets keep
      both signs. This catches a mix-up that scaling alone cannot see, because
-     the direction CDF is normalised and a global scale is invisible to it.
+     the direction CDF is normalised and a global scale is invisible to it;
+  3. sidecar        - each mock frequency gets <id>_<f>GHz.dataset.json, a copy
+     of the source's with the frequency, propagating_count, file checksums and
+     provenance (mock_of, transmittance_scale, far_field_theta_above_90_zeroed)
+     rewritten.
 
 The Freq column of both files is rewritten to "<f>GHz"; the C++ loader checks
 it against the directory name (BBR009). Every other column is copied verbatim
@@ -33,9 +39,12 @@ Usage:
       --source-freq 500 --freqs 50 150 500 1500 5000 --scales 0.2 0.4 1.0 0.6 0.8
 """
 import argparse
+import copy
 import os
 import sys
 import time
+
+from bbrsim import sidecar
 
 # Column indices (both files start with Freq; headers are fixed, see the CSVs).
 FF_THETA = 5                    # far_field.csv: Theta [deg]
@@ -73,6 +82,13 @@ if len(args.freqs) != len(args.scales):
     print(f"--freqs ({len(args.freqs)}) and --scales ({len(args.scales)}) "
           "must have the same length")
     sys.exit(2)
+src_sidecars = {}
+for id_ in args.ids:
+    try:
+        src_sidecars[id_] = sidecar.load(src, f"{id_}_{args.source_freq}GHz")
+    except ValueError as e:
+        print(f"source sidecar: {e}")
+        sys.exit(2)
 
 
 def transform(src_path, dst_path, freq_token, scale, zero_back_hemisphere, is_far_field):
@@ -94,7 +110,8 @@ def transform(src_path, dst_path, freq_token, scale, zero_back_hemisphere, is_fa
 
 
 t0 = time.time()
-n_files = 0
+n_csv = 0
+n_sidecars = 0
 for id_ in args.ids:
     for i, (ftoken, scale) in enumerate(zip(args.freqs, args.scales)):
         zero_back = (i % 2 == 1)
@@ -111,7 +128,19 @@ for id_ in args.ids:
             for name, is_ff in (("far_field.csv", True), ("waveguide.csv", False)):
                 transform(os.path.join(sdir, name), os.path.join(ddir, name),
                           ftoken, scale, zero_back, is_ff)
-                n_files += 1
+                n_csv += 1
+        stem = f"{id_}_{ftoken}GHz"
+        sc = copy.deepcopy(src_sidecars[id_])
+        f_ghz = float(ftoken)
+        sc["frequency_ghz"] = f_ghz
+        sc["frequency_label"] = f"{ftoken}GHz"
+        sc["provenance"] = {**sc["provenance"], "producer": "validation/Scripts/make_mock_hfss_frequencies.py",
+                            "mock_of": f"{id_}_{args.source_freq}GHz", "transmittance_scale": scale,
+                            "far_field_theta_above_90_zeroed": zero_back}
+        sc["modes"]["propagating_count"] = sidecar.modes_for(sc["exit_field"]["cross_section"], f_ghz)["propagating_count"]
+        sc["files"] = sidecar.file_entries(out_root, stem)
+        sidecar.write(out_root, stem, sc)
+        n_sidecars += 1
         print(f"  {id_}_{ftoken}GHz  scale={scale:<4g} "
               f"far-field={'k_z>=0 only' if zero_back else 'full'}")
-print(f"wrote {n_files} files to {out_root} in {time.time() - t0:.1f} s")
+print(f"wrote {n_csv} CSV files and {n_sidecars} sidecars to {out_root} in {time.time() - t0:.1f} s")

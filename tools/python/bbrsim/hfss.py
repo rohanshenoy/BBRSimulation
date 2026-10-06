@@ -11,12 +11,14 @@ Conventions (standard crack geometry; crack-local axes = world axes):
     normal_hat = +x   exit-face normal / propagation direction
     theta_hat  = +y   long dimension of the gap
     phi_hat    = +z   gap (short) dimension
-HFSS incoming frame: z_i = normal_hat, x_i = phi_hat, y_i = -theta_hat.
+HFSS global frame in these axes: X = -phi_hat, Y = +theta_hat, Z = +normal_hat.
+HFSS incidence angles are the spherical angles of the arrival direction r = -k:
     IWaveTheta = acos(-k . normal)                (180 deg = normal incidence)
     IWavePhi   = atan2(-k . theta_hat, k . phi_hat), folded into [0, 90] deg
                  by mirroring theta_hat (sign sy) and phi_hat (sign sx).
-Outgoing frame (far_field.csv Theta, Phi), with theta_f = sy*theta_hat and
-phi_f = sx*phi_hat:
+The exit coordinate system (x_e, y_e, z_e) = (Z, Y, -X) equals (normal,
+theta_hat, phi_hat), so far_field.csv (Theta, Phi) and waveguide.csv (Y, Z) need
+no transform. With theta_f = sy*theta_hat and phi_f = sx*phi_hat:
     dir_out = sinT cosP normal + sinT sinP theta_f + cosT phi_f
 
 Every formula here has a named counterpart in library/src/BBSimOpBoundaryProcess.cc
@@ -55,6 +57,10 @@ class AngleDataset:
     F1_theta: np.ndarray      # complex rEtheta for Ephi=1 input
     F1_phi: np.ndarray        # complex rEphi   for Ephi=1 input
     rho: complex = 0j         # normalized exit-field overlap <E0,E1> (polarization cross term)
+    exit_y_m: np.ndarray = None   # waveguide.csv Y of every exit point (exit CS, metres; along theta_f)
+    exit_z_m: np.ndarray = None   # waveguide.csv Z of every exit point (exit CS, metres; along phi_f)
+    E0: np.ndarray = None         # (M, 3) complex exit field (Ex, Ey, Ez) for Ephi=0 input
+    E1: np.ndarray = None         # (M, 3) complex exit field for Ephi=1 input, paired by row with E0
 
 
 def load_dataset(dir_stem, base_dir=None):
@@ -72,7 +78,9 @@ def load_dataset(dir_stem, base_dir=None):
     same row count and no key of their own (BBR012); the two CSVs must have the
     same incidence keys (BBR007; BBR000 when neither has one); a key whose largest
     transmittance over linear polarizations exceeds 1 has T0 and T1 divided by it.
-    The C++ errors are raised here as ValueError naming the code.
+    The C++ errors are raised here as ValueError naming the code. No sidecar is
+    read: the Python-side sidecar checks (F1-F13, C1-C5) are bbrsim.sidecar and
+    validation/check_dataset_sidecars.py.
     """
     dataset_id = dir_stem   # local alias: the error messages below name the stem
     base = base_dir or default_base_dir()
@@ -147,6 +155,7 @@ def load_dataset(dir_stem, base_dir=None):
             b.rEtheta_real.to_numpy(float) + 1j * b.rEtheta_imag.to_numpy(float),
             b.rEphi_real.to_numpy(float) + 1j * b.rEphi_imag.to_numpy(float),
             rho,
+            w[0].Y.to_numpy(float), w[0].Z.to_numpy(float), E[0], E[1],
         )
     return out
 
@@ -218,7 +227,11 @@ def fold_incidence(k, normal=(1., 0., 0.), theta_hat=(0., 1., 0.), phi_hat=(0., 
 
 
 def incoming_basis(inc):
-    """(e_theta_in, e_phi_in): HFSS incoming spherical basis in world frame."""
+    """(e_theta_in, e_phi_in) of HandleDiffractionBoundary in the world frame: exactly
+    (-e_theta, -e_phi) of the HFSS spherical basis at the arrival direction r = -k, written in
+    the folded frame (X, Y, Z) = (-phi_f, theta_f, normal). The common sign cancels in T, in the
+    cross term and in |E|^2 and flips pol_out only, which is the same state; the +sin(theta)
+    term is the -e_theta component, not a sign error."""
     th, ph = np.radians(inc.theta_deg), np.radians(inc.phi_deg)
     e_theta = (np.sin(th) * inc.normal
                - np.cos(th) * np.sin(ph) * inc.theta_f
@@ -259,6 +272,19 @@ def direction_weights(ds, E_theta, E_phi):
     w = np.where(cosN < K_MIN_NORMAL_COMPONENT, 0., w)
     s = w.sum()
     return w / s if s > 0 else np.full_like(w, 1. / len(w))
+
+
+def exit_position_weights(ds, E_theta, E_phi):
+    """Normalised sampling weights over the exit points (rows of waveguide.csv).
+
+    weight_j = |E_theta E0_j + E_phi E1_j|^2 summed over (Ex, Ey, Ez), the runtime CDF
+    of BBRHFSSData::SampleExitPosition; uniform when every weight is zero, as the C++
+    then draws a uniform index. Point j sits at ds.exit_y_m[j] along theta_f and
+    ds.exit_z_m[j] along phi_f from the exit-face centre.
+    """
+    w = np.sum(np.abs(E_theta * ds.E0 + E_phi * ds.E1) ** 2, axis=1)
+    s = w.sum()
+    return w / s if s > 0 else np.full(len(w), 1. / len(w))
 
 
 def outgoing_directions(ds, inc):

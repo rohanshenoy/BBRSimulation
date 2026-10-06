@@ -3,7 +3,15 @@
 
 #include "G4AutoLock.hh"
 #include "G4Exception.hh"
+#include "G4LogicalVolume.hh"
+#include "G4Material.hh"
+#include "G4PhysicalVolumeStore.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4VPhysicalVolume.hh"
+#include "G4VSolid.hh"
 #include "G4ios.hh"
+
+#include "nlohmann/json.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +19,8 @@
 #include <filesystem>
 #include <limits>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 namespace {
 G4Mutex cacheMutex = G4MUTEX_INITIALIZER;
@@ -29,6 +39,11 @@ BBRCrackLibrary& BBRCrackLibrary::Instance()
 {
   static BBRCrackLibrary sInstance;
   return sInstance;
+}
+
+G4String BBRCrackLibrary::DatasetIdOf(const G4String& volumeName)
+{
+  return volumeName.substr(0, volumeName.find(':'));
 }
 
 BBRCrackLibrary::FrequencySet& BBRCrackLibrary::Discover(const G4String& datasetId)
@@ -84,7 +99,7 @@ BBRCrackLibrary::FrequencySet& BBRCrackLibrary::Discover(const G4String& dataset
     const double f = std::strtod(token.c_str(), &end);
     if (token.empty() || end == nullptr || *end != '\0' || !(f > 0.)) continue;
 
-    set.entries.push_back({f, prefix + token + "GHz", nullptr});
+    set.entries.push_back({f, prefix + token + "GHz", nullptr, nullptr});
   }
 
   std::sort(set.entries.begin(), set.entries.end(),
@@ -111,6 +126,40 @@ BBRCrackLibrary::FrequencySet& BBRCrackLibrary::Discover(const G4String& dataset
        << ". Set /bbr/dataDir <root> (root contains waveguides/) or BBRSIMDATA "
        << "(currently " << (env ? env : "unset") << ").";
     G4Exception("BBRCrackLibrary::Discover", "BBR011", FatalException, ed);
+  }
+
+  // Every frequency's sidecar (fail closed), then the frequency-independent blocks must agree.
+  for (auto& e : set.entries)
+    e.sidecar = std::make_unique<BBRDatasetSidecar>(
+        BBRDatasetSidecar::Load(fWaveguidesDir, datasetId, e.dirStem, e.freq_GHz));
+  for (std::size_t i = 1; i < set.entries.size(); ++i) {
+    const std::vector<std::string> differ = set.entries[i].sidecar->InvariantDiff(*set.entries[0].sidecar);
+    if (!differ.empty()) {
+      G4ExceptionDescription ed;
+      ed << "The sidecars of dataset " << datasetId << " disagree on their frequency-independent physics, "
+         << "in block(s)";
+      for (std::size_t b = 0; b < differ.size(); ++b) ed << (b ? ", " : " ") << differ[b];
+      ed << ": " << set.entries[0].sidecar->path << " and " << set.entries[i].sidecar->path << ".";
+      G4Exception("BBRCrackLibrary::Discover", "BBR024", FatalException, ed);
+    }
+  }
+
+  // Every frequency's four CSVs must be present before the first event, so an
+  // incomplete tree stops the run at startup rather than mid-run. Existence
+  // only: the CSVs are read on first selection (BBRHFSSData, same codes).
+  for (const auto& e : set.entries) {
+    for (const char* ephi : {"_Ephi=0", "_Ephi=1"}) {
+      for (const auto& [file, code] : {std::pair{"far_field.csv", "BBR001"}, std::pair{"waveguide.csv", "BBR002"}}) {
+        const fs::path p = dir / (e.dirStem + ephi) / file;
+        std::error_code ec3;
+        if (fs::is_regular_file(p, ec3)) continue;
+        G4ExceptionDescription ed;
+        ed << "Missing HFSS file " << AbsPath(p) << " (no such regular file): every frequency of dataset "
+           << datasetId << " needs far_field.csv and waveguide.csv in both " << e.dirStem << "_Ephi=0 and "
+           << e.dirStem << "_Ephi=1.";
+        G4Exception("BBRCrackLibrary::Discover", code, FatalException, ed);
+      }
+    }
   }
 
   G4cout << "[BBR] HFSS dataset " << datasetId << ": " << set.entries.size()
@@ -166,9 +215,75 @@ const BBRHFSSData& BBRCrackLibrary::Lookup(const G4String& datasetId, G4double n
     }
   }
 
+  // The lowest-mode cutoff (modes.cutoff_ghz): below it a closed guide carries
+  // no propagating mode, so a table from the other side is the wrong physics.
+  const G4double fc = E[k].sidecar->cutoffGHz;
+  if (fc > 0. && ((nu_GHz < fc) != (E[k].freq_GHz < fc))) {
+    const G4bool below = nu_GHz < fc;
+    G4bool& warned = below ? set.warnedBelowCutoff : set.warnedAboveCutoff;
+    if (!warned) {
+      warned = true;
+      G4ExceptionDescription ed;
+      ed << "BBR026 dataset=" << datasetId << " direction=" << (below ? "below" : "above")
+         << " nu_GHz=" << nu_GHz << " grid_GHz=" << E[k].freq_GHz << " cutoff_GHz=" << fc
+         << " (" << E[k].sidecar->lowestMode << ") : the photon and the HFSS dataset serving it lie on "
+         << "opposite sides of the lowest-mode cutoff; the table is used unchanged. Reported once per "
+         << "dataset and direction.";
+      G4Exception("BBRCrackLibrary::Lookup", "BBR026", JustWarning, ed);
+    }
+  }
+
   if (!E[k].data)
-    E[k].data = std::make_unique<BBRHFSSData>(fWaveguidesDir, E[k].dirStem, E[k].freq_GHz);
+    E[k].data = std::make_unique<BBRHFSSData>(fWaveguidesDir, E[k].dirStem, E[k].freq_GHz, E[k].sidecar.get());
 
   chosen_GHz = E[k].freq_GHz;
   return *E[k].data;
+}
+
+void BBRCrackLibrary::ValidatePlacedCracks()
+{
+  G4AutoLock lock(&cacheMutex);
+  if (fValidated) return;
+  fValidated = true;
+  for (const G4VPhysicalVolume* pv : *G4PhysicalVolumeStore::GetInstance()) {
+    const G4LogicalVolume* lv = pv->GetLogicalVolume();
+    const G4Material* mat = lv ? lv->GetMaterial() : nullptr;
+    if (!mat || mat->GetName() != "vacuum_wg") continue;
+    const G4String name = pv->GetName();
+    const G4String id = DatasetIdOf(name);
+    FrequencySet& set = Discover(id);
+    const G4VSolid& solid = *lv->GetSolid();
+    for (const auto& e : set.entries) e.sidecar->CheckFitsSolid(solid, name);
+    G4ThreeVector lo, hi;
+    solid.BoundingLimits(lo, hi);
+    const G4ThreeVector extent = (hi - lo) / mm;
+    fPlaced.push_back({name, id, {extent.x(), extent.y(), extent.z()}});
+    const auto& sc = *set.entries.front().sidecar;
+    G4cout << "[BBR] crack " << name << ": HFSS (p, l, g) = (" << sc.extentP_mm << ", " << sc.extentL_mm << ", "
+           << sc.extentG_mm << ") mm, Geant4 (x, y, z) = (" << extent.x() << ", " << extent.y() << ", "
+           << extent.z() << ") mm; " << set.entries.size() << " sidecar(s) fit" << G4endl;
+  }
+}
+
+std::string BBRCrackLibrary::PlacedCracksJson() const
+{
+  using json = nlohmann::json;
+  G4AutoLock lock(&cacheMutex);
+  json out = json::array();
+  for (const auto& p : fPlaced) {
+    const FrequencySet& set = fSets.at(p.datasetId);   // discovered by ValidatePlacedCracks
+    const auto& first = *set.entries.front().sidecar;
+    json frequencies = json::array();
+    for (const auto& e : set.entries)
+      frequencies.push_back({{"label", e.sidecar->frequencyLabel},
+                             {"frequency_ghz", e.freq_GHz},
+                             {"sidecar", e.dirStem + ".dataset.json"},
+                             {"recorded", e.sidecar->recorded.empty() ? json() : json::parse(e.sidecar->recorded)}});
+    out.push_back({{"volume", std::string(p.volume)},
+                   {"dataset_id", std::string(p.datasetId)},
+                   {"geant4_extent_mm", {p.extent_mm[0], p.extent_mm[1], p.extent_mm[2]}},
+                   {"hfss_extent_mm", {{"p", first.extentP_mm}, {"l", first.extentL_mm}, {"g", first.extentG_mm}}},
+                   {"frequencies", frequencies}});
+  }
+  return out.dump(-1, ' ', false, json::error_handler_t::replace);
 }

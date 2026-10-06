@@ -22,6 +22,12 @@ BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
   : G4WrapperProcess(name)
 {}
 
+void BBSimOpBoundaryProcess::BuildPhysicsTable(const G4ParticleDefinition& particle)
+{
+  G4WrapperProcess::BuildPhysicsTable(particle);
+  BBRCrackLibrary::Instance().ValidatePlacedCracks();
+}
+
 // PostStepDoIt — intercept steps that ENTER a vacuum_wg crack volume (HFSS
 // diffraction) or a material carrying a REFLECTIVITY table (tabulated
 // reflectance); fall through to the stock process otherwise. Geometries with
@@ -82,20 +88,25 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // E/h_Planck is a frequency in 1/ns; 1e9*hertz is exactly 1/ns, so the
   // quotient is in GHz.
   const G4String volName   = touch->GetVolume()->GetName();
-  const G4String datasetId = volName.substr(0, volName.find(':'));
+  const G4String datasetId = BBRCrackLibrary::DatasetIdOf(volName);
   const G4double nu_GHz =
       aTrack.GetKineticEnergy() / CLHEP::h_Planck / (1e9 * CLHEP::hertz);
   const BBRHFSSData& hfss =
       BBRCrackLibrary::Instance().Lookup(datasetId, nu_GHz, fLastHFSSFreqGHz);
 
   // --- incoming angles in crack-local frame (folded into HFSS quarter-symmetry) ---
-  // HFSS convention: ẑ_i points OUT of the crack (= normal_hat = +x_world).
-  // A photon propagating along +x_world (khat = normal_hat) approaches the
-  // exit face from inside, i.e. its k-vector is anti-parallel to ẑ_i →
-  // IWaveTheta = 180° (confirmed: T≈1.055 at IWaveTheta=180°, T≈0 at 0°).
+  // HFSS global frame in crack-local axes: X = -phi_hat (gap), Y = +theta_hat
+  // (long), Z = +normal_hat (propagation). HFSS's spherical incidence angles are
+  // those of the ARRIVAL direction r of the plane wave, k = -r:
+  //   IWaveTheta = polar angle of -k from Z   = acos(-k.normal_hat)
+  //   IWavePhi   = azimuth of -k from X to Y  = atan2(-k.theta_hat, k.phi_hat)
+  // A photon entering along normal_hat has IWaveTheta = 180 deg (normal entry;
+  // crack1's raw T is 1.055 there and ~0 at 0 deg). The exit coordinate system
+  // (x_e, y_e, z_e) = (Z, Y, -X) is then exactly (normal_hat, theta_hat, phi_hat),
+  // so the CSV exit positions and far-field angles need no transform.
   G4double cosVal = std::min(1., std::max(-1., -khat.dot(normal_hat)));
   G4double iwaveTheta_deg = std::acos(cosVal) * (180. / CLHEP::pi);
-  // IWavePhi: azimuth in HFSS x̂_i=phi_hat, ŷ_i=-theta_hat plane. Transverse
+  // IWavePhi: azimuth of -k in the HFSS X-Y plane (X = -phi_hat, Y = +theta_hat). Transverse
   // components below 1e-12 are snapped to +0 first: for a k exactly in the
   // x-z plane (k_y == 0) atan2(-0, -x) is -180° but atan2(+0, -x) is +180°,
   // and which one the expression yields depends on how the optimiser orders
@@ -114,8 +125,8 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // signs so everything sampled from the folded dataset (outgoing direction,
   // polarization, exit position) is mapped back to the true frame. Without
   // the un-fold, oblique photons get mirror-image outgoing distributions.
-  //   sy: phi → |phi|        (mirrors ŷ_i, i.e. flips theta_hat)
-  //   sx: |phi| → 180−|phi|  (mirrors x̂_i, i.e. flips phi_hat)
+  //   sy: phi → |phi|        (mirrors Y, i.e. flips theta_hat)
+  //   sx: |phi| → 180−|phi|  (mirrors X, i.e. flips phi_hat)
   const G4double sy = (iwavePhi_raw < 0.) ? -1. : 1.;
   G4double iwavePhi_deg = std::abs(iwavePhi_raw);
   const G4double sx = (iwavePhi_deg > 90.) ? -1. : 1.;
@@ -127,11 +138,14 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   const G4ThreeVector theta_f = sy * theta_hat;
   const G4ThreeVector phi_f   = sx * phi_hat;
 
-  // --- decompose incoming polarization onto HFSS incoming spherical basis ---
-  // Standard spherical basis at (IWaveTheta, IWavePhi) in the folded HFSS
-  // frame (ẑ_i=normal_hat, x̂_i=phi_f, ŷ_i=-theta_f):
-  //   ê_θ = -sin(T)*ẑ_i + cos(T)*cos(P)*x̂_i - cos(T)*sin(P)*ŷ_i
-  //   ê_φ =            -sin(P)*x̂_i           - cos(P)*ŷ_i
+  // --- decompose incoming polarization onto the HFSS incoming basis ---
+  // In the folded HFSS frame (X, Y, Z) = (-phi_f, theta_f, normal_hat) the
+  // spherical basis at the arrival direction r(T, P) is
+  //   e_theta = cosT cosP X + cosT sinP Y - sinT Z,   e_phi = -sinP X + cosP Y.
+  // The two vectors below are exactly -e_theta and -e_phi. The common sign
+  // cancels in T, in the cross term and in |E|^2, and flips pol_out only, which
+  // is the same state. Do not flip the +sin(th) term on its own: it is the
+  // -e_theta component, not a sign error.
   G4double th = iwaveTheta_deg * (CLHEP::pi / 180.);
   G4double ph = iwavePhi_deg   * (CLHEP::pi / 180.);
   G4ThreeVector eTheta_in = +std::sin(th) * normal_hat

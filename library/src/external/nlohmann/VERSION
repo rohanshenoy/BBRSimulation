@@ -1,0 +1,3 @@
+nlohmann/json 3.12.0, single_include/nlohmann/json.hpp, MIT (LICENSE.MIT)
+sha256 aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63
+Private to libBBRsim (SYSTEM PRIVATE include of src/external); never installed.

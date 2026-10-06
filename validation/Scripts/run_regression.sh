@@ -24,15 +24,18 @@
 #    validation/Scripts/consumer_smoke against the installed library.
 # 1c. Runs the C++ tests (ctest), the Python tests (pytest, on the installed
 #    bbrsim) and validation/Scripts/tests/test_env.sh (the env scripts).
-# 2. Builds the mock HFSS tree when needed, checks that the real
-#    data/waveguides holds only 500 GHz (leak guard), runs the ten cases in
+# 2. Builds the mock HFSS tree (each mock frequency with its dataset sidecar)
+#    and the mock round-gap tree when needed, checks that the real
+#    data/waveguides holds only 500 GHz (leak guard), runs the eleven cases in
 #    parallel with a pinned Geant4 thread count (BBR_THREADS, default 8), each
 #    in BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the
-#    installed env script): the six validation/G4Macros fixtures and four
+#    installed env script): the seven validation/G4Macros fixtures and four
 #    example macros (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
 #    their command lines are pinned by drift_guards.sh). Scans every log for
-#    GeomNav / G4Exception / BBR0xx / LP002 messages, and checks that the
-#    frequency case's BBR008 clamp warning fires once per side.
+#    GeomNav / G4Exception / BBR0xx / LP002 messages, checks that the
+#    frequency case's BBR008 clamp warning fires once per side, and that the
+#    BBR026 cutoff warning tolerated in the Planck cases fires at most once per
+#    dataset and direction.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
 #    one PASS/FAIL line per check (with BBR_PIN=1 also the row fixed-seed
 #    numbers: the three fixed-seed numbers against Scripts/numbers.baseline).
@@ -251,12 +254,15 @@ echo "=== 2. macros ==="
 rm -rf "$REG"; mkdir -p "$REG"
 
 # Mock multi-frequency HFSS tree for the frequency fixture. ~1.3 GB and ~5 s, so
-# it is rebuilt only when it is missing or older than the real data or the
-# generator. It lives in the build dir and is reached from a macro's run
-# directory as ../mock_hfss via the symlink beside it.
+# it is rebuilt only when it is missing or older than the real data, the
+# generator, bbrsim/sidecar.py (which writes its sidecars) or bbrsim/hfss.py
+# (which sidecar.py imports). It lives in the
+# build dir and is reached from a macro's run directory as ../mock_hfss via the
+# symlink beside it.
 MOCK="$BUILD/mock_hfss"
 if [ ! -d "$MOCK/waveguides" ] || \
    [ -n "$(find "$REPO/data/waveguides" "$VAL/Scripts/make_mock_hfss_frequencies.py" \
+            "$REPO/tools/python/bbrsim/sidecar.py" "$REPO/tools/python/bbrsim/hfss.py" \
             -newer "$MOCK/waveguides" -print -quit 2>/dev/null)" ]; then
   echo "generating mock HFSS frequency tree in $MOCK ..."
   # Written beside the final path and renamed only on success, so an interrupted
@@ -271,6 +277,22 @@ if [ ! -d "$MOCK/waveguides" ] || \
 fi
 ln -s "$MOCK" "$REG/mock_hfss"
 
+# Mock round-gap tree for the round case: the RoundGap_r50um dataset plus links to
+# the real cracks (BBRsim validates every placed crack). Small; rebuilt when it is
+# missing or older than the real data, the generator, bbrsim/sidecar.py or bbrsim/hfss.py.
+MOCKRG="$BUILD/mock_round_gap"
+if [ ! -d "$MOCKRG/waveguides" ] || \
+   [ -n "$(find "$REPO/data/waveguides" "$VAL/Scripts/make_mock_round_gap.py" "$REPO/tools/python/bbrsim/sidecar.py" \
+            "$REPO/tools/python/bbrsim/hfss.py" -newer "$MOCKRG/waveguides" -print -quit 2>/dev/null)" ]; then
+  echo "generating mock round-gap tree in $MOCKRG ..."
+  rm -rf "$MOCKRG" "$MOCKRG.tmp"
+  if ! $PY "$VAL/Scripts/make_mock_round_gap.py" --real "$REPO/data/waveguides" --dst "$MOCKRG.tmp" \
+         >"$BUILD/mock_round_gap.log" 2>&1 || ! mv "$MOCKRG.tmp" "$MOCKRG"; then
+    rm -rf "$MOCKRG.tmp"; echo "MOCK ROUND-GAP GENERATION FAILED:"; tail -5 "$BUILD/mock_round_gap.log"; exit 2
+  fi
+fi
+ln -s "$MOCKRG" "$REG/mock_round_gap"
+
 # The real tree must stay single-frequency: catches mock data written into data/.
 # Run with -c: conda run does not forward stdin, so a heredoc would never execute
 # and the guard could never fail. Run from / so the CWD cannot shadow the
@@ -284,27 +306,28 @@ run_macro() {  # case executable macro-path
   mkdir -p "$REG/$1" && ( cd "$REG/$1" && "$2" "$3" >run.log 2>&1; echo $? >exit.code )
 }
 
-# Count log lines that indicate trouble. A tolerated exception code (the
-# expected BBR008 clamp warnings of the frequency case) is subtracted from both
+# Count log lines that indicate trouble. The tolerated exception codes, an ERE
+# alternation (the expected BBR008 clamp warnings of the frequency case, the
+# BBR026 cutoff warnings of the Planck cases), are subtracted from both
 # the code hits and the two-line G4Exception banner, which a single grep cannot
 # do: a JustWarning prints "G4Exception-START" and "*** G4Exception : CODE" on
 # separate lines, and threads interleave.
-scan_log() {  # case-dir [tolerated-code]
+scan_log() {  # case-dir [tolerated-codes-ERE]
   local log="$REG/$1/run.log" tol="${2:-}"
   local n_geom n_lp n_start n_bbr n_tol=0
   n_geom=$(grep -c -i "GeomNav" "$log" || true)
   n_lp=$(grep -c "LP002" "$log" || true)
   n_start=$(grep -c "G4Exception-START" "$log" || true)
   if [ -n "$tol" ]; then
-    n_bbr=$(grep -E "BBR0[0-9][0-9]" "$log" | grep -v -c "$tol" || true)
-    n_tol=$(grep -c -E "G4Exception : $tol" "$log" || true)
+    n_bbr=$(grep -E "BBR0[0-9][0-9]" "$log" | grep -v -c -E "$tol" || true)
+    n_tol=$(grep -c -E "G4Exception : ($tol)" "$log" || true)
   else
     n_bbr=$(grep -c -E "BBR0[0-9][0-9]" "$log" || true)
   fi
   echo $(( n_geom + n_lp + (n_start - n_tol) + n_bbr ))
 }
 # refl, planck, config_mt and lp run the example macros themselves, pinned by the
-# drift guard "regression macros pinned"; the other six are validation-only fixtures.
+# drift guard "regression macros pinned"; the other seven are validation-only fixtures.
 run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
 run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
 run_macro config_mt "$TESTWORLD" "$REPO/examples/testworld/G4Macros/config_mt.mac"   &
@@ -313,18 +336,28 @@ run_macro exit      "$TESTWORLD" "$VM/Validation_WorldExit.mac"       &
 run_macro transmit  "$TESTWORLD" "$VM/Validation_CrackTransmit.mac"   &
 run_macro oblique   "$TESTWORLD" "$VM/Validation_CrackOblique.mac"    &
 run_macro frequency "$TESTWORLD" "$VM/Validation_CrackFrequency.mac"  &
+run_macro round     "$TESTWORLD" "$VM/Validation_RoundGap.mac"    &
 run_macro lp        "$LIGHTPIPE" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac"   &
 run_macro lp_cad    "$LIGHTPIPE" "$VM/Validation_LightPipeCAD.mac"    &
 wait
-for d in refl planck config_mt wall exit transmit oblique frequency lp lp_cad; do
+for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_cad; do
   code=$(cat "$REG/$d/exit.code")
-  tol=""; [ "$d" = "frequency" ] && tol="BBR008"   # expected clamp warnings
+  case "$d" in
+    frequency) tol="BBR008|BBR026" ;;               # clamp warnings; Planck photons below the TE10 cutoff
+    planck|config_mt|transmit) tol="BBR026" ;;      # Planck photons below the cracks' TE10 cutoff (14.99 GHz)
+    *) tol="" ;;
+  esac
   nbad=$(scan_log "$d" "$tol")
   if [ "$code" -eq 0 ] && [ "$nbad" -eq 0 ] && ls "$REG/$d"/output/*.root >/dev/null 2>&1; then
     line PASS "run:$d" "exit 0, no GeomNav/G4Exception/BBR0xx/LP002${tol:+ (except $tol)}"; pass=$((pass+1))
   else
     line FAIL "run:$d" "exit $code, flagged log lines: $nbad"; fail=$((fail+1))
-    grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | head -3
+    # Show the first offenders, not the tolerated codes, which may fill the head.
+    if [ -n "$tol" ]; then
+      grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | grep -v -E "$tol" | head -3
+    else
+      grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | head -3
+    fi
   fi
 done
 # The clamp warning must fire exactly once per side for crack1 (runs 13 and 14
@@ -335,6 +368,21 @@ for side in low high; do
   if [ "$n" -eq 1 ]; then line PASS "clamp warning $side" "[frequency] BBR008 once"; pass=$((pass+1))
   else line FAIL "clamp warning $side" "[frequency] BBR008 count $n, expected 1"; fail=$((fail+1)); fi
 done
+# BBR026 may fire in the Planck cases, at most once per dataset and direction.
+# Counted per case: each case is its own process with its own one-shot flags.
+# Fails closed: every BBR026 banner (the line scan_log subtracts) must have a
+# parsed description line, so a changed message format cannot pass unseen.
+c26=""
+for d in planck config_mt transmit frequency; do
+  [ -f "$REG/$d/run.log" ] || { c26="$c26 [$d] no run.log;"; continue; }
+  n_ban=$(grep -c "G4Exception : BBR026" "$REG/$d/run.log" || true)
+  n_desc=$(grep -cE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) " "$REG/$d/run.log" || true)
+  [ "$n_ban" -ne "$n_desc" ] && c26="$c26 [$d] $n_ban BBR026 banners, $n_desc parsed descriptions;"
+  c=$(grep -oE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) " "$REG/$d/run.log" | sort | uniq -c | awk '$1 > 1')
+  [ -n "$c" ] && c26="$c26 [$d] $c"
+done
+if [ -z "$c26" ]; then line PASS "cutoff warning once" "BBR026 at most once per dataset and direction per case"; pass=$((pass+1))
+else line FAIL "cutoff warning once" "$c26"; fail=$((fail+1)); fi
 
 echo "=== 3. validators ==="
 # An XFAIL holds only for the documented failure: the validator reached its
@@ -433,7 +481,24 @@ for f in "$REG"/frequency/output/bbr_freq_r*.root; do
 done
 if [ "$frq_n" -gt 0 ] && [ "$frq_bad" -eq 0 ]; then line PASS "frequency invariants" "[frequency] check_invariants on $frq_n per-run files"; pass=$((pass+1))
 else fail=$((fail+frq_bad)); [ "$frq_n" -eq 0 ] && { line FAIL "frequency invariants" "[frequency] no per-run files found"; fail=$((fail+1)); }; fi
+# 49 checks over the nine runs, including the startup crack line in the run log.
+out=$($PY "$VAL/check_round_gap.py" "$REG/round/output" --data-dir "$REG/mock_round_gap" \
+          --log "$REG/round/run.log" 2>&1); rc=$?
+res=$(echo "$out" | grep -E "^RESULT" | tail -1)
+if [ $rc -eq 0 ]; then line PASS check_round_gap.py "[round] $res"; pass=$((pass+1))
+else line FAIL check_round_gap.py "[round] $res"; fail=$((fail+1)); echo "$out" | grep -E "^  FAIL" | head -8 | sed 's/^/       /'; fi
+rg_bad=0; rg_n=0
+for f in "$REG"/round/output/bbr_round_r*.root; do
+  [ -f "$f" ] || continue
+  rg_n=$((rg_n+1))
+  out=$($PY "$VAL/check_invariants.py" "$f" 2>&1) || { rg_bad=$((rg_bad+1)); line FAIL check_invariants.py "[round/$(basename "$f")] $(echo "$out" | grep -E "^RESULT" | tail -1)"; }
+done
+if [ "$rg_n" -gt 0 ] && [ "$rg_bad" -eq 0 ]; then line PASS "round invariants" "[round] check_invariants on $rg_n per-run files"; pass=$((pass+1))
+else fail=$((fail+rg_bad)); [ "$rg_n" -eq 0 ] && { line FAIL "round invariants" "[round] no per-run files found"; fail=$((fail+1)); }; fi
 check -        check_cu_serov.py
+# Every HFSS dataset, real and mock, carries a valid schema-1 sidecar: checks,
+# full mode lists, CSV checksums, C1-C5 (validation/README.md, Dataset sidecars).
+check -        check_dataset_sidecars.py "$REPO/data/waveguides" "$MOCK/waveguides" "$MOCKRG/waveguides"
 
 # BBR_PIN=1 (for refactors that must not change behaviour): the three fixed-seed
 # numbers must equal the committed Scripts/numbers.baseline exactly.

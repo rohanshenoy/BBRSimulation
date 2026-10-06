@@ -20,6 +20,16 @@ with its front face at x = 0. The slab material comes from
 `InfParallelPlate_crack2` (102 µm gap at z = 3 mm). For each, the library reads
 `<dataDir>/waveguides/<id>_<freq>GHz_Ephi={0,1}`.
 
+Opt-in round gap: `/bbr/testworld/roundGap true` (PreInit only, default
+`false`) also places `RoundGapPlate`, a 0.4 mm Cu plate centred at z = −80 mm
+with its front face at x = 0, holding `RoundGap_r50um`, a straight round
+`vacuum_wg` hole along x (a `G4Tubs` turned onto local x inside a
+`G4DisplacedSolid`; radius 51 µm against the 50 µm HFSS radius). With the
+default `false` the world, and so the pinned regression macros, are unchanged.
+A run with the round gap on needs a data root holding a `RoundGap_r50um`
+dataset, for example the mock written by
+`validation/Scripts/make_mock_round_gap.py`, selected with `/bbr/dataDir`.
+
 Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x faces
 (the crack axis). Entry through a side face is not detected and is treated as
 an axial entry.
@@ -38,6 +48,17 @@ an axial entry.
   `/bbr/gun/energy_eV` (default 500 GHz), with random polarization unless
   `/bbr/gun/pol` sets one. z = 0 aims at crack1, z = 3 mm at crack2, z ≳ 5 mm at
   solid copper.
+
+## Commands
+
+All are issued before `/run/initialize` unless noted.
+
+| Command | Owner | Effect |
+|---|---|---|
+| `/bbr/det/setCuMaterial`, `/bbr/det/setCuRRR`, `/bbr/det/setCuStageT` | library (`BBRConfigMessenger`) | Cu RRR and temperature stage |
+| `/bbr/dataDir` | library | data root holding `waveguides/` |
+| `/bbr/thermal/*`, `/bbr/gun/*` | library | Planck emitter and fixed gun; also valid after `/run/initialize` |
+| `/bbr/testworld/roundGap <bool>` | this example (`TestWorldMessenger`) | also place the round gap (default `false`); refused after `/run/initialize` |
 
 ## Execution & output
 
@@ -84,10 +105,10 @@ If you `cmake --install` the example into the library's prefix, a shell that has
 ## Testing
 
 The regression runner runs this executable on three of the macros here,
-`reflectance.mac`, `planck.mac` and `config_mt.mac`, and on five fixtures that
+`reflectance.mac`, `planck.mac` and `config_mt.mac`, and on six fixtures that
 exist only in `validation/G4Macros/` (`Validation_CrackWall`,
 `Validation_WorldExit`, `Validation_CrackTransmit`, `Validation_CrackOblique`,
-`Validation_CrackFrequency`). The three macros are therefore regression
+`Validation_CrackFrequency`, `Validation_RoundGap`). The three macros are therefore regression
 inputs: the drift guard `regression macros pinned` fails when one of their
 command lines changes (only full-line comment and blank-line edits
 pass), so change them only together with their validators and then update the

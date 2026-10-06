@@ -11,6 +11,7 @@ set(BBRsim_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRConfigManager.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRConfigMessenger.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRCrackLibrary.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRDatasetSidecar.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBRHFSSData.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBSimOpBoundaryProcess.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/src/BBSimPhysics.cc
@@ -26,6 +27,7 @@ set(BBRsim_HEADERS
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRConfigManager.hh
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRConfigMessenger.hh
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRCrackLibrary.hh
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRDatasetSidecar.hh
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRHFSSData.hh
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBRMaterials.hh
   ${CMAKE_CURRENT_SOURCE_DIR}/include/BBSimOpBoundaryProcess.hh
@@ -50,6 +52,9 @@ endif()
 target_include_directories(BBRsim PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/BBRsim>)
+# nlohmann/json 3.12.0, vendored for the HFSS dataset sidecars. PRIVATE (never
+# installed, never in a public header) and SYSTEM (its warnings are not ours).
+target_include_directories(BBRsim SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/external)
 # Geant4 11.4 exports imported targets, so include dirs and compile
 # definitions reach consumers through this PUBLIC link.
 target_link_libraries(BBRsim PUBLIC ${Geant4_LIBRARIES})

@@ -6,12 +6,23 @@
 // double or misordered registration is fatal (BBR014, D6).
 //
 // The event_loop_fatal cases run one event (optical physics only) into a
-// vacuum_wg crack that has no HFSS dataset: BBR011, raised by BBRCrackLibrary
-// under the wrapper's PostStepDoIt, must leave BeamOn as the G4Exception. With
-// the sequential run manager the throwing handler catches it; with the tasking
-// run manager it is raised on a worker thread, whose own stock handler aborts
-// the process (event_loop_fatal_mt, run through tests/ExpectAbort.cmake).
+// vacuum_wg crack whose dataset passes the startup check (sidecar and all four
+// CSVs present) but whose Ephi=1 waveguide.csv has a non-numeric field in a
+// data row: BBR013, raised by BBRHFSSData when it reads the CSVs at the first
+// selection under the wrapper's PostStepDoIt, must leave BeamOn as the
+// G4Exception. With the sequential run manager the throwing handler catches
+// it; with the tasking run manager it is raised on a worker thread, whose own
+// stock handler aborts the process (event_loop_fatal_mt, run through
+// tests/ExpectAbort.cmake).
+//
+// The *_stops_before_events cases: BBSimOpBoundaryProcess::BuildPhysicsTable
+// validates every placed crack at the first run initialization (/run/beamOn
+// with the sequential run manager used there; /run/initialize with an MT or
+// task run manager, whose Initialize calls BeamOn(0)), so a dataset without
+// its sidecar (BBR024) or with an exit section wider than the crack (BBR025)
+// stops the run before any event.
 #include "BBRTestSupport.hh"
+#include "HFSSFixture.hh"
 
 #include "BBRConfigManager.hh"
 #include "BBRMaterials.hh"
@@ -46,9 +57,9 @@
 #include "G4VUserDetectorConstruction.hh"
 #include "G4VUserPrimaryGeneratorAction.hh"
 
-#include <cstdlib>
-#include <stdexcept>
+#include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace bbrtest;
@@ -123,22 +134,37 @@ G4RunManager* Build(Order order) {
   return rm;
 }
 
-// The event-loop world: a vacuum_wg crack named NoSuchCrack (the HFSS dataset
-// id is the volume name), entry face at x = 0, in a G4_Galactic world. The data
-// root is the repository's data/ (BBRSIM_TEST_DATA), whose waveguides/ holds
-// only the two test-world cracks, so the crack's first photon raises BBR011.
+// The event-loop world: a vacuum_wg crack (the HFSS dataset id is the volume
+// name), entry face at x = 0, in a G4_Galactic world.
 class CrackWorld : public G4VUserDetectorConstruction {
  public:
+  explicit CrackWorld(std::string name) : fName(std::move(name)) {}
   G4VPhysicalVolume* Construct() override {
     auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
     auto* wlv = new G4LogicalVolume(new G4Box("World", 50 * mm, 50 * mm, 50 * mm), gal, "World");
     auto* world = new G4PVPlacement(nullptr, {}, wlv, "World", nullptr, false, 0);
-    auto* clv = new G4LogicalVolume(new G4Box("NoSuchCrack", 2 * mm, 5 * mm, 0.026 * mm),
-                                    BBRMaterials::GetVacuumWG(), "NoSuchCrack");
-    new G4PVPlacement(nullptr, {2 * mm, 0, 0}, clv, "NoSuchCrack", wlv, false, 0);
+    auto* clv = new G4LogicalVolume(new G4Box(fName, 2 * mm, 5 * mm, 0.026 * mm),
+                                    BBRMaterials::GetVacuumWG(), fName);
+    new G4PVPlacement(nullptr, {2 * mm, 0, 0}, clv, fName, wlv, false, 0);
     return world;
   }
+ private:
+  std::string fName;
 };
+
+// Data root for the event-loop cases: ./hfss in the case's working directory.
+std::filesystem::path DataRoot() { return std::filesystem::current_path() / "hfss"; }
+
+// A complete dataset (sidecar and all four CSVs) whose Ephi=1 waveguide.csv
+// carries Ex_real = "abc" in its data row under a valid header: the startup
+// check, which looks only for the files, passes, and the first selection,
+// mid-event, raises BBR013 when the loader parses that row.
+void WriteBadRowDataset(const std::string& id) {
+  auto ds = hfssfix::Mini500();
+  hfssfix::WriteDataset(DataRoot(), id + "_500GHz", ds);   // the sidecar is derived from the valid rows
+  ds.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,abc,0,1,0,0,0\n";
+  bbrtest::WriteFile(DataRoot() / "waveguides" / (id + "_500GHz_Ephi=1") / "waveguide.csv", ds.wg1);
+}
 
 // One 500 GHz photon from x = -20 mm along +x, into the crack's entry face.
 class CrackGun : public G4VUserPrimaryGeneratorAction {
@@ -162,14 +188,12 @@ class CrackActions : public G4VUserActionInitialization {
 
 // Optical physics only: an event with the examples' FTFP_BERT list would first
 // build every physics table, which needs most of the Geant4 datasets.
-G4RunManager* BuildEventLoop(G4RunManagerType type) {
-  const char* data = std::getenv("BBRSIM_TEST_DATA");
-  if (!data) throw std::runtime_error("BBRSIM_TEST_DATA is not set");
-  BBRConfigManager::SetDataDir(data);   // on the master, before the workers copy it
+G4RunManager* BuildEventLoop(G4RunManagerType type, const std::string& crack) {
+  BBRConfigManager::SetDataDir(DataRoot().string());   // on the master, before the workers copy it
   auto* rm = G4RunManagerFactory::CreateRunManager(type);
   bbrtest::CreateElectronInPreInit();
   rm->SetNumberOfThreads(2);            // no effect on the sequential run manager
-  rm->SetUserInitialization(new CrackWorld);
+  rm->SetUserInitialization(new CrackWorld(crack));
   G4OpticalParameters::Instance()->SetProcessActivation("Cerenkov", false);
   G4OpticalParameters::Instance()->SetProcessActivation("Scintillation", false);
   auto* pl = new G4VModularPhysicsList;
@@ -213,25 +237,48 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR014", [&] { rm->Initialize(); }, "BBSimPhysics::WrapOpBoundaryProcess");
     }},
     {"event_loop_fatal", [] {
-      G4RunManager* rm = BuildEventLoop(G4RunManagerType::SerialOnly);
+      WriteBadRowDataset("BadRowCrack");
+      G4RunManager* rm = BuildEventLoop(G4RunManagerType::SerialOnly, "BadRowCrack");
       rm->Initialize();
-      ExpectG4Exception("BBR011", [&] { rm->BeamOn(1); }, "BBRCrackLibrary::Discover");
+      ExpectG4Exception("BBR013", [&] { rm->BeamOn(1); }, "BBRHFSSData::Load",
+                        "Bad numeric field Ex_real = 'abc' in " + DataRoot().string() +
+                          "/waveguides/BadRowCrack_500GHz_Ephi=1/waveguide.csv");
       // Raised mid-event, on the step that entered the crack. The run is left
       // half-processed, so this is the last thing the process does.
       CHECK(G4StateManager::GetStateManager()->GetCurrentState() == G4State_EventProc);
       const G4Step* s = G4EventManager::GetEventManager()->GetTrackingManager()->GetSteppingManager()->GetStep();
       CHECK(s->GetPreStepPoint()->GetPhysicalVolume()->GetName() == "World");
-      CHECK(s->GetPostStepPoint()->GetPhysicalVolume()->GetName() == "NoSuchCrack");
+      CHECK(s->GetPostStepPoint()->GetPhysicalVolume()->GetName() == "BadRowCrack");
       CHECK(s->GetPostStepPoint()->GetStepStatus() == fGeomBoundary);
       CHECK_NEAR(s->GetPostStepPoint()->GetPosition().x(), 0., 1e-9 * mm);
     }},
     {"event_loop_fatal_mt", [] {   // must abort: registered with bbrsim_add_abort_test
-      G4RunManager* rm = BuildEventLoop(G4RunManagerType::TaskingOnly);
+      WriteBadRowDataset("BadRowCrack");
+      G4RunManager* rm = BuildEventLoop(G4RunManagerType::TaskingOnly, "BadRowCrack");
       rm->Initialize();
       rm->BeamOn(1);
       // Not reached when the worker aborts. If BeamOn returns, the case exits 0, and
       // ExpectAbort.cmake fails it: the test requires the abort itself.
-      std::printf("BeamOn returned: the worker's BBR011 did not abort the process\n");
+      std::printf("BeamOn returned: the worker's BBR013 did not abort the process\n");
+    }},
+    {"missing_sidecar_stops_before_events", [] {
+      hfssfix::WriteDataset(DataRoot(), "Bare_500GHz", hfssfix::Mini500(), false);
+      G4RunManager* rm = BuildEventLoop(G4RunManagerType::SerialOnly, "Bare");
+      rm->Initialize();
+      ExpectG4Exception("BBR024", [&] { rm->BeamOn(1); }, "BBRDatasetSidecar",
+                        "Bare_500GHz.dataset.json: cannot be opened");
+      CHECK(G4StateManager::GetStateManager()->GetCurrentState() != G4State_EventProc);
+    }},
+    {"section_wider_than_crack_stops_before_events", [] {
+      auto p = hfssfix::SidecarFrom("Wide_500GHz", hfssfix::Mini500());
+      p.zHalf = 3e-5;   // 30 um, beyond the crack's 26 um half-gap
+      hfssfix::WriteDataset(DataRoot(), "Wide_500GHz", hfssfix::Mini500(), false);
+      bbrtest::WriteFile(DataRoot() / "waveguides" / "Wide_500GHz.dataset.json", hfssfix::SidecarJson(p));
+      G4RunManager* rm = BuildEventLoop(G4RunManagerType::SerialOnly, "Wide");
+      rm->Initialize();
+      ExpectG4Exception("BBR025", [&] { rm->BeamOn(1); }, "BBRDatasetSidecar",
+                        "does not fit strictly inside crack volume Wide");
+      CHECK(G4StateManager::GetStateManager()->GetCurrentState() != G4State_EventProc);
     }},
   });
 }

@@ -1,4 +1,5 @@
 #include "BBRHFSSData.hh"
+#include "BBRDatasetSidecar.hh"
 
 #include "G4Exception.hh"
 #include "G4PhysicalConstants.hh"
@@ -7,10 +8,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <cmath>
 #include <complex>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -72,20 +75,45 @@ bool FieldCountOK(const std::vector<std::string>& v, std::size_t n, const G4Stri
   return false;
 }
 
+// C1: the CSV header must list exactly the sidecar's columns. One leading UTF-8
+// byte-order mark is dropped first (SplitCSV drops a trailing CR), as the Python
+// check, which reads the header through pandas, does: the consumer is never
+// stricter than the producer's validator.
+void CheckHeader(std::string header, const std::vector<std::string>& want, const G4String& path,
+                 const std::string& sidecarPath)
+{
+  if (header.compare(0, 3, "\xEF\xBB\xBF") == 0) header.erase(0, 3);
+  const std::vector<std::string> got = SplitCSV(header);
+  if (got == want) return;
+  G4ExceptionDescription ed;
+  ed << "Header of " << path << " differs from the columns its sidecar " << sidecarPath << " declares";
+  std::size_t i = 0;
+  while (i < got.size() && i < want.size() && got[i] == want[i]) ++i;
+  if (i < got.size() && i < want.size())
+    ed << ": column " << i << " is '" << got[i] << "', the sidecar declares '" << want[i] << "'";
+  if (got.size() != want.size())
+    ed << (i < got.size() && i < want.size() ? ";" : ":") << " the header has " << got.size()
+       << " columns, the sidecar declares " << want.size();
+  ed << " (BBRHFSSData reads the columns by position).";
+  G4Exception("BBRHFSSData::Load", "BBR013", FatalException, ed);
+}
+
+bool Within(G4double v, G4double lo, G4double hi, G4double tol) { return v >= lo - tol && v <= hi + tol; }
+
 } // namespace
 
 // ---------------------------------------------------------------------------
 
 BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
-                         G4double expectedFreqGHz)
+                         G4double expectedFreqGHz, const BBRDatasetSidecar* sidecar)
   : fFreqGHz(expectedFreqGHz)
 {
   auto dir0 = baseDir + "/" + dirStem + "_Ephi=0";
   auto dir1 = baseDir + "/" + dirStem + "_Ephi=1";
-  LoadFarField (dir0 + "/far_field.csv",  0);
-  LoadFarField (dir1 + "/far_field.csv",  1);
-  LoadWaveguide(dir0 + "/waveguide.csv",  0);
-  LoadWaveguide(dir1 + "/waveguide.csv",  1);
+  LoadFarField (dir0 + "/far_field.csv",  0, sidecar);
+  LoadFarField (dir1 + "/far_field.csv",  1, sidecar);
+  LoadWaveguide(dir0 + "/waveguide.csv",  0, sidecar);
+  LoadWaveguide(dir1 + "/waveguide.csv",  1, sidecar);
 
   if (fData.empty())
     G4Exception("BBRHFSSData", "BBR000", FatalException,
@@ -105,6 +133,7 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
       G4Exception("BBRHFSSData", "BBR007", FatalException, ed);
     }
   }
+  if (sidecar) CheckAgainstSidecar(*sidecar, dirStem);
 
   // Polarization cross term (Wang eq. 58 applied to eq. 53): the transmitted power of a
   // mixed polarization is |Et E0 + Ep E1|^2 integrated over the exit face, which adds
@@ -186,7 +215,7 @@ void BBRHFSSData::CheckFrequencyColumn(const G4String& path,
 // far_field.csv columns:
 //   Freq(0) Ephi(1) IWavePhi(2) IWaveTheta(3) Phi(4) Theta(5)
 //   rEphi_real(6) rEphi_imag(7) rEtheta_real(8) rEtheta_imag(9)
-void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag)
+void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag, const BBRDatasetSidecar* sc)
 {
   std::ifstream f(path);
   if (!f)
@@ -195,6 +224,7 @@ void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag)
 
   std::string line;
   std::getline(f, line); // skip header
+  if (sc) CheckHeader(line, sc->farFieldColumns, path, sc->path);
 
   // Row counter per key: the Ephi=1 rows of a key are paired with its Ephi=0
   // FarFieldPoints by position, and each pair must share (Phi, Theta) (BBR012).
@@ -264,7 +294,7 @@ void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag)
 // waveguide.csv columns:
 //   Freq(0) Ephi(1) IWavePhi(2) IWaveTheta(3) OutgoingPower(4) IngoingPower(5)
 //   X(6) Y(7) Z(8) Ex_real(9) Ey_real(10) Ez_real(11) Ex_imag(12) Ey_imag(13) Ez_imag(14)
-void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag)
+void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDatasetSidecar* sc)
 {
   std::ifstream f(path);
   if (!f)
@@ -273,6 +303,7 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag)
 
   std::string line;
   std::getline(f, line); // skip header
+  if (sc) CheckHeader(line, sc->exitFieldColumns, path, sc->path);
 
   // Ephi=1 exit points are paired with the Ephi=0 ones by position and must
   // sit at the same (X, Y, Z) (BBR012), as for the far field.
@@ -359,6 +390,99 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag)
 // ---------------------------------------------------------------------------
 // Lookup and query
 // ---------------------------------------------------------------------------
+
+// C2-C5 (validation/README.md, Dataset sidecars): every key on the declared grid; per key
+// the declared far-field and exit row counts; every far-field and exit row in
+// the declared ranges; the distinct-value counts (equal to the declared ones, or
+// with outside_points "omitted" at most the declared exit-lattice counts); X = 0;
+// and every exit point inside the declared cross-section.
+void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4String& dirStem) const
+{
+  auto fail = [&](const char* code, const std::string& what) {
+    G4ExceptionDescription ed;
+    ed << "Dataset " << dirStem << " disagrees with its sidecar " << sc.path << ": " << what;
+    G4Exception("BBRHFSSData::CheckAgainstSidecar", code, FatalException, ed);
+  };
+  // The shortest text that reads back as the same double, as Python's repr: a value
+  // just past a bound (Theta = 180.000001) must not print as the bound itself, and
+  // X = 1e-12 must not print as to_string's 0.000000.
+  auto num = [](G4double v) {
+    char buf[64];
+    const auto r = std::to_chars(buf, buf + sizeof buf, v, std::chars_format::general);
+    return std::string(buf, r.ptr);
+  };
+  auto fmt = [&](G4double a, G4double b) { return "(" + num(a) + ", " + num(b) + ")"; };
+  auto range = [&](const char* name, const BBRAxisRange& r) {
+    return std::string(name) + " in [" + num(r.min) + ", " + num(r.max) + "]";
+  };
+  auto declared = [](G4double v, const std::vector<G4double>& list) {
+    for (const G4double d : list) if (RoundDeg(d) == v) return true;
+    return false;
+  };
+  const G4double yTol = 1e-9 * std::max(std::abs(sc.exitY.min), std::abs(sc.exitY.max));
+  const G4double zTol = 1e-9 * std::max(std::abs(sc.exitZ.min), std::abs(sc.exitZ.max));
+  std::set<G4double> phis, thetas, ys, zs;
+  std::size_t outside = 0;
+  G4double outY = 0., outZ = 0.;
+  for (const auto& [key, ds] : fData) {
+    const std::string k = fmt(key.first, key.second);
+    if (!declared(key.first, sc.incidentPhiDeg) || !declared(key.second, sc.incidentThetaDeg))
+      fail("BBR007", "incidence key " + k + " is not on the declared incident_phi_deg x incident_theta_deg grid");
+    if (G4int(ds.farField.size()) != sc.farFieldPointsPerKey)
+      fail("BBR012", "key " + k + " has " + std::to_string(ds.farField.size()) + " far-field rows; points_per_key is " +
+                     std::to_string(sc.farFieldPointsPerKey));
+    if (G4int(ds.exitPoints.size()) != sc.exitPointsPerKey)
+      fail("BBR012", "key " + k + " has " + std::to_string(ds.exitPoints.size()) + " exit points; points_per_key_retained is " +
+                     std::to_string(sc.exitPointsPerKey));
+    for (const auto& fp : ds.farField) {
+      if (!Within(fp.phi_deg, sc.farFieldPhi.min, sc.farFieldPhi.max, 1e-9) ||
+          !Within(fp.theta_deg, sc.farFieldTheta.min, sc.farFieldTheta.max, 1e-9))
+        fail("BBR012", "far-field row (Phi, Theta) = " + fmt(fp.phi_deg, fp.theta_deg) + " of key " + k +
+                       " lies outside the declared ranges " + range("Phi", sc.farFieldPhi) + ", " +
+                       range("Theta", sc.farFieldTheta) + " deg");
+      phis.insert(fp.phi_deg);
+      thetas.insert(fp.theta_deg);
+    }
+    for (const auto& ep : ds.exitPoints) {
+      if (std::abs(ep.x) > 1e-12)
+        fail("BBR012", "an exit point of key " + k + " has X = " + num(ep.x) + " m; the sidecar declares x_e = 0");
+      if (!Within(ep.y, sc.exitY.min, sc.exitY.max, yTol) || !Within(ep.z, sc.exitZ.min, sc.exitZ.max, zTol))
+        fail("BBR012", "exit point (Y, Z) = " + fmt(ep.y, ep.z) + " m of key " + k + " lies outside the declared grid " +
+                       range("Y", sc.exitY) + ", " + range("Z", sc.exitZ) + " m");
+      ys.insert(ep.y);
+      zs.insert(ep.z);
+      if (!sc.crossSection.Contains(ep.y, ep.z)) {
+        // outside_points "zero": a point with no field in either polarization can never be sampled.
+        const bool noField = ep.Ex_re_0 == 0. && ep.Ex_im_0 == 0. && ep.Ey_re_0 == 0. && ep.Ey_im_0 == 0. &&
+                             ep.Ez_re_0 == 0. && ep.Ez_im_0 == 0. && ep.Ex_re_1 == 0. && ep.Ex_im_1 == 0. &&
+                             ep.Ey_re_1 == 0. && ep.Ey_im_1 == 0. && ep.Ez_re_1 == 0. && ep.Ez_im_1 == 0.;
+        if (!(sc.outsidePoints == "zero" && noField)) {
+          if (outside == 0) { outY = ep.y; outZ = ep.z; }   // the first offender, as the Python check reports
+          ++outside;
+        }
+      }
+    }
+  }
+  if (G4int(phis.size()) != sc.farFieldPhi.count || G4int(thetas.size()) != sc.farFieldTheta.count)
+    fail("BBR012", "the far field has " + std::to_string(phis.size()) + " Phi and " + std::to_string(thetas.size()) +
+                   " Theta values; the sidecar declares " + std::to_string(sc.farFieldPhi.count) + " and " +
+                   std::to_string(sc.farFieldTheta.count));
+  // With "none" and "zero" every lattice point is written, so the retained distinct counts
+  // equal the declared ones. With "omitted" the producer declares the whole export lattice
+  // and drops the points outside the section, so a round face whose radius is not a multiple
+  // of the step leaves its outermost lattice columns without a retained point: the retained
+  // counts may then be smaller than the declared ones, never larger.
+  const bool omitted = sc.outsidePoints == "omitted";
+  const bool countsOk = omitted ? G4int(ys.size()) <= sc.exitY.count && G4int(zs.size()) <= sc.exitZ.count
+                                : G4int(ys.size()) == sc.exitY.count && G4int(zs.size()) == sc.exitZ.count;
+  if (!countsOk)
+    fail("BBR012", "the exit grid has " + std::to_string(ys.size()) + " Y and " + std::to_string(zs.size()) +
+                   " Z values; the sidecar declares " + std::to_string(sc.exitY.count) + " and " + std::to_string(sc.exitZ.count) +
+                   (omitted ? " (with outside_points omitted the retained counts may be smaller, not larger)" : ""));
+  if (outside)
+    fail("BBR025", std::to_string(outside) + " exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = " +
+                   fmt(outY, outZ) + " m");
+}
 
 const BBRHFSSData::AngleDataset& BBRHFSSData::FindDataset(
     G4double iwavePhi_deg, G4double iwaveTheta_deg) const
@@ -505,10 +629,10 @@ G4ThreeVector BBRHFSSData::SampleExitPosition(
   }
 
   const auto& ep = eps[j];
-  // HFSS coordinates are SI (meters). Geant4 base unit is mm → multiply by CLHEP::m.
-  // HFSS model: x=b(gap), y=long, z=propagation. Exit face (X=0 in CSV):
-  //   CSV Y → y_model → theta_hat (world ŷ)   via crack_x
-  //   CSV Z → x_model → phi_hat   (world ẑ)   via crack_y
+  // HFSS coordinates are SI (meters); Geant4's base unit is mm, so multiply by
+  // CLHEP::m. The CSV points are in the exit coordinate system (x_e, y_e, z_e) =
+  // (Z, Y, -X)_HFSS = (normal, theta_hat, phi_hat): the exit plane is x_e = 0 (CSV X
+  // column = 0), CSV Y runs along crack_x (theta_f) and CSV Z along crack_y (phi_f).
   return exit_face_center + (ep.y * CLHEP::m) * crack_x
                           + (ep.z * CLHEP::m) * crack_y;
 }

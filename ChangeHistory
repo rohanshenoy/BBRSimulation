@@ -1,3 +1,6 @@
+2026-10-05  cutoff : BBR026 when a photon and its HFSS dataset lie on opposite sides of the lowest-mode cutoff.
+2026-10-05  roundgap : Straight round gap (opt-in /bbr/testworld/roundGap, G4DisplacedSolid tube) validated against a mock dataset.
+2026-10-05  sidecar : HFSS dataset sidecars (schema 1.0, BBR024/BBR025); legacy sidecars; placed cracks validated before the first event; data fingerprint over sidecars.
 2026-09-30  review : Rejected /bbr/ values fail the command, so a batch run exits non-zero; geometry and HFSS data fingerprint recorded once per process, tessellated solids by facet count; runner scripts no longer need ripgrep; standalone example builds moved to <build>/standalone-examples.
 2026-09-30  audit : Per-result schema-2 metadata and provenance; true reflection counters and validator; shared source/output helpers; finite Planck normalization, surface guards (BBR023) and exact Cu temperature keys; batch failure exits; optional in-tree example build.
 2026-09-30  g4-11.1 : Builds and passes the C++ tests on Geant4 11.1.2 (Linux, GCC 13.2).

@@ -26,6 +26,8 @@ function(bbrsim_add_test_program name)
   cmake_parse_arguments(T "NEEDS_ENSDF" "LABEL" "CASES;ENV;ENVMOD;WILL_FAIL" ${ARGN})
   add_executable(${name} ${name}.cc BBRTestSupport.hh)
   target_link_libraries(${name} PRIVATE BBRsim)
+  # The vendored nlohmann/json, which the library keeps PRIVATE; tests are never installed.
+  target_include_directories(${name} SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/library/src/external)
   target_compile_options(${name} PRIVATE -Wall -Wextra)
   set(env ${T_ENV})
   if(T_NEEDS_ENSDF)
@@ -63,8 +65,8 @@ endfunction()
 
 bbrsim_add_test_program(testSupport LABEL unit
   CASES handler_throws handler_records_warning scripted_engine tempdir
-        check_fails unexpected_exception
-  WILL_FAIL check_fails unexpected_exception)
+        check_fails unexpected_exception message_mismatch_fails
+  WILL_FAIL check_fails unexpected_exception message_mismatch_fails)
 bbrsim_add_abort_test(testSupport.abort_stock testSupport abort_stock BBRT03)
 
 bbrsim_add_test_program(testHFSSData LABEL unit
@@ -72,10 +74,18 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         direction_cdf zero_weight_rows coherent_cross_term_in_direction exit_position
         err_missing_files err_no_keys err_key_mismatch err_freq_column err_ephi1_row_mismatch
         err_bad_number real_data_smoke transmittance_coherent real_data_diagonal_key
+        sidecar_checks_pass sidecar_c1_header sidecar_c1_bom sidecar_c2_key_off_grid sidecar_c3_far_field
+        sidecar_c4_exit_rows sidecar_c5_outside_section sidecar_c5_zero_outside sidecar_real_data
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
+bbrsim_add_test_program(testSidecar LABEL unit
+  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only invariant_diff field_types
+        recorded_fields f12_fits_solid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
-  CASES selection_grid5 token_verbatim discovery_errors unreadable_root concurrent_first_load)
+  CASES selection_grid5 token_verbatim discovery_errors discovery_missing_far_field discovery_missing_waveguide
+        dataset_id_of unreadable_root concurrent_first_load
+        sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok
+        placed_cracks_json cutoff_warning)
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
   CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget snap_and_rotation
@@ -84,7 +94,7 @@ bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
 
 bbrsim_add_test_program(testPhysicsList LABEL regression NEEDS_ENSDF
   CASES wrapped_once_at_stock_index registered_twice_is_fatal wrong_order_is_fatal event_loop_fatal
-  ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
+        missing_sidecar_stops_before_events section_wider_than_crack_stops_before_events)
 
 # testPassthrough: stock vs wrapped boundary optics, byte for byte. The program
 # takes <mode> <nEvents> <outfile>, so it is registered by hand: four producer
@@ -138,12 +148,15 @@ bbrsim_add_test_program(testConfig LABEL unit
   CASES defaults command_table datadir_quotes setT_units validation_paths datadir_default datadir_env datadir_env_late
         worker_clone_isolation worker_before_master print_flushes
   ENVMOD "BBRSIMDATA=unset:")
-bbrsim_add_test_program(testBoundaryStatuses LABEL unit CASES stock_statuses)
+bbrsim_add_test_program(testBoundaryStatuses LABEL unit CASES stock_statuses data_fingerprint)
 target_compile_definitions(testConfig PRIVATE "BBRSIM_TEST_PREFIX=\"${CMAKE_INSTALL_PREFIX}\"")
 set_tests_properties(testConfig.datadir_env testConfig.datadir_env_late PROPERTIES ENVIRONMENT_MODIFICATION "${BBRSIM_TEST_HERMETIC};BBRSIMDATA=set:/env/data")
 
 # The event-loop fatal on a worker thread aborts the process; ExpectAbort.cmake
-# checks the abort and the code. Same environment as the testPhysicsList cases.
-bbrsim_add_abort_test(testPhysicsList.event_loop_fatal_mt testPhysicsList event_loop_fatal_mt BBR011)
+# checks the abort and the code. Same environment as the testPhysicsList cases,
+# and its own working directory, where the case writes its HFSS data root.
+bbrsim_add_abort_test(testPhysicsList.event_loop_fatal_mt testPhysicsList event_loop_fatal_mt BBR013)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/work/testPhysicsList.event_loop_fatal_mt)
 set_tests_properties(testPhysicsList.event_loop_fatal_mt PROPERTIES LABELS regression
-  ENVIRONMENT "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data;G4ENSDFSTATEDATA=${Geant4_DATASET_G4ENSDFSTATE_PATH}")
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/work/testPhysicsList.event_loop_fatal_mt
+  ENVIRONMENT "G4ENSDFSTATEDATA=${Geant4_DATASET_G4ENSDFSTATE_PATH}")

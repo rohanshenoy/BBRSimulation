@@ -1,6 +1,7 @@
 #include "BBRAnalysis.hh"
 
 #include "BBRConfigManager.hh"
+#include "BBRCrackLibrary.hh"
 #include "G4AnalysisManager.hh"
 #include "G4Material.hh"
 #include "G4LogicalVolume.hh"
@@ -38,32 +39,6 @@ std::string JsonString(const std::string& value) {
   }
   out << '"';
   return out.str();
-}
-
-std::string DataFingerprint(const std::string& directory) {
-  std::error_code ec;
-  const auto root = std::filesystem::path(directory) / "waveguides";
-  if (!std::filesystem::is_directory(root, ec)) return "unavailable";
-  std::vector<std::filesystem::path> paths;
-  for (std::filesystem::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec))
-    if (it->is_regular_file() && it->path().extension() == ".csv") paths.push_back(it->path());
-  if (ec) return "unavailable";
-  std::sort(paths.begin(), paths.end());
-  std::uint64_t hash = 14695981039346656037ULL;
-  auto add = [&](unsigned char c) { hash = (hash ^ c) * 1099511628211ULL; };
-  for (const auto& p : paths) {
-    for (unsigned char c : p.lexically_relative(root).generic_string()) add(c);
-    add(0);
-    std::ifstream input(p, std::ios::binary);
-    char buffer[65536];
-    while (input.read(buffer, sizeof(buffer)) || input.gcount())
-      for (std::streamsize i = 0; i < input.gcount(); ++i) add(static_cast<unsigned char>(buffer[i]));
-    if (!input.eof()) return "unavailable";
-    add(0);
-  }
-  std::ostringstream value;
-  value << "fnv1a64:" << std::hex << std::setw(16) << std::setfill('0') << hash;
-  return value.str();
 }
 
 const char* kOutputFile = "output/bbr.root";
@@ -130,6 +105,44 @@ const std::vector<StatusInfo> kStatuses = {
 #undef STOCK_STATUS
 #undef LOCAL_STATUS
 }  // namespace
+
+// FNV-1a over the name and bytes of every HFSS dataset sidecar
+// (<data root>/waveguides/*.dataset.json). Each sidecar records the sha256 of
+// its four CSVs (checked by validation/check_dataset_sidecars.py), so this
+// identifies the data at a few kilobytes of reads instead of every CSV.
+// "unavailable": no readable waveguides/ directory; "no-sidecars": one with
+// no sidecar in it (the empty-input hash would look like a real fingerprint).
+std::string BBRAnalysis::DataFingerprint(const std::string& dataRoot) {
+  std::error_code ec;
+  const auto root = std::filesystem::path(dataRoot) / "waveguides";
+  if (!std::filesystem::is_directory(root, ec)) return "unavailable";
+  const std::string suffix = ".dataset.json";
+  std::vector<std::filesystem::path> paths;
+  for (std::filesystem::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+    const std::string name = it->path().filename().string();
+    if (it->is_regular_file() && name.size() > suffix.size() &&
+        name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
+      paths.push_back(it->path());
+  }
+  if (ec) return "unavailable";
+  if (paths.empty()) return "no-sidecars";
+  std::sort(paths.begin(), paths.end());
+  std::uint64_t hash = 14695981039346656037ULL;
+  auto add = [&](unsigned char c) { hash = (hash ^ c) * 1099511628211ULL; };
+  for (const auto& p : paths) {
+    for (unsigned char c : p.filename().string()) add(c);
+    add(0);
+    std::ifstream input(p, std::ios::binary);
+    char buffer[65536];
+    while (input.read(buffer, sizeof(buffer)) || input.gcount())
+      for (std::streamsize i = 0; i < input.gcount(); ++i) add(static_cast<unsigned char>(buffer[i]));
+    if (!input.eof()) return "unavailable";
+    add(0);
+  }
+  std::ostringstream value;
+  value << "fnv1a64:" << std::hex << std::setw(16) << std::setfill('0') << hash;
+  return value.str();
+}
 
 BBRAnalysis::BBRAnalysis(const G4String& applicationVersion, const G4String& applicationFingerprint)
   : fApplicationVersion(applicationVersion), fApplicationFingerprint(applicationFingerprint) {
@@ -264,6 +277,9 @@ void BBRAnalysis::BeginRun(const G4Run* run, G4bool master) {
       }
       fGeometry = geometry.str();
     }
+    // The placed cracks and their sidecars: validated before the first run begins
+    // (at /run/initialize, or in a sequential run manager's first BeamOn).
+    if (fHfssDatasets.empty()) fHfssDatasets = BBRCrackLibrary::Instance().PlacedCracksJson();
     if (fDataFingerprint.empty())
       fDataFingerprint = DataFingerprint(BBRConfigManager::GetDataDir());
     std::ostringstream random;
@@ -304,6 +320,7 @@ void BBRAnalysis::WriteMetadata(const G4Run* run) const {
      << ", \"geant4\": " << JsonString(G4Version) << "},\n  \"data\": {\"directory\": "
      << JsonString(std::filesystem::absolute(std::string(BBRConfigManager::GetDataDir())).string())
      << ", \"fingerprint\": " << JsonString(fDataFingerprint)
+     << ", \"hfss_datasets\": " << (fHfssDatasets.empty() ? G4String("[]") : fHfssDatasets)
      << "},\n  \"legend\": {\n  \"status\": ";
   dumpMap(fStatusCodes);
   js << ",\n  \"event_type\": {\"0\": \"transmission\", \"1\": \"reflection\", \"2\": \"absorption\", \"3\": \"other\"},\n  \"volume\": ";

@@ -98,9 +98,15 @@ nearest its frequency (in log frequency) and records the choice in the
 `hfss_freq_GHz` column. Only a 500 GHz dataset exists, so every photon of a
 broadband Planck run gets the 500 GHz tables, and broadband crack results are
 indicative, not quantitative. Adding real data means adding
-`<id>_<freq>GHz_Ephi=N` directories under `waveguides/`. There is no
-interpolation between frequencies; a photon beyond the grid uses the nearest
-edge, with one `BBR008` warning per crack and side.
+`<id>_<freq>GHz_Ephi=N` directories under `waveguides/`, each pair with its
+`<id>_<freq>GHz.dataset.json` sidecar (see `validation/README.md`, Dataset
+sidecars). There is no interpolation between frequencies; a photon beyond the
+grid uses the nearest edge, with one `BBR008` warning per crack and side.
+When a photon's frequency and the dataset serving it lie on opposite sides of
+the guide's lowest-mode cutoff (`modes.cutoff_ghz` in the sidecar: TE10 at
+14.99 GHz for the slab cracks, TE11 at 1757 GHz for the 50 µm round gap),
+BBRsim warns once with `BBR026`. The 2000 GHz round-gap data are therefore for
+fixed-energy gun runs only until a dataset below cutoff exists.
 
 ### 3. Copper reflectance
 
@@ -154,6 +160,7 @@ are allowed and whether they reach the worker threads:
 | `/bbr/det/` | before `/run/initialize` | no | geometry is built once, on the master |
 | `/bbr/thermal/` | any time | yes | emitter rebuilt at the next event |
 | `/bbr/gun/` | any time | yes | read every event |
+| `/bbr/testworld/roundGap` | before `/run/initialize` | no | test world only, default `false`: `true` also places the opt-in straight round gap `RoundGap_r50um`, which needs a data root holding a `RoundGap_r50um` dataset (`/bbr/dataDir`) |
 | `/bbr/config/print` | any time | — | prints every current setting |
 
 There is no runtime geometry change: after `/run/initialize`, changing a
@@ -279,7 +286,9 @@ output (default `output/bbr.root` in the current directory) through the
 | `check_crack_wall_reflection.py` | reflection off a crack's side wall flips only p_z |
 | `check_crack_oblique.py` | 45° incidence: 138 checks against the HFSS tables and the Python model |
 | `check_crack_frequency.py` | dataset choice per photon on the mock five-frequency tree: 89 checks (`--data-dir`) |
+| `check_round_gap.py` | the opt-in straight round gap at 2000 GHz on its mock dataset: transmittance per polarization, exit positions inside the HFSS radius, the radial exit profile per polarization and the mean exit direction, 49 checks over nine runs, one of them the startup crack line in the run log (`--data-dir`, `--log`) |
 | `check_invariants.py` | no photon ever travels inside a metal, and every photon death is labelled correctly (`--allow-no-crossings` for a run that crosses no boundary) |
+| `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the two mock trees): every dataset is a complete trio with a valid schema-1 sidecar (full mode lists, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
 
 **Validator run by hand**, because it needs a large run:
 `check_cu_absorptance.py` (`planck_5M.mac`), shown above.
@@ -310,6 +319,40 @@ The fixtures these run on, and the runner, are described in
 `cmake --install build` in the repository, or point `/bbr/dataDir` or
 `$BBRSIMDATA` at a directory containing `waveguides/`. The message names the
 path it tried.
+
+**`/run/initialize` aborts with `BBR024`** (`HFSS dataset sidecar ... cannot
+be opened`, or a sidecar field that is missing, mistyped or names another
+dataset or frequency): every `<id>_<freq>GHz_Ephi={0,1}` pair needs its
+`<id>_<freq>GHz.dataset.json` beside it, and an old data tree or a hand-copied
+dataset has none. Fetch the sidecar the HFSS runner wrote with the dataset, or
+write one (`bbrsim.sidecar.build_from_csvs`; the mock generators show how),
+then run `conda run -n bbrsim python validation/check_dataset_sidecars.py
+<dir>/waveguides` before the Geant4 run. The message names the absolute
+sidecar path and the field. See [Dataset
+sidecars](validation/README.md#dataset-sidecars).
+
+**`BBR025`**: the dataset declares a convention or a geometry BBRsim does not
+implement. The message names the field (a frame, incidence, far-field or
+polarization definition, or the modes block) and the one convention the
+sampler implements; or, at `/run/initialize`, it names the crack volume whose
+solid the declared exit cross-section does not fit strictly inside (make the
+Geant4 section larger than the HFSS one by a recorded margin, as the 52/102 µm
+test-world gaps are, and check that local x is the propagation axis: a bare
+`G4Tubs` has it on z); or, at the first CSV load of a frequency, it counts the
+exit points outside the declared cross-section. A dataset produced outside the
+canonical pose is rejected, not remapped. See [Dataset
+sidecars](validation/README.md#dataset-sidecars).
+
+**A `BBR026` banner in a Planck run**: a warning, not an error. A photon's
+frequency and the grid frequency serving it lie on opposite sides of the
+guide's lowest-mode cutoff (`modes.cutoff_ghz`), so the table was computed in
+the other propagation regime; the photon is served unchanged and the warning
+appears once per dataset and direction. Expected in a broadband run on a
+single-frequency grid (the 2000 GHz round gap is above its 1757 GHz cutoff,
+which is why it is for gun runs only); unexpected in a fixed-energy gun run
+whose energy was meant to match the dataset, where it signals the wrong
+dataset or frequency. The runner tolerates it only where it is expected
+([Dataset sidecars](validation/README.md#dataset-sidecars)).
 
 **No `[BBR] reflectance` lines**: expected with many threads; see
 [Copper reflectance](#3-copper-reflectance).
