@@ -51,8 +51,11 @@ class BBRHFSSData
   // sidecar (optional): the dataset's parsed <dirStem>.dataset.json. When
   // given, the loader also runs the sidecar checks C1-C5: header = declared
   // columns (BBR013), keys on the declared grid (BBR007), far-field and
-  // exit-grid rows per key, ranges and counts, X = 0 (BBR012), every exit
-  // point inside the declared cross-section (BBR025). BBRCrackLibrary always
+  // exit-grid rows per key, ranges and distinct-value counts (equal to the
+  // declared ones; with outside_points "omitted" the exit counts may be
+  // smaller, never larger, because the producer declares the whole export
+  // lattice and drops the points outside the section), X = 0 (BBR012), every
+  // exit point inside the declared cross-section (BBR025). BBRCrackLibrary always
   // passes it; a direct construction without one keeps the pre-sidecar checks.
   BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
               G4double expectedFreqGHz, const BBRDatasetSidecar* sidecar = nullptr);

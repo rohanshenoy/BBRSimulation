@@ -583,11 +583,22 @@ def _check_one(stem, d, sc, exempt):
     if d["far_field"]["points_per_key"] != ff["points_per_key"]:
         raise ValueError(f"BBR012: {tag}: {d['far_field']['points_per_key']} far-field rows per key, "
                          f"declared {ff['points_per_key']}")
+    # C4: with "none" and "zero" every lattice point is written, so the retained distinct counts
+    # equal the declared ones; with "omitted" the producer declares the whole export lattice and
+    # drops the points outside the section, so a round face whose radius is not a multiple of the
+    # step leaves its outermost lattice columns without a retained point: the retained counts may
+    # then be smaller than the declared ones, never larger (BBRHFSSData::CheckAgainstSidecar).
+    omitted = xf["outside_points"] == "omitted"
     for axis in ("y_e", "z_e"):                                                                         # C4
         got, want = d["exit_field"]["grid"][axis], xf["grid"][axis]
         tol = 1e-9 * max(abs(want["min"]), abs(want["max"]))
-        if got["count"] != want["count"] or got["min"] < want["min"] - tol or got["max"] > want["max"] + tol:
+        if (got["min"] < want["min"] - tol or got["max"] > want["max"] + tol
+                or (not omitted and got["count"] != want["count"])):
             raise ValueError(f"BBR012: {tag}: exit grid {axis} {got} outside or unlike the declared {want}")
+        if omitted and got["count"] > want["count"]:
+            raise ValueError(f"BBR012: {tag}: exit grid {axis} {got} has more distinct values than the declared "
+                             f"lattice {want} (with outside_points omitted the retained count may be smaller, "
+                             f"not larger)")
     if d["exit_field"]["points_per_key_retained"] != xf["points_per_key_retained"]:
         raise ValueError(f"BBR012: {tag}: exit points per key differ from points_per_key_retained")
     if d["x_max_abs_m"] > 1e-12:

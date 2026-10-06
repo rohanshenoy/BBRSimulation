@@ -393,8 +393,9 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
 
 // C2-C5 (validation/README.md, Dataset sidecars): every key on the declared grid; per key
 // the declared far-field and exit row counts; every far-field and exit row in
-// the declared ranges; the distinct-value counts; X = 0; and every exit point
-// inside the declared cross-section.
+// the declared ranges; the distinct-value counts (equal to the declared ones, or
+// with outside_points "omitted" at most the declared exit-lattice counts); X = 0;
+// and every exit point inside the declared cross-section.
 void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4String& dirStem) const
 {
   auto fail = [&](const char* code, const std::string& what) {
@@ -466,9 +467,18 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
     fail("BBR012", "the far field has " + std::to_string(phis.size()) + " Phi and " + std::to_string(thetas.size()) +
                    " Theta values; the sidecar declares " + std::to_string(sc.farFieldPhi.count) + " and " +
                    std::to_string(sc.farFieldTheta.count));
-  if (G4int(ys.size()) != sc.exitY.count || G4int(zs.size()) != sc.exitZ.count)
+  // With "none" and "zero" every lattice point is written, so the retained distinct counts
+  // equal the declared ones. With "omitted" the producer declares the whole export lattice
+  // and drops the points outside the section, so a round face whose radius is not a multiple
+  // of the step leaves its outermost lattice columns without a retained point: the retained
+  // counts may then be smaller than the declared ones, never larger.
+  const bool omitted = sc.outsidePoints == "omitted";
+  const bool countsOk = omitted ? G4int(ys.size()) <= sc.exitY.count && G4int(zs.size()) <= sc.exitZ.count
+                                : G4int(ys.size()) == sc.exitY.count && G4int(zs.size()) == sc.exitZ.count;
+  if (!countsOk)
     fail("BBR012", "the exit grid has " + std::to_string(ys.size()) + " Y and " + std::to_string(zs.size()) +
-                   " Z values; the sidecar declares " + std::to_string(sc.exitY.count) + " and " + std::to_string(sc.exitZ.count));
+                   " Z values; the sidecar declares " + std::to_string(sc.exitY.count) + " and " + std::to_string(sc.exitZ.count) +
+                   (omitted ? " (with outside_points omitted the retained counts may be smaller, not larger)" : ""));
   if (outside)
     fail("BBR025", std::to_string(outside) + " exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = " +
                    fmt(outY, outZ) + " m");

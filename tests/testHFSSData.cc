@@ -391,6 +391,32 @@ int main(int argc, char** argv) {
       r.zCount = 3;
       TempDir d4; ExpectG4Exception("BBR012", [&] { LoadChecked(d4, ds, &r); },
                                     "BBRHFSSData", "the exit grid has 2 Y and 2 Z values; the sidecar declares 2 and 3");
+      // With outside_points "omitted" the producer declares the whole export lattice and drops
+      // the lattice points outside the section, so a round face whose radius is not a multiple
+      // of the step leaves its outermost lattice columns without a retained point: the retained
+      // distinct counts may be smaller than the declared ones, never larger. Here R = 15 um at a
+      // 10 um step: lattice Y in [-20, 20] um, 5 columns declared, 3 retained (-10, 0, +10 um).
+      Dataset disc = hfssfix::Mini500();
+      disc.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,3,4,0,-1e-05,0,0,1,0,0,0,0\n"
+                 "500GHz,0,0,180,3,4,0,0,0,0,1,0,0,0,0\n500GHz,0,0,180,3,4,0,1e-05,0,0,1,0,0,0,0\n";
+      disc.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,-1e-05,0,0,0,1,0,0,0\n"
+                 "500GHz,1,0,180,1,4,0,0,0,0,0,1,0,0,0\n500GHz,1,0,180,1,4,0,1e-05,0,0,0,1,0,0,0\n";
+      auto w = hfssfix::SidecarFrom("c_500GHz", disc);   // Y in [-10, 10] um, 3 columns, 3 points per key
+      w.disc = true; w.radius = 1.5e-5;
+      w.yMin = -2e-5; w.yMax = 2e-5; w.yCount = 5;
+      w.outsidePoints = "omitted";
+      TempDir d6; LoadChecked(d6, disc, &w);              // accepted: 3 retained of 5 declared
+      w.outsidePoints = "none";                            // every lattice point written: equality
+      TempDir d7; ExpectG4Exception("BBR012", [&] { LoadChecked(d7, disc, &w); },
+                                    "BBRHFSSData", "the exit grid has 3 Y and 1 Z values; the sidecar declares 5 and 1");
+      w.outsidePoints = "zero";
+      TempDir d8; ExpectG4Exception("BBR012", [&] { LoadChecked(d8, disc, &w); },
+                                    "BBRHFSSData", "the exit grid has 3 Y and 1 Z values; the sidecar declares 5 and 1");
+      // More retained values than the declared lattice has columns is wrong under "omitted" too.
+      w.outsidePoints = "omitted"; w.yCount = 2;           // a lattice of two columns at +-20 um
+      TempDir d9; ExpectG4Exception("BBR012", [&] { LoadChecked(d9, disc, &w); },
+                                    "BBRHFSSData", "the exit grid has 3 Y and 1 Z values; the sidecar declares 2 and 1 "
+                                                   "(with outside_points omitted the retained counts may be smaller, not larger)");
     }},
     {"sidecar_c5_outside_section", [] {
       const Dataset ds = hfssfix::WrapKeys("500", "0.01");   // exit points at Y = 10 mm

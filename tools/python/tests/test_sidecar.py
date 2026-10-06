@@ -275,6 +275,61 @@ def test_check_csvs_outside_points(tmp_path, outside_points, field, ok):
             sidecar.check_csvs(base, stem, sc)
 
 
+def write_disc(base, dataset_id="c", label="500GHz"):
+    """One key (0, 180), two far-field rows, three exit points at Y = -10, 0, +10 um on Z = 0."""
+    stem = f"{dataset_id}_{label}"
+    for e, out, field in ((0, 0.5, "0,1,0,0,0,0"), (1, 0.25, "0,0,1,0,0,0")):
+        d = os.path.join(base, f"{stem}_Ephi={e}")
+        os.makedirs(d)
+        with open(os.path.join(d, "far_field.csv"), "w") as fh:
+            fh.write(FF_HDR + "".join(f"{label},{e},0,180,0,{t},0.1,0.0,0.2,0.05\n" for t in (60, 120)))
+        with open(os.path.join(d, "waveguide.csv"), "w") as fh:
+            fh.write(WG_HDR + "".join(f"{label},{e},0,180,{out},1.0,0,{y},0.0,{field}\n"
+                                      for y in ("-1e-05", "0", "1e-05")))
+    return stem
+
+
+def disc_sidecar(base, stem, outside_points, radius_m=1.5e-5):
+    return sidecar.build_from_csvs(
+        base, "c", "500GHz", section={"shape": "disc", "radius_m": radius_m},
+        extent_mm={"p": 0.4, "l": 0.03, "g": 0.03}, provenance={"producer": "test"},
+        exit_origin_mm=[0.0, 0.0, 0.4], plane_wave_origin_mm=[0.0, 0.0, 0.0],
+        bounding_box_mm=[-0.015, -0.015, 0.0, 0.015, 0.015, 0.4],
+        resolution_mm=[0.0, 0.01, 0.01], outside_points=outside_points, bounds_method="edge_samples",
+        rotational=True)
+
+
+@pytest.mark.parametrize("outside_points,ok", [("omitted", True), ("none", False), ("zero", False)],
+                         ids=["omitted", "none", "zero"])
+def test_check_csvs_omitted_allows_a_wider_lattice(tmp_path, outside_points, ok):
+    """The producer declares the whole export lattice and, with "omitted", drops the points outside
+    the section, so a round face whose radius is not a step multiple leaves the outermost lattice
+    columns empty: R = 15 um at a 10 um step gives a lattice Y in [-20, 20] um with 5 columns, of
+    which 3 hold a retained point. The retained distinct count may then be smaller than the declared
+    one, never larger; "none" and "zero" write every lattice point and keep the equality."""
+    base = str(tmp_path)
+    stem = write_disc(base)
+    sc = disc_sidecar(base, stem, outside_points)
+    assert sc["exit_field"]["grid"]["y_e"] == {"min": -1e-5, "max": 1e-5, "count": 3}
+    sc["exit_field"]["grid"]["y_e"] = {"min": -2e-5, "max": 2e-5, "count": 5}
+    sidecar.check(sc, "c", stem, 500.0)
+    if ok:
+        sidecar.check_csvs(base, stem, sc)
+    else:
+        with pytest.raises(ValueError, match="^BBR012: c_500GHz_Ephi=0: exit grid y_e .*unlike the declared"):
+            sidecar.check_csvs(base, stem, sc)
+
+
+def test_check_csvs_omitted_refuses_more_values_than_declared(tmp_path):
+    base = str(tmp_path)
+    stem = write_disc(base)
+    sc = disc_sidecar(base, stem, "omitted")
+    sc["exit_field"]["grid"]["y_e"] = {"min": -2e-5, "max": 2e-5, "count": 2}    # two columns at +-20 um
+    sidecar.check(sc, "c", stem, 500.0)
+    with pytest.raises(ValueError, match="^BBR012: c_500GHz_Ephi=0: exit grid y_e .*more distinct values"):
+        sidecar.check_csvs(base, stem, sc)
+
+
 # --- fix round 2: the physics-only invariant, the disc modes, load(), malformed CSVs -------------
 
 def built(tmp_path):
