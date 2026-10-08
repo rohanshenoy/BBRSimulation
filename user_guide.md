@@ -289,9 +289,15 @@ output (default `output/bbr.root` in the current directory) through the
 | `check_round_gap.py` | the opt-in straight round gap at 2000 GHz on its mock dataset: transmittance per polarization, exit positions inside the HFSS radius, the radial exit profile per polarization and the mean exit direction, 49 checks over nine runs, one of them the startup crack line in the run log (`--data-dir`, `--log`) |
 | `check_invariants.py` | no photon ever travels inside a metal, and every photon death is labelled correctly (`--allow-no-crossings` for a run that crosses no boundary) |
 | `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the two mock trees): every dataset is a complete trio with a valid schema-1 sidecar (full mode lists, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
+| `check_tree_run.py` | reads a run that `validation/Scripts/make_tree_check.py` generated for an HFSS data tree: every photon used the right frequency table, and transmission, reflection and exit directions follow it, against `bbrsim.hfss` reading the same tree (`--log`); see [Real-tree check](validation/README.md#real-tree-check) |
 
 **Validator run by hand**, because it needs a large run:
 `check_cu_absorptance.py` (`planck_5M.mac`), shown above.
+
+**Checking a new data tree**: `validation/Scripts/make_tree_check.py <root> --out <dir>`
+writes a test-world macro for every dataset under `<root>/waveguides` that the
+test world can place, and `check_tree_run.py` checks the run; the recipe is in
+[Real-tree check](validation/README.md#real-tree-check).
 
 **Python tests** (`tools/python/tests/`, pytest): the `bbrsim` formulas against
 analytic limits and reference values, the HFSS mirror, the ROOT loader, and the
