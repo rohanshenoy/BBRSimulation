@@ -208,6 +208,132 @@ def check_reflections(rep, tag, dec):
     rep.check(f"{tag} reflection", dev < TOL_REFL, f"{len(rf)} reflections, max deviation from specular {dev:.1e}")
 
 
+def table(rep, tag, tables, stem):
+    """The dataset dict of stem, or None after a FAIL row naming the load error."""
+    ds = tables.get(stem)
+    if isinstance(ds, Exception):
+        rep.check(f"{tag} table {stem}", False, f"{type(ds).__name__}: {ds}")
+        return None
+    return ds
+
+
+def predict_gun(ds, r):
+    """(T, exit-direction weights, outgoing directions) of a gun run: its configured direction
+    folded onto the nearest incidence key, with its polarization, or random."""
+    inc = hfss.fold_incidence(r["direction"])
+    a = ds[hfss.nearest_key(ds, inc.phi_deg, inc.theta_deg)]
+    dirs = hfss.outgoing_directions(a, inc)
+    if r["polarization"] is None:
+        t, w = hfss.random_polarization_mixture(a)       # T = (T0 + T1)/2: no linear polarization exceeds 1
+    else:
+        k, p = unit(r["direction"]), np.asarray(r["polarization"], dtype=float)
+        et, ep = hfss.polarization_components(unit(p - p.dot(k) * k), inc)
+        t, w = hfss.transmittance(a, et, ep), hfss.direction_weights(a, et, ep)
+    return float(t), w, dirs
+
+
+def gun_rows(rep, tag, r, dec, tables, grids):
+    """Transmittance of a gun run or probe; for gun runs, the exit-direction moments too."""
+    if not len(dec):
+        return
+    stems = dict(grids[r["dataset"]])
+    f = float(dec["hfss_freq_GHz"].iloc[0])
+    ds = table(rep, tag, tables, stems[f]) if f in stems else None
+    if ds is None:
+        return
+    t, w, dirs = predict_gun(ds, r)
+    n, tx = len(dec), dec[dec["status"] == TRANSMIT]
+    rep.stat(f"{tag} transmittance", len(tx), n * t, math.sqrt(n * t * (1.0 - t)), slack=1.0,
+             detail=f"T_obs {len(tx) / n:.4f}, T {t:.4f}, N {n}")
+    if r["kind"].startswith("probe") or len(tx) <= MIN_TX_MOMENTS:
+        return
+    # Standard errors from the predicted distribution, the hypothesis under test: these far
+    # fields have rare wide tails, and a sample of a hundred transmissions that misses them
+    # understates its own spread. The 1e-9 slack covers a prediction that puts all its weight
+    # on one grid direction, where observed and expected agree only to rounding.
+    out = tx[["px_post", "py_post", "pz_post"]].to_numpy(float)
+    n_tx = len(out)
+    for i, c in enumerate("xyz"):
+        x = dirs[:, i]
+        mu = float(w @ x)
+        rep.stat(f"{tag} <p{c}>", float(out[:, i].mean()), mu,
+                 math.sqrt(max(float(w @ x ** 2) - mu * mu, 0.0) / n_tx), slack=1e-9)
+    for i, c in ((1, "y"), (2, "z")):
+        x2 = dirs[:, i] ** 2
+        mu = float(w @ x2)
+        rep.stat(f"{tag} <p{c}^2>", float((out[:, i] ** 2).mean()), mu,
+                 math.sqrt(max(float(w @ x2 ** 2) - mu * mu, 0.0) / n_tx), slack=1e-9)
+
+
+def planck_fractions(grid_ghz, temp_K, band_eV):
+    """Share of the photon-number spectrum each grid point serves under the selection rule:
+    bins between neighbouring log midpoints, the edge bins running to the band ends."""
+    e = np.geomspace(band_eV[0], band_eV[1], PLANCK_GRID_POINTS)
+    pdf = physics.planck_photon_number_pdf(e, temp_K)
+    cdf = np.concatenate([[0.0], np.cumsum(0.5 * (pdf[1:] + pdf[:-1]) * np.diff(e))])
+    cdf /= cdf[-1]
+    mids = [math.sqrt(a * b) for a, b in zip(grid_ghz[:-1], grid_ghz[1:])]
+    return np.diff(np.concatenate([[0.0], np.interp(mids, hfss.photon_frequency_GHz(e), cdf), [1.0]]))
+
+
+def planck_rows(rep, tag, r, dec, tables, grids, band_eV):
+    """Per (dataset, selected frequency): transmissions against the summed per-photon T,
+    each photon at its own incidence key with random polarization. For the aimed dataset
+    on a grid of more than one point: entries per grid point against the spectrum."""
+    ids = dec["vol_post"].map(dataset_id)
+    for (did, f), grp in dec.groupby([ids, dec["hfss_freq_GHz"]]):
+        stems = dict(grids.get(did, []))
+        ds = table(rep, tag, tables, stems[f]) if f in stems else None
+        if ds is None:
+            continue           # the selection rows already fail an unknown frequency
+        t = np.empty(len(grp))
+        for j, k in enumerate(grp[["px_pre", "py_pre", "pz_pre"]].to_numpy(float)):
+            inc = hfss.fold_incidence(k)
+            a = ds[hfss.nearest_key(ds, inc.phi_deg, inc.theta_deg)]
+            t[j] = 0.5 * (a.T0 + a.T1)    # BBRPrimarySource: uniformly random linear polarization
+        n_tx = int((grp["status"] == TRANSMIT).sum())
+        rep.stat(f"{tag} transmittance {did} {f:g} GHz", n_tx, t.sum(), math.sqrt(float((t * (1.0 - t)).sum())),
+                 slack=1.0, detail=f"{len(grp)} entries")
+    grid = grids[r["dataset"]]
+    if len(grid) < 2:
+        return
+    own = dec[ids == r["dataset"]]
+    if not len(own):
+        rep.check(f"{tag} spectrum", False, "no entries on the aimed crack")
+        return
+    n = len(own)
+    for (f, _), pb in zip(grid, planck_fractions([g for g, _ in grid], r["temperature_K"], band_eV)):
+        nb = int((own["hfss_freq_GHz"] == f).sum())
+        rep.stat(f"{tag} spectrum {f:g} GHz", nb, n * pb, math.sqrt(n * pb * (1.0 - pb)), slack=1.0,
+                 detail=f"{n} entries")
+
+
+def physics_rows(rep, man, tables, grids):
+    """Below FILTER_MARGIN x the polarization-filter limit no TE0n mode propagates, so a
+    rectangular crack must carry under FILTER_T_MAX of E along its long side at normal
+    incidence; a swapped pair of Ephi directories carries nearly all of it."""
+    inc = hfss.fold_incidence(NORMAL)
+    et, ep = hfss.polarization_components(E_LONG, inc)
+    for did, d in sorted(man["datasets"].items()):
+        if not d["aimed"]:
+            continue
+        if d.get("cross_section") != "rectangle":
+            rep.skip(f"physics {did}", f"{d.get('cross_section')} cross-section: no polarization filter")
+            continue
+        limit = float(d["polarization_filter_limit_ghz"])
+        for f, stem in grids[did]:
+            name = f"physics {did} {f:g} GHz"
+            if f >= FILTER_MARGIN * limit:
+                rep.skip(name, f"at or above {FILTER_MARGIN:g} x the filter limit {limit:g} GHz")
+                continue
+            ds = table(rep, name, tables, stem)
+            if ds is None:
+                continue
+            t = hfss.transmittance(ds[hfss.nearest_key(ds, inc.phi_deg, inc.theta_deg)], et, ep)
+            rep.check(name, t < FILTER_T_MAX,
+                      f"T for E along the long side at normal incidence {t:.2e}, limit {FILTER_T_MAX:g}")
+
+
 def check_log(rep, log_path, entries, grids, cutoffs, placed, wg):
     try:
         with open(log_path, errors="replace") as fh:
@@ -311,10 +437,12 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
         if r["kind"] == "planck":
             rep.check(f"{tag} entries", not dec["event_id"].duplicated().any(),
                       f"{len(dec)} decided entries in {r['events']} events, at most one per event")
+            planck_rows(rep, tag, r, dec, tables, grids, man["planck"]["band_eV"])
         else:
             check_gun_exact(rep, tag, r, dec, ids)
             if len(dec) and (ids == r["dataset"]).all():
                 served[r["dataset"]].update(np.unique(f_rec).tolist())
+            gun_rows(rep, tag, r, dec, tables, grids)
         check_reflections(rep, tag, dec)
 
     rep.check("sentinel", n_bad_sentinel == 0,
@@ -325,6 +453,7 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
         missing = [f for f, _ in grids[did] if f not in served[did]]
         rep.check(f"coverage {did}", not missing,
                   "every grid frequency served by a gun run" if not missing else f"no gun run served {missing} GHz")
+    physics_rows(rep, man, tables, grids)
     if log_path is not None:
         check_log(rep, log_path, entries, {d: grids[d] for d in aimed}, cutoffs, placed or {}, wg)
     return rep

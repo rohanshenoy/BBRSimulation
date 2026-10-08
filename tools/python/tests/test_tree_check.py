@@ -431,3 +431,70 @@ def test_e2e_missing_output(checker, e2e, e2e_tables, tmp_path):
     (run / "output/tree_r005.root").unlink()
     ok, rows = rows_of(checker, run, e2e_tables)
     assert not ok and any(n.startswith("run 005 ") and n.endswith(" output") for n in failing(rows))
+
+
+# --- the validator: statistics and the physics row ------------------------------------
+FF_HDR = "Freq,Ephi,IWavePhi,IWaveTheta,Phi,Theta,rEphi_real,rEphi_imag,rEtheta_real,rEtheta_imag\n"
+WG_HDR = ("Freq,Ephi,IWavePhi,IWaveTheta,OutgoingPower,IngoingPower,X,Y,Z,"
+          "Ex_real,Ey_real,Ez_real,Ex_imag,Ey_imag,Ez_imag\n")
+
+
+def write_table(wg, stem, T, label="500GHz"):
+    """A one-key (0, 180) dataset with T = (T0, T1), a two-row far field and one exit point."""
+    for e, t in enumerate(T):
+        d = Path(wg) / f"{stem}_Ephi={e}"
+        d.mkdir(parents=True)
+        (d / "far_field.csv").write_text(FF_HDR + "".join(
+            f"{label},{e},0,180,0,{th},0.1,0.0,0.2,0.05\n" for th in (60, 120)))
+        (d / "waveguide.csv").write_text(WG_HDR + f"{label},{e},0,180,{t},1.0,0,0,0,0,1,0,0,0,0\n")
+
+
+def test_planck_fractions(checker):
+    p = checker.planck_fractions([180.0, 320.0, 569.0, 1010.0], 20.0, (4.14e-5, 8.27e-2))
+    assert p.sum() == pytest.approx(1.0, abs=1e-12) and (p > 0).all()
+    from bbrsim import physics
+    e = np.linspace(4.14e-5, 8.27e-2, 400001)
+    pdf = physics.planck_photon_number_pdf(e, 20.0)
+    below = np.trapezoid(np.where(hfss.photon_frequency_GHz(e) < math.sqrt(180.0 * 320.0), pdf, 0.0), e)
+    assert p[0] == pytest.approx(below / np.trapezoid(pdf, e), rel=1e-3)
+
+
+def test_physics_row_swapped_ephi(checker, tmp_path):
+    wg = tmp_path / "waveguides"
+    write_table(wg, "good_500GHz", (0.99, 1e-10))
+    write_table(wg, "swap_500GHz", (1e-10, 0.99))          # Ephi directories swapped
+    man = {"datasets": {d: {"aimed": True, "cross_section": "rectangle",
+                            "polarization_filter_limit_ghz": 2997.92458} for d in ("good", "swap")}}
+    grids = {d: [(500.0, f"{d}_500GHz")] for d in ("good", "swap")}
+    rep = checker.Report()
+    checker.physics_rows(rep, man, checker.Tables(str(wg)), grids)
+    assert {n: s for s, n, _ in rep.rows} == {"physics good 500 GHz": "PASS", "physics swap 500 GHz": "FAIL"}
+    man["datasets"]["good"]["cross_section"] = "disc"
+    man["datasets"]["swap"]["polarization_filter_limit_ghz"] = 510.0     # 500 GHz is above 0.95 x 510
+    rep = checker.Report()
+    checker.physics_rows(rep, man, checker.Tables(str(wg)), grids)
+    assert [s for s, _, _ in rep.rows] == ["SKIP", "SKIP"]
+
+
+def test_e2e_statistical_rows(checker, e2e, e2e_tables):
+    run, man = e2e
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert ok, failing(rows)
+    names = [n for _, n, _ in rows]
+    assert sum(n.endswith(" transmittance") for n in names) == sum(x["kind"] != "planck" for x in man["runs"])
+    assert any(n.endswith(" <py^2>") for n in names)
+    assert any(" transmittance InfParallelPlate_crack2 500 GHz" in n for n in names)
+    assert ("PASS", f"physics {CRACK1} 500 GHz") in [(s, n) for s, n, _ in rows]
+
+
+def test_e2e_transmittance_off(checker, e2e, e2e_tables, tmp_path):
+    run = copy_run(e2e[0], tmp_path / "run")
+    legend = json.loads((run / "output/tree_r001.metadata.json").read_text())["legend"]["status"]
+    code = {name: int(c) for c, name in legend.items()}
+
+    def change(cr):        # run 1, E across the gap at normal incidence: every transmission now reflects
+        cr["status_code"][cr["status_code"] == code["BBRDiffractionTransmit"]] = code["BBRDiffractionReflect"]
+
+    rewrite_crossings(run / "output/tree_r001.root", change)
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and any(n.startswith("run 001 ") and n.endswith(" transmittance") for n in failing(rows))
