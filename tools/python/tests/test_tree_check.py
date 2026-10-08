@@ -228,3 +228,206 @@ def test_refusals(repo_root, tmp_path, case, message):
     if case == "no_sidecar":
         assert "check_dataset_sidecars.py" in r.stderr
     assert not (out / "tree_check.mac").exists() and not (out / "tree_check.json").exists()
+
+
+# --- the validator: pure functions -------------------------------------------------
+@pytest.fixture(scope="module")
+def checker(repo_root):
+    spec = importlib.util.spec_from_file_location("check_tree_run", repo_root / "validation/check_tree_run.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_expected_warnings(checker):
+    grids = {"a": [(180.0, "a_180GHz"), (320.0, "a_320GHz")], "b": [(500.0, "b_500GHz")]}
+    cutoffs = {"a": 14.9896229, "b": 14.9896229}
+    want = checker.expected_warnings([("a", 200.0, 180.0), ("b", 1e4, 500.0)], grids, cutoffs)
+    assert set(want.values()) == {0}            # inside the grid; a one-point grid never clamps
+    want = checker.expected_warnings([("a", 100.0, 180.0), ("a", 2000.0, 320.0), ("a", 12.0, 180.0),
+                                      ("b", 12.0, 500.0)], grids, cutoffs)
+    assert want[("BBR008", "a", "low")] == 1 and want[("BBR008", "a", "high")] == 1
+    assert want[("BBR026", "a", "below")] == 1 and want[("BBR026", "b", "below")] == 1
+    assert want[("BBR008", "b", "low")] == 0 and want[("BBR026", "a", "above")] == 0
+    # 'above': a photon at or above the cutoff served from a grid point below it
+    disc, fc = {"r": [(1000.0, "r_1000GHz"), (2000.0, "r_2000GHz")]}, 1756.984664434265
+    want = checker.expected_warnings([("r", 1400.0, 1000.0), ("r", fc, 1000.0)], disc, {"r": fc})
+    assert want[("BBR026", "r", "above")] == 1 and want[("BBR026", "r", "below")] == 0
+
+
+LOG = """[BBR] HFSS dataset InfParallelPlate_crack1Rohan: 1 frequency grid point(s): 500 GHz (from /t/waveguides)
+[BBR] crack InfParallelPlate_crack1Rohan: HFSS (p, l, g) = (1, 10, 0.05) mm, Geant4 (x, y, z) = (4, 10.2, 0.052) mm; 1 sidecar(s) fit
+G4WT1 > 
+-------- WWWW ------- G4Exception-START -------- WWWW -------
+*** G4Exception : BBR026
+      issued by : BBRCrackLibrary::Lookup
+BBR026 dataset=InfParallelPlate_crack1Rohan direction=below nu_GHz=11.4 grid_GHz=500 cutoff_GHz=14.9896 (TE10) : the photon and the HFSS dataset serving it lie on opposite sides of the lowest-mode cutoff; the table is used unchanged. Reported once per dataset and direction.
+*** This is just a warning message. ***
+-------- WWWW -------- G4Exception-END --------- WWWW -------
+G4WT3 > [BBR] HFSS InfParallelPlate_crack1Rohan_500GHz key (0, 180): max transmittance 1.05451 > 1 (port-normalization artefact), normalized to 1
+"""
+
+
+def test_parse_log(checker):
+    lg = checker.parse_log(LOG)
+    assert lg["warnings"] == {("BBR026", CRACK1, "below"): 1}
+    assert lg["banners"] == 1 and lg["geomnav"] == 0 and lg["other_codes"] == []
+    assert len(lg["crack_lines"]) == 1 and len(lg["dataset_lines"]) == 1
+    bad = checker.parse_log(LOG + "G4Exception-START\n*** G4Exception : BBR010\nGeomNav1002: stuck track\n")
+    assert len(bad["other_codes"]) == 1 and bad["banners"] == 2 and bad["geomnav"] == 1
+
+
+def test_z_max(checker):
+    assert [round(checker.z_max(m), 4) for m in (0, 1, 15, 16, 300, 5000)] == \
+        [4.0, 4.0, 4.0, 4.0032, 4.6491, 5.1993]
+
+
+def test_report_family_wise(checker):
+    for off, passes in ((4.5, True), (10.0, False)):          # the limit is 4.65 SE at M = 300
+        rep = checker.Report()
+        for i in range(299):
+            rep.stat(f"row {i}", 100.0, 100.0, 1.0)
+        rep.stat("off", 100.0 + off, 100.0, 1.0)
+        assert rep.finish() is passes
+    rep = checker.Report()
+    rep.stat("one short at T = 1", 299.0, 300.0, 0.0, slack=1.0)   # one count of slack when sigma is 0
+    assert rep.finish() is True
+    rep = checker.Report()
+    rep.stat("two short at T = 1", 298.0, 300.0, 0.0, slack=1.0)
+    assert rep.finish() is False
+
+
+def test_validator_skip_lines(checker, tmp_path):
+    root = sidecar_tree(tmp_path / "data", {**LEGACY, "LightPipeSLAC": ["500"]})
+    man = {"schema": "bbrsim-tree-check/1", "data_root": str(root),
+           "datasets": {d: {"aimed": d != "LightPipeSLAC", "grid": [[500.0, f"{d}_500GHz"]],
+                            "cutoff_ghz": 14.9896229} for d in (CRACK1, CRACK2, "LightPipeSLAC")},
+           "not_exercised": ["LightPipeSLAC"],
+           "skipped": [{"dataset": CRACK1, "kinds": "oblique", "reason": "no row"}], "runs": []}
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "tree_check.json").write_text(json.dumps(man))
+    rows = checker.validate(str(run)).rows
+    assert ("SKIP", "dataset LightPipeSLAC", "the test world cannot place it; not exercised") in rows
+    assert ("SKIP", f"dataset {CRACK1} oblique", "no row") in rows
+    assert any(s == "PASS" and n == "tree unchanged" for s, n, _ in rows)
+    assert any(s == "FAIL" and n == "selection" for s, n, _ in rows)      # no run, no entry: fails closed
+
+
+def test_tree_changed_after_generation(repo_root, checker, tmp_path):
+    root = sidecar_tree(tmp_path / "data", LEGACY)
+    r, _ = generate(repo_root, root, tmp_path / "run")
+    assert r.returncode == 0, r.stderr
+    (root / "waveguides" / f"{CRACK1}_320GHz_Ephi=0").mkdir()        # a frequency added after generation
+    rows = checker.validate(str(tmp_path / "run")).rows
+    assert next(s for s, n, _ in rows if n == "tree unchanged") == "FAIL"
+
+
+# --- the validator end to end: a small real run of the test world --------------------
+@pytest.fixture(scope="module")
+def e2e(repo_root, tmp_path_factory):
+    """A small generated run of the test world on BBRSIMDATA's tree, with its log."""
+    binary, data = os.environ.get("BBR_TESTWORLD_BINARY"), os.environ.get("BBRSIMDATA")
+    if not binary or not data:
+        pytest.skip("needs BBR_TESTWORLD_BINARY and BBRSIMDATA")
+    run = tmp_path_factory.mktemp("tree_e2e")
+    r, man = generate(repo_root, data, run, "--events", 600, "--planck-events", 3000)
+    assert r.returncode == 0, r.stderr
+    env = dict(os.environ, G4FORCENUMBEROFTHREADS="1")
+    env.pop("DYLD_LIBRARY_PATH", None)
+    env.pop("LD_LIBRARY_PATH", None)
+    with open(run / "run.log", "w") as log:
+        p = subprocess.run([binary, "tree_check.mac"], cwd=run, env=env, stdout=log,
+                           stderr=subprocess.STDOUT, timeout=900)
+    assert p.returncode == 0, (run / "run.log").read_text()[-3000:]
+    return run, man
+
+
+@pytest.fixture(scope="module")
+def e2e_tables(checker, e2e):
+    """One table cache for every end-to-end test (each 500 GHz table loads once)."""
+    return checker.Tables(os.path.join(e2e[1]["data_root"], "waveguides"))
+
+
+def rows_of(checker, run, tables):
+    rep = checker.validate(str(run), str(run / "run.log"), tables=tables)
+    return rep.finish(), rep.rows
+
+
+def failing(rows):
+    return {n: d for s, n, d in rows if s == "FAIL"}
+
+
+def copy_run(run, dst):
+    shutil.copytree(run, dst)
+    return dst
+
+
+def rewrite_crossings(path, change):
+    """Rewrite the ROOT file at path with change(crossings arrays) applied in place."""
+    import uproot
+    with uproot.open(path) as f:
+        trees = {name: {k: np.array(v) for k, v in f[name].arrays(library="np").items()}
+                 for name in ("crossings", "abspoints")}                 # writable copies
+    change(trees["crossings"])
+    with uproot.recreate(path) as f:
+        for name, arrs in trees.items():
+            tree = f.mktree(name, {k: v.dtype for k, v in arrs.items()})
+            if len(next(iter(arrs.values()))):
+                tree.extend(arrs)
+
+
+def test_e2e_passes(checker, e2e, e2e_tables):
+    run, _ = e2e
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert ok, failing(rows)
+    names = {n for _, n, _ in rows}
+    assert {"tree unchanged", "sentinel", "selection", f"coverage {CRACK1}", f"coverage {CRACK2}",
+            f"log startup {CRACK1}", f"log grid {CRACK2}", "log hygiene",
+            f"log BBR008 {CRACK1} low", f"log BBR026 {CRACK2} below"} <= names
+
+
+def test_e2e_cli(repo_root, e2e):
+    run, _ = e2e
+    r = subprocess.run([sys.executable, str(repo_root / "validation/check_tree_run.py"), str(run),
+                        "--log", str(run / "run.log")], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.rstrip().endswith("RESULT: PASS"), r.stdout[-3000:]
+    assert not r.stderr
+
+
+def test_e2e_wrong_frequency(checker, e2e, e2e_tables, tmp_path):
+    run = copy_run(e2e[0], tmp_path / "run")
+
+    def change(cr):
+        i = int(np.flatnonzero(cr["hfss_freq_GHz"] > 0)[0])
+        cr["hfss_freq_GHz"][i] = 501.0
+
+    rewrite_crossings(run / "output/tree_r000.root", change)
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and "selection" in failing(rows)
+
+
+def test_e2e_metadata_other_tree(checker, e2e, e2e_tables, tmp_path):
+    run = copy_run(e2e[0], tmp_path / "run")
+    path = run / "output/tree_r003.metadata.json"
+    meta = json.loads(path.read_text())
+    meta["data"]["directory"] = "/somewhere/else"
+    path.write_text(json.dumps(meta))
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and any(n.startswith("run 003 ") and n.endswith(" metadata") for n in failing(rows))
+
+
+def test_e2e_extra_warning_in_log(checker, e2e, e2e_tables, tmp_path):
+    run = copy_run(e2e[0], tmp_path / "run")
+    with open(run / "run.log", "a") as fh:
+        fh.write("-------- WWWW ------- G4Exception-START -------- WWWW -------\n*** G4Exception : BBR008\n"
+                 f"BBR008 dataset={CRACK1} side=high nu_GHz=600 edge_GHz=500 : photon frequency lies outside\n")
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and f"log BBR008 {CRACK1} high" in failing(rows)
+
+
+def test_e2e_missing_output(checker, e2e, e2e_tables, tmp_path):
+    run = copy_run(e2e[0], tmp_path / "run")
+    (run / "output/tree_r005.root").unlink()
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and any(n.startswith("run 005 ") and n.endswith(" output") for n in failing(rows))
