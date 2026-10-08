@@ -30,6 +30,7 @@ swapped pair of Ephi directories fails it).
 Prints one PASS / FAIL / SKIP line per check, then RESULT: PASS or FAIL; exits 0 or 1.
 """
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -367,6 +368,15 @@ def check_log(rep, log_path, entries, grids, cutoffs, placed, wg):
                   lines[0] if len(lines) == 1 else f"{len(lines)} '[BBR] HFSS dataset {did}:' lines")
 
 
+def sidecar_sha256(wg, stem):
+    """sha256 of a dataset's sidecar, as make_tree_check.py records it; None if unreadable."""
+    try:
+        with open(os.path.join(wg, f"{stem}.dataset.json"), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+
+
 def validate(run_dir, log_path=None, data_root=None, tables=None):
     """Every row for the run in run_dir; returns the Report (finish() judges it)."""
     rep = Report()
@@ -390,8 +400,17 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
 
     try:
         now = {d: [(f, s) for f, s in g] for d, g in hfss.discover_datasets(wg).items()}
-        rep.check("tree unchanged", now == grids, f"{wg}: grids as generated" if now == grids
-                  else f"{wg}: the grids differ from the manifest's; regenerate the run")
+        recorded = {s: h for v in man["datasets"].values() for s, h in v.get("sidecar_sha256", {}).items()}
+        changed = sorted(s for _, s in sum(grids.values(), [])
+                         if recorded.get(s) is None or sidecar_sha256(wg, s) != recorded[s])
+        if now != grids:
+            detail = f"{wg}: the grids differ from the manifest's; regenerate the run"
+        elif changed:
+            detail = (f"{wg}: sidecars changed or unrecorded since generation ({', '.join(changed)}); "
+                      "the tables may have been rebuilt; regenerate the run")
+        else:
+            detail = f"{wg}: grids and sidecar checksums as generated"
+        rep.check("tree unchanged", now == grids and not changed, detail)
     except (OSError, ValueError) as err:
         rep.check("tree unchanged", False, f"{wg}: {err}")
     for did in man.get("not_exercised", []):
@@ -415,9 +434,11 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
             [f["label"] for f in h["frequencies"]] == [s[len(h["dataset_id"]) + 1:] for _, s in grids[h["dataset_id"]]]
             for h in hd.values()))
         same_root = os.path.realpath(data.get("directory", "")) == root
-        rep.check(f"{tag} metadata", same_root and labels_ok,
+        events_ok = meta.get("events") == r["events"]
+        rep.check(f"{tag} metadata", same_root and labels_ok and events_ok,
                   f"data root {data.get('directory')}" + ("" if same_root else f", not {root}")
-                  + ("" if labels_ok else "; placed cracks or frequency labels differ from the tree"))
+                  + ("" if labels_ok else "; placed cracks or frequency labels differ from the tree")
+                  + ("" if events_ok else f"; {meta.get('events')} events, the manifest asks {r['events']}"))
         if placed is None:
             placed = {v: h["dataset_id"] for v, h in hd.items()}
         if "hfss_freq_GHz" not in df.columns:
@@ -435,8 +456,10 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
         n_bad_sel += int((f_rec != f_exp).sum())
         entries.extend((i, float(n), float(f)) for i, n, f in zip(ids, nu, f_rec) if i in cutoffs)
         if r["kind"] == "planck":
-            rep.check(f"{tag} entries", not dec["event_id"].duplicated().any(),
-                      f"{len(dec)} decided entries in {r['events']} events, at most one per event")
+            n_own = int((ids == r["dataset"]).sum())
+            rep.check(f"{tag} entries", n_own > 0 and not dec["event_id"].duplicated().any(),
+                      f"{len(dec)} decided entries in {r['events']} events, {n_own} on {r['dataset']}; "
+                      "at least one on the aimed crack and at most one per event")
             planck_rows(rep, tag, r, dec, tables, grids, man["planck"]["band_eV"])
         else:
             check_gun_exact(rep, tag, r, dec, ids)

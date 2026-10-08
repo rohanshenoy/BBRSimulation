@@ -376,8 +376,10 @@ of the thread count (Geant4 warns, Run10035, otherwise).
 
 `check_tree_run.py RUN_DIR --log RUN_DIR/run.log` reads the manifest, every
 `output/tree_rNNN.root` with its metadata, and the log.
-- Exact rows: the tree is unchanged since generation; every output names the
-  data root and the tree's frequencies; every decided crack entry carries the
+- Exact rows: the tree is unchanged since generation (the grids, and each
+  sidecar's sha256, which the manifest records and which covers the CSV
+  checksums); every output names the data root and the tree's frequencies and
+  ran the planned number of events; every Planck run reached its crack; every decided crack entry carries the
   grid frequency the selection rule gives for its recorded energy, and every
   other row −1 (the mirror computes the frequency in CLHEP's own arithmetic, so
   the comparison is exact); one entry per event on the aimed crack with the

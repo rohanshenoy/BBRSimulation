@@ -301,7 +301,10 @@ def test_validator_skip_lines(checker, tmp_path):
     root = sidecar_tree(tmp_path / "data", {**LEGACY, "LightPipeSLAC": ["500"]})
     man = {"schema": "bbrsim-tree-check/1", "data_root": str(root),
            "datasets": {d: {"aimed": d != "LightPipeSLAC", "grid": [[500.0, f"{d}_500GHz"]],
-                            "cutoff_ghz": 14.9896229} for d in (CRACK1, CRACK2, "LightPipeSLAC")},
+                            "cutoff_ghz": 14.9896229,
+                            "sidecar_sha256": {f"{d}_500GHz": checker.sidecar_sha256(str(root / "waveguides"),
+                                                                                    f"{d}_500GHz")}}
+                     for d in (CRACK1, CRACK2, "LightPipeSLAC")},
            "not_exercised": ["LightPipeSLAC"],
            "skipped": [{"dataset": CRACK1, "kinds": "oblique", "reason": "no row"}], "runs": []}
     run = tmp_path / "run"
@@ -319,6 +322,17 @@ def test_tree_changed_after_generation(repo_root, checker, tmp_path):
     r, _ = generate(repo_root, root, tmp_path / "run")
     assert r.returncode == 0, r.stderr
     (root / "waveguides" / f"{CRACK1}_320GHz_Ephi=0").mkdir()        # a frequency added after generation
+    rows = checker.validate(str(tmp_path / "run")).rows
+    assert next(s for s, n, _ in rows if n == "tree unchanged") == "FAIL"
+
+
+def test_tree_rebuilt_with_same_labels(repo_root, checker, tmp_path):
+    # A tree rebuilt in place keeps its labels but not its sidecars, which carry the CSV checksums.
+    root = sidecar_tree(tmp_path / "data", LEGACY)
+    r, _ = generate(repo_root, root, tmp_path / "run")
+    assert r.returncode == 0, r.stderr
+    sc = root / "waveguides" / f"{CRACK1}_500GHz.dataset.json"
+    sc.write_text(sc.read_text().replace("}", ', "rebuilt": true}', 1))
     rows = checker.validate(str(tmp_path / "run")).rows
     assert next(s for s, n, _ in rows if n == "tree unchanged") == "FAIL"
 
@@ -431,6 +445,27 @@ def test_e2e_missing_output(checker, e2e, e2e_tables, tmp_path):
     (run / "output/tree_r005.root").unlink()
     ok, rows = rows_of(checker, run, e2e_tables)
     assert not ok and any(n.startswith("run 005 ") and n.endswith(" output") for n in failing(rows))
+
+
+def test_e2e_empty_planck_run(checker, e2e, e2e_tables, tmp_path):
+    # Without the log: a Planck run with no crack entries must fail on its own rows.
+    run, man = e2e
+    run = copy_run(run, tmp_path / "run")
+    r = next(x for x in man["runs"] if x["kind"] == "planck" and x["dataset"] == CRACK1)
+    rewrite_crossings(run / r["file"], lambda c: c.update({k: v[:0] for k, v in c.items()}))
+    rep = checker.validate(str(run), tables=e2e_tables)
+    assert not rep.finish()
+    assert f"{checker.run_tag(r)} entries" in failing(rep.rows)
+
+
+def test_e2e_metadata_events_differ(checker, e2e, e2e_tables, tmp_path):
+    run = copy_run(e2e[0], tmp_path / "run")
+    meta = run / "output/tree_r000.metadata.json"
+    m = json.loads(meta.read_text())
+    m["events"] = int(m["events"]) - 1
+    meta.write_text(json.dumps(m))
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and any(n.startswith("run 000 ") and n.endswith(" metadata") for n in failing(rows))
 
 
 # --- the validator: statistics and the physics row ------------------------------------

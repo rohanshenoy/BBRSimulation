@@ -33,6 +33,7 @@ above the square of the Geant4 thread count (Geant4 warns, Run10035, otherwise).
 Exit code 0 on success, 2 when the tree cannot be checked.
 """
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -107,7 +108,8 @@ def read_tree(root):
                       "both slab cracks and checks every placed crack at /run/initialize")
     datasets = {}
     for did, grid in grids.items():
-        entry = {"aimed": did in AIM, "grid": [[f, stem] for f, stem in grid]}
+        entry = {"aimed": did in AIM, "grid": [[f, stem] for f, stem in grid],
+                 "sidecar_sha256": {stem: sidecar_sha256(wg, stem) for _, stem in grid}}
         if did in AIM:
             try:
                 sc = [sidecar.load(wg, stem) for _, stem in grid][0]
@@ -125,6 +127,15 @@ def read_tree(root):
                               f"check the tree with validation/check_dataset_sidecars.py {wg}") from None
         datasets[did] = entry
     return wg, datasets
+
+
+def sidecar_sha256(wg, stem):
+    """sha256 of a dataset's sidecar, which records its CSVs' checksums; None if unreadable."""
+    try:
+        with open(os.path.join(wg, f"{stem}.dataset.json"), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
 
 
 def plan_runs(datasets, events, probe_events, planck_events, planck_temp_K):
