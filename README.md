@@ -271,8 +271,9 @@ validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 
 The runner builds and installs the library with its C++ tests
 (`BUILD_BBRSIM_TESTS=ON`), runs them (CTest), the Python tests (pytest) and
-the env-script test, builds both examples against the install, runs eleven
-fixed-seed cases in parallel (seven validation fixtures and four example macros)
+the env-script test, builds both examples against the install, runs thirteen
+fixed-seed cases in parallel (seven validation fixtures, two real-tree checks
+generated at run time, and four example macros)
 with the Geant4 thread count pinned to 8 (`BBR_THREADS` overrides), scans their
 logs for warnings, and runs the PASS/FAIL validators on their output. Last, it
 runs the examples installed into a separate prefix without the env script, and

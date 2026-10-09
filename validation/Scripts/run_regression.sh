@@ -26,11 +26,13 @@
 #    bbrsim) and validation/Scripts/tests/test_env.sh (the env scripts).
 # 2. Builds the mock HFSS tree (each mock frequency with its dataset sidecar)
 #    and the mock round-gap tree when needed, checks that the real
-#    data/waveguides holds only 500 GHz (leak guard), runs the eleven cases in
-#    parallel with a pinned Geant4 thread count (BBR_THREADS, default 8), each
-#    in BUILD_DIR/regression/<case>/ (BBRSIMDATA comes from the
-#    installed env script): the seven validation/G4Macros fixtures and four
-#    example macros (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
+#    data/waveguides holds only 500 GHz (leak guard), generates the two
+#    real-tree checks (make_tree_check.py over data/ and over the mock tree),
+#    runs the thirteen cases in parallel with a pinned Geant4 thread count
+#    (BBR_THREADS, default 8), each in BUILD_DIR/regression/<case>/ (BBRSIMDATA
+#    comes from the installed env script): the seven validation/G4Macros
+#    fixtures, the two generated tree checks and four example macros
+#    (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
 #    their command lines are pinned by drift_guards.sh). Scans every log for
 #    GeomNav / G4Exception / BBR0xx / LP002 messages, checks that the
 #    frequency case's BBR008 clamp warning fires once per side, and that the
@@ -302,6 +304,18 @@ if out=$(cd / && $PY -c "$LEAK_PY" "$REPO/data/waveguides" 2>&1); then
   line PASS "real-data leak guard" "data/waveguides holds only 500 GHz"; pass=$((pass+1))
 else line FAIL "real-data leak guard" "$(echo "$out" | tail -1)"; fail=$((fail+1)); fi
 
+# The real-tree check (validation/README.md, Real-tree check): a run generated from a
+# data tree's directory names and sidecars, over the legacy tree in data/ and over the
+# mock five-frequency tree. A failed generation leaves no tree_check.mac, so that
+# case's run row fails.
+tree_gen() {  # case data-root
+  mkdir -p "$REG/$1"
+  $PY "$VAL/Scripts/make_tree_check.py" "$2" --out "$REG/$1" >"$REG/$1/generate.log" 2>&1 ||
+    { echo "TREE CHECK GENERATION FAILED ($1):"; tail -3 "$REG/$1/generate.log"; }
+}
+tree_gen tree_legacy "$REPO/data"
+tree_gen tree_mock   "$MOCK"
+
 run_macro() {  # case executable macro-path
   mkdir -p "$REG/$1" && ( cd "$REG/$1" && "$2" "$3" >run.log 2>&1; echo $? >exit.code )
 }
@@ -327,7 +341,8 @@ scan_log() {  # case-dir [tolerated-codes-ERE]
   echo $(( n_geom + n_lp + (n_start - n_tol) + n_bbr ))
 }
 # refl, planck, config_mt and lp run the example macros themselves, pinned by the
-# drift guard "regression macros pinned"; the other seven are validation-only fixtures.
+# drift guard "regression macros pinned"; the next seven are validation-only fixtures,
+# and the two tree checks run the macros make_tree_check.py generated above.
 run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
 run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
 run_macro config_mt "$TESTWORLD" "$REPO/examples/testworld/G4Macros/config_mt.mac"   &
@@ -339,11 +354,14 @@ run_macro frequency "$TESTWORLD" "$VM/Validation_CrackFrequency.mac"  &
 run_macro round     "$TESTWORLD" "$VM/Validation_RoundGap.mac"    &
 run_macro lp        "$LIGHTPIPE" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac"   &
 run_macro lp_cad    "$LIGHTPIPE" "$VM/Validation_LightPipeCAD.mac"    &
+run_macro tree_legacy "$TESTWORLD" "$REG/tree_legacy/tree_check.mac"  &
+run_macro tree_mock   "$TESTWORLD" "$REG/tree_mock/tree_check.mac"    &
 wait
-for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_cad; do
+for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_cad tree_legacy tree_mock; do
   code=$(cat "$REG/$d/exit.code")
   case "$d" in
     frequency) tol="BBR008|BBR026" ;;               # clamp warnings; Planck photons below the TE10 cutoff
+    tree_legacy|tree_mock) tol="BBR008|BBR026" ;;   # check_tree_run.py checks their exact counts
     planck|config_mt|transmit) tol="BBR026" ;;      # Planck photons below the cracks' TE10 cutoff (14.99 GHz)
     *) tol="" ;;
   esac
@@ -495,6 +513,22 @@ for f in "$REG"/round/output/bbr_round_r*.root; do
 done
 if [ "$rg_n" -gt 0 ] && [ "$rg_bad" -eq 0 ]; then line PASS "round invariants" "[round] check_invariants on $rg_n per-run files"; pass=$((pass+1))
 else fail=$((fail+rg_bad)); [ "$rg_n" -eq 0 ] && { line FAIL "round invariants" "[round] no per-run files found"; fail=$((fail+1)); }; fi
+# The real-tree checks: each generated run against its own tree (manifest, per-run
+# outputs and log), then check_invariants on every per-run file.
+for t in tree_legacy tree_mock; do
+  out=$($PY "$VAL/check_tree_run.py" "$REG/$t" --log "$REG/$t/run.log" 2>&1); rc=$?
+  res=$(echo "$out" | grep -E "^RESULT" | tail -1)
+  if [ $rc -eq 0 ]; then line PASS check_tree_run.py "[$t] $res"; pass=$((pass+1))
+  else line FAIL check_tree_run.py "[$t] $res"; fail=$((fail+1)); echo "$out" | grep -E "^  FAIL" | head -8 | sed 's/^/       /'; fi
+  tr_bad=0; tr_n=0
+  for f in "$REG/$t"/output/tree_r*.root; do
+    [ -f "$f" ] || continue
+    tr_n=$((tr_n+1))
+    out=$($PY "$VAL/check_invariants.py" "$f" 2>&1) || { tr_bad=$((tr_bad+1)); line FAIL check_invariants.py "[$t/$(basename "$f")] $(echo "$out" | grep -E "^RESULT" | tail -1)"; }
+  done
+  if [ "$tr_n" -gt 0 ] && [ "$tr_bad" -eq 0 ]; then line PASS "$t invariants" "[$t] check_invariants on $tr_n per-run files"; pass=$((pass+1))
+  else fail=$((fail+tr_bad)); [ "$tr_n" -eq 0 ] && { line FAIL "$t invariants" "[$t] no per-run files found"; fail=$((fail+1)); }; fi
+done
 check -        check_cu_serov.py
 # Every HFSS dataset, real and mock, carries a valid schema-1 sidecar: checks,
 # full mode lists, CSV checksums, C1-C5 (validation/README.md, Dataset sidecars).

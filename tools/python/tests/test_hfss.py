@@ -153,6 +153,51 @@ def test_photon_frequency_scalar_and_array():
     assert hfss.photon_frequency_GHz(np.array([2.067834e-3])).shape == (1,)
 
 
+def test_photon_frequency_matches_clhep_arithmetic():
+    # CLHEP builds h_Planck = 6.62607015e-34 * joule * s in MeV ns, with joule =
+    # 1e-6 MeV / e_SI and s = 1e9 ns; BBSimOpBoundaryProcess computes
+    # nu = E[MeV] / h_Planck / (1e9 * hertz), and 1e9 * hertz is exactly 1. The
+    # literals below restate that arithmetic independently of the module.
+    assert hfss.H_PLANCK_MEV_NS == 4.135667696923858e-12
+    assert hfss.H_EV_S == 4.135667696923858e-15
+    rng = np.random.default_rng(7)
+    e_MeV = rng.uniform(4.14e-5, 8.27e-2, 10000) * 1e-6     # the emitter's band, as Geant4 holds it
+    recorded_eV = e_MeV / 1e-6                               # the ntuple stores E / eV
+    nu_cpp = e_MeV / 4.135667696923858e-12 / 1.0
+    assert np.array_equal(hfss.photon_frequency_GHz(recorded_eV), nu_cpp)
+
+
+def test_discover_datasets_lists_every_id(tmp_path):
+    for name in ("InfParallelPlate_crack1Rohan_180GHz", "InfParallelPlate_crack1Rohan_1.01e3GHz",
+                 "InfParallelPlate_crack2_500GHz"):
+        (tmp_path / f"{name}_Ephi=0").mkdir()
+        (tmp_path / f"{name}_Ephi=1").mkdir()
+        (tmp_path / f"{name}.dataset.json").write_text("{}")
+    (tmp_path / "c_notanumberGHz_Ephi=0").mkdir()            # skipped, as BBRCrackLibrary skips it
+    (tmp_path / "c_700GHz_Ephi=0").write_text("a file, not a dir")
+    assert hfss.discover_datasets(str(tmp_path)) == {
+        "InfParallelPlate_crack1Rohan": [(180.0, "InfParallelPlate_crack1Rohan_180GHz"),
+                                         (1010.0, "InfParallelPlate_crack1Rohan_1.01e3GHz")],
+        "InfParallelPlate_crack2": [(500.0, "InfParallelPlate_crack2_500GHz")]}
+
+
+def test_discover_datasets_legacy_dir_raises(tmp_path):
+    (tmp_path / "InfParallelPlate_crack2_Ephi=0").mkdir()
+    with pytest.raises(ValueError, match="legacy"):
+        hfss.discover_datasets(str(tmp_path))
+
+
+def test_discover_datasets_duplicate_raises(tmp_path):
+    (tmp_path / "c_1500GHz_Ephi=0").mkdir()
+    (tmp_path / "c_1.5e3GHz_Ephi=0").mkdir()
+    with pytest.raises(ValueError, match="duplicate"):
+        hfss.discover_datasets(str(tmp_path))
+
+
+def test_discover_datasets_empty_tree(tmp_path):
+    assert hfss.discover_datasets(str(tmp_path)) == {}
+
+
 # --- dataset load ----------------------------------------------------------------
 def test_load_normalizes_ratio_above_one(tmp_path):
     # A key whose lam_max exceeds 1 has T0 and T1 divided by it (the BBRHFSSData

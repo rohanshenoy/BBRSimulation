@@ -4,11 +4,12 @@ Fixed-seed fixtures and PASS/FAIL validators that gate every change to BBRsim.
 
 ```
 G4Macros/Validation_*.mac   the seven validation-only fixtures
-check_*.py                  the 14 validators
+check_*.py                  the 15 validators
 Scripts/run_regression.sh   build + fixtures + validators, one command
 Scripts/drift_guards.sh     source-tree consistency checks (run by the runner, or alone)
 Scripts/make_mock_hfss_frequencies.py   the mock HFSS tree for Validation_CrackFrequency
 Scripts/make_mock_round_gap.py          the mock RoundGap_r50um dataset at 2000 GHz for Validation_RoundGap, with links to the real crack datasets
+Scripts/make_tree_check.py              a test-world run for any HFSS data tree, checked by check_tree_run.py (see Real-tree check)
 Scripts/consumer_smoke/     external find_package(BBRsim) + link smoke test
 Scripts/numbers.baseline    the three fixed-seed numbers that BBR_PIN=1 compares
 Scripts/tests/              make_bad_output.py (synthetic outputs for the validator negative tests),
@@ -28,12 +29,13 @@ consumer smoke test and the `bbrsim data default` and `version stamp` checks,
 then step 1c: the C++
 tests (`ctest`), the Python tests (`pytest`, from `/` on the installed
 `bbrsim`; pytest must be installed, `pip install -e "tools/python[test]"`) and
-`Scripts/tests/test_env.sh` (`env scripts`). It runs the eleven cases in parallel,
+`Scripts/tests/test_env.sh` (`env scripts`). It runs the thirteen cases in parallel,
 each in `BUILD_DIR/regression/<case>/`, with `G4FORCENUMBEROFTHREADS` pinned to
 8 (`BBR_THREADS` overrides; Geant4 warns when a run has more threads than the
 square root of its events, and the log scan would fail on a many-core machine),
-and runs the validators on their output. Seven cases run the fixtures here; four
-run example macros directly (see [Regression inputs](#regression-inputs)).
+and runs the validators on their output. Seven cases run the fixtures here, two
+run the real-tree checks generated at run time (see [Real-tree check](#real-tree-check)),
+and four run example macros directly (see [Regression inputs](#regression-inputs)).
 Last come two rows: `installed examples` (both examples installed into
 `BUILD_DIR/expfx`, never the prefix, run without `BBRSIMDATA` or
 `DYLD_LIBRARY_PATH`: `Validation_CrackTransmit.mac` must pass
@@ -63,6 +65,8 @@ fingerprint stays fixed; pytest also exercises real redirected output and per-re
 | `round` | `Validation_RoundGap.mac` | `bbrsimTestWorld` | `check_round_gap.py --data-dir mock_round_gap --log run.log` on `output/`; `check_invariants.py` on each of the 9 `bbr_round_rNN.root` |
 | `lp` | `examples/lightpipe/G4Macros/lightpipe.mac` | `bbrsimLightPipe` | `check_invariants.py` |
 | `lp_cad` | `Validation_LightPipeCAD.mac` | `bbrsimLightPipe` | `check_invariants.py` (cad mode, the bundled `box_sample.stl` through `BBRSIMDATA`) |
+| `tree_legacy` | `tree_check.mac`, generated from `data/` | `bbrsimTestWorld` | `check_tree_run.py --log run.log` on the case directory; `check_invariants.py` on each of the 16 `tree_rNNN.root` |
+| `tree_mock` | `tree_check.mac`, generated from `BUILD_DIR/mock_hfss` | `bbrsimTestWorld` | the same, on its 92 `tree_rNNN.root` |
 | — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL); `check_dataset_sidecars.py` on `data/waveguides`, `BUILD_DIR/mock_hfss/waveguides` and `BUILD_DIR/mock_round_gap/waveguides` |
 
 A case passes when the binary exits 0, writes its ROOT output, and its log
@@ -71,7 +75,7 @@ tolerated warnings: `BBR008` (frequency case: its clamp warnings, exactly one
 per side required) and `BBR026` (planck, config_mt, transmit and frequency:
 Planck photons below the cracks' TE10 cutoff at 14.99 GHz served by a dataset
 above it, at most once per dataset and direction). The round case's gun
-photons sit above its TE11 cutoff, so `BBR026` fails it.
+photons sit above its TE11 cutoff, so `BBR026` fails it. The two tree cases tolerate `BBR008` and `BBR026`; `check_tree_run.py` then requires exactly the warnings their output implies.
 
 ## Drift guards
 
@@ -104,6 +108,7 @@ not installed is skipped) and exits with its FAIL count.
 - `check_crack_transmittance.py` — T_obs within 3 σ (binomial) of 0.50 and no tangential exits.
 - `check_crack_ratio.py` — the crack2/crack1 entry ratio is within 3 σ (Poisson) of the aperture ratio A2/A1 = 1.962.
 - `check_crack_oblique.py`, `check_crack_frequency.py` — all 138 and 89 checks respectively.
+- `check_tree_run.py` — on each tree case, every exact row, every statistical row within its family-wise limit and every physics row of [Real-tree check](#real-tree-check).
 - `check_round_gap.py` — all 49 checks over the nine runs of `Validation_RoundGap.mac` (2000 GHz, against the mock `RoundGap_r50um` table): one gap entry per event along the gun direction; T_obs within 3 σ (binomial) of the `bbrsim.hfss` prediction; every exit on the exit face and within the 50 µm HFSS radius, although the Geant4 hole is 51 µm; for the three fixed polarizations, the share of exits inside R/2 within 4 σ of the table's prediction, which tells the Ephi=0 and Ephi=1 radial profiles apart; and the mean exit direction within 4 standard errors of the prediction in each component. The last run, at the diagonal key (45°, 135°) with a fixed polarization of equal θ̂ and φ̂ components, makes the polarization cross term 2 E_θ E_φ √(T₀T₁) Re ρ large (Re ρ = 0.288 in the mock): T = 0.511 against 0.289 with the term's sign flipped, 28 σ apart, so it pins that sign end to end; the random-polarization diagonal run averages the term out. With `--log` (as the runner calls it) one more check: the run log holds exactly one `[BBR] crack RoundGap_r50um:` line reporting its sidecar fit, the startup check of the placed solid against the sidecar; without it, 48 checks.
 - `check_invariants.py` — both invariants, each printed in its own section: no photons in metal (no crossing starts inside a `Cu_RRR*` or `BBR_Perfect*` material, and the file holds at least one crossing; `--allow-no-crossings` waives only the latter, for the world-exit fixture), and termination labels (the file holds at least one `abspoints` row, no `unknown` label, every world exit is `WorldExit`, every absorption has a volume, and the `BBRAbsorb` counts agree between the two ntuples). A code with no legend entry fails the section that reads that column (`legend lacks code(s) …`), so a legend gap cannot make a check pass vacuously.
 - `check_cu_serov.py` — full-Drude loss for the `OF_Cu` (RRR 3) and `HP_Cu` (RRR 6) aliases within ±10 % of Serov et al. (2016). **XFAIL:** `HP_Cu` comes out 13 % low at 230 GHz, because RRR 6 was derived with Hagen-Rubens. Whether to move `HP_Cu` to RRR 5 or accept a wider tolerance is an open decision; the runner reports the check as XFAIL, and as XPASS (a failure) if it starts passing.
@@ -137,6 +142,11 @@ here. Their validators rely on the seeds and event counts too, and
 index the runs by position, so change a fixture only together with its
 validators. Every `Validation_*.mac` must also be called by the runner (drift guard
 `every fixture is run`).
+
+The two tree cases run macros that `Scripts/make_tree_check.py` writes into their
+case directories at run time, from `data/` and from the mock tree. They are not
+fixtures and are not pinned; their validator reads the run plan from the
+manifest beside the macro.
 
 The library install copies this directory to `<prefix>/validation`
 (`INSTALL_VALIDATION`, on by default). The four example macros are installed
@@ -335,6 +345,72 @@ conda run -n bbrsim python validation/Scripts/make_mock_round_gap.py \
 cd D && bbrsimTestWorld <repo>/validation/G4Macros/Validation_RoundGap.mac > run.log 2>&1
 conda run -n bbrsim python <repo>/validation/check_round_gap.py output --data-dir ../mock_round_gap --log run.log
 ```
+
+## Real-tree check
+
+Shows, for any HFSS data tree, that BBRsim consumes it as the `bbrsim.hfss`
+mirror reads it: the legacy tree in `data/`, the mock tree, and the HPC trees,
+whose CSVs never leave the HPC.
+
+`Scripts/make_tree_check.py DATA_ROOT --out RUN_DIR` reads the directory names
+and sidecars under `DATA_ROOT/waveguides`, never the CSVs, and writes
+`RUN_DIR/tree_check.mac` and the run manifest `RUN_DIR/tree_check.json`. It knows
+only where the test world places its cracks: `InfParallelPlate_crack1Rohan` at
+z = 0, `InfParallelPlate_crack2` at z = 3 mm and, through
+`/bbr/testworld/roundGap`, `RoundGap_r50um` at z = −80 mm. Any other dataset is
+listed as not exercised. Per dataset and grid frequency it plans seven gun runs
+of 4000 photons from x = −20 mm at the entrance-face centre:
+- normal incidence with random polarization, with E across the gap, and with E
+  along the long side;
+- random polarization at every declared IWavePhi on every declared IWaveTheta
+  strictly between 90° and 180°;
+- E_θ = E_φ at IWavePhi 45° on each such row, which makes the polarization cross
+  term visible.
+
+Grids of more than one point add probes at 0.99 and 1.01 times each log midpoint
+and beyond each edge. Each dataset gets one 20 K Planck run from a thin box just
+in front of its crack. Energies carry 11 significant figures, and the lowest and
+highest grid frequencies run 0.1 % inside the grid, because an exact edge reads
+back one ulp outside and clamps. Keep every event count at or above the square
+of the thread count (Geant4 warns, Run10035, otherwise).
+
+`check_tree_run.py RUN_DIR --log RUN_DIR/run.log` reads the manifest, every
+`output/tree_rNNN.root` with its metadata, and the log.
+- Exact rows: the tree is unchanged since generation (the grids, and each
+  sidecar's sha256, which the manifest records and which covers the CSV
+  checksums); every output names the data root and the tree's frequencies and
+  ran the planned number of events; every Planck run reached its crack; every decided crack entry carries the
+  grid frequency the selection rule gives for its recorded energy, and every
+  other row −1 (the mirror computes the frequency in CLHEP's own arithmetic, so
+  the comparison is exact); one entry per event on the aimed crack with the
+  configured direction and energy; specular reflections; every grid frequency
+  served; `BBR008` and `BBR026` exactly as the output implies, no other warning,
+  and the startup lines.
+- Statistical rows: transmittance per run and probe; exit direction, the mean of
+  each component and the mean square of the transverse ones; per Planck run, the
+  transmissions against the summed per-photon prediction and the entries per
+  grid point against the photon-number spectrum. Each passes within z_max
+  standard errors, z_max = max(4, Φ⁻¹(1 − 0.0005/M)) for M statistical rows, so a
+  correct run fails any of them with at most 0.1 % chance; counts get one count
+  of slack.
+- The physics row: below 0.95 × the sidecar's polarization-filter limit, a
+  rectangular crack transmits under 1 % of E along its long side at normal
+  incidence, so a swapped pair of `Ephi` directories fails.
+
+Apart from the physics row, every row compares BBRsim with the mirror reading
+the same files: the check proves the consumer, not the data, whose physics is
+accepted on the HFSS side. The runner runs it as the cases `tree_legacy` and
+`tree_mock`. On any other tree, check the sidecars first:
+
+```bash
+conda run -n bbrsim python validation/check_dataset_sidecars.py <root>/waveguides
+conda run -n bbrsim python validation/Scripts/make_tree_check.py <root> --out <dir>
+cd <dir> && G4FORCENUMBEROFTHREADS=8 bbrsimTestWorld tree_check.mac > run.log 2>&1
+conda run -n bbrsim python <repo>/validation/check_tree_run.py <dir> --log <dir>/run.log
+```
+
+Where there is no conda, the Python that has `bbrsim` importable replaces
+`conda run -n bbrsim python`.
 
 ## Leak guard
 

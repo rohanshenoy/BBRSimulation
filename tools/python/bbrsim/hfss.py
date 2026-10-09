@@ -347,12 +347,24 @@ def binned_expectation(values, weights, edges):
 # directory tree.
 # ---------------------------------------------------------------------------
 
-H_EV_S = 4.135667696e-15   # Planck constant in eV s (CODATA 2018 = CLHEP's value)
+# CLHEP's units and Planck constant, built in CLHEP's own order
+# (CLHEP/Units/SystemOfUnits.h, PhysicalConstants.h): electronvolt = 1e-6 MeV,
+# joule = electronvolt / e_SI, second = 1e9 ns, h_Planck = 6.62607015e-34 * joule
+# * second in MeV ns. photon_frequency_GHz divides by it as BBSimOpBoundaryProcess
+# does, so a frequency computed here equals the C++ one bit for bit and the
+# validators' selection checks are exact.
+_E_SI = 1.602176634e-19                                # CLHEP::e_SI, coulomb
+_ELECTRONVOLT = 1.e-6 * 1.                             # CLHEP::electronvolt, MeV
+_JOULE = _ELECTRONVOLT / _E_SI                         # CLHEP::joule, MeV
+_SECOND = 1.e+9 * 1.                                   # CLHEP::second, ns
+H_PLANCK_MEV_NS = 6.62607015e-34 * _JOULE * _SECOND    # CLHEP::h_Planck, MeV ns
+H_EV_S = H_PLANCK_MEV_NS / (_ELECTRONVOLT * _SECOND)   # the same in eV s, 4.135667696923858e-15
 
 
 def photon_frequency_GHz(energy_eV):
-    """Photon frequency in GHz from its energy in eV (scalar or array)."""
-    nu = np.asarray(energy_eV, dtype=float) / H_EV_S / 1e9
+    """Photon frequency in GHz from its energy in eV (scalar or array), computed as
+    BBSimOpBoundaryProcess does: E[MeV] / h_Planck[MeV ns], where 1/ns is 1 GHz."""
+    nu = (np.asarray(energy_eV, dtype=float) * _ELECTRONVOLT) / H_PLANCK_MEV_NS
     return float(nu) if nu.ndim == 0 else nu
 
 
@@ -436,6 +448,32 @@ def discover_frequencies(dataset_id, base_dir=None):
         raise FileNotFoundError(
             f"no {prefix}<freq>{suffix} directories under {base}")
     return sorted(found.items())
+
+
+_DATASET_DIR = re.compile(r"(?P<id>.+)_(?P<token>[^_]+)GHz_Ephi=0")
+
+
+def discover_datasets(base_dir=None):
+    """{dataset_id: [(freq_GHz, dir_stem), ...]} for every dataset under ``base_dir``.
+
+    Each '<id>_<token>GHz_Ephi=0' folder whose token parses as BBRCrackLibrary
+    parses it names a dataset; each ID's grid is then exactly what
+    discover_frequencies returns, with its errors (two tokens of one value).
+    A '<id>_Ephi=0' folder with no frequency raises, as for one ID. Folders with
+    a token that does not parse, and files, are skipped. IDs come sorted.
+    """
+    base = base_dir or default_base_dir()
+    ids = set()
+    for name in sorted(os.listdir(base)):
+        if not name.endswith("_Ephi=0") or not os.path.isdir(os.path.join(base, name)):
+            continue
+        if not name[:-len("_Ephi=0")].endswith("GHz"):
+            raise ValueError(f"legacy directory {name} has no frequency: rename it to "
+                             f"<id>_<freq>GHz_Ephi=0")
+        m = _DATASET_DIR.fullmatch(name)
+        if m and _parse_stem_token(name, f"{m.group('id')}_", "GHz_Ephi=0") is not None:
+            ids.add(m.group("id"))
+    return {i: discover_frequencies(i, base) for i in sorted(ids)}
 
 
 def select_frequency(entries, nu_GHz):
