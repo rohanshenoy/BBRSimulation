@@ -121,8 +121,9 @@ def _order(entries):
     return out
 
 
-def disc_modes(radius_m, freq_ghz, limit_ghz=LIST_LIMIT_GHZ):
-    """Closed ideal-PEC circular guide: TE_np = x'_np c/(2 pi R), TM_np = x_np c/(2 pi R)."""
+def _disc_entries(radius_m, limit_ghz):
+    """(cutoff_ghz, kind, m, p) of every TE_mp and TM_mp of a closed PEC circular guide with its cutoff
+    at or below limit_ghz, in list order."""
     from scipy.special import jn_zeros, jnp_zeros
     scale = C / (2 * math.pi * radius_m) / 1e9         # GHz per unit Bessel zero
     x_max = limit_ghz / scale
@@ -144,12 +145,19 @@ def disc_modes(radius_m, freq_ghz, limit_ghz=LIST_LIMIT_GHZ):
         if not added and m >= 1:
             break
         m += 1
+    return _order(entries)
+
+
+def disc_modes(radius_m, freq_ghz, limit_ghz=LIST_LIMIT_GHZ):
+    """Closed ideal-PEC circular guide: TE_np = x'_np c/(2 pi R), TM_np = x_np c/(2 pi R). The list
+    stops at limit_ghz; propagating_count counts to the file's own frequency, above the limit too
+    (CDX-007), as the HFSS producer does."""
     cutoffs = [{"mode": mode_label(k, m, p), "cutoff_ghz": f, "degeneracy": 1 if m == 0 else 2}
-               for f, k, m, p in _order(entries)]
-    lowest = X11_PRIME * scale
+               for f, k, m, p in _disc_entries(radius_m, limit_ghz)]
+    lowest = X11_PRIME * C / (2 * math.pi * radius_m) / 1e9
     return {"cutoff_ghz": lowest, "mode": "TE11", "list_limit_ghz": limit_ghz,
             "polarization_filter_limit_ghz": lowest, "cutoffs": cutoffs,
-            "propagating_count": sum(1 for c in cutoffs if c["cutoff_ghz"] <= freq_ghz)}
+            "propagating_count": len(_disc_entries(radius_m, freq_ghz))}
 
 
 def modes_for(section, freq_ghz):

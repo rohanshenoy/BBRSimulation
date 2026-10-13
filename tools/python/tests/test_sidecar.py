@@ -80,6 +80,17 @@ def test_disc_modes_5um_matches_the_producer():
     assert m["propagating_count"] == 1
 
 
+@pytest.mark.parametrize("freq_ghz,count", [(2000.0, 1), (19000.0, None), (20000.0, 114), (25000.0, 179),
+                                             (30000.0, 255)])
+def test_disc_propagating_count_beyond_the_list(freq_ghz, count):
+    """CDX-007: the list stops at 20 THz, the count runs to the file's frequency (the HFSS producer's
+    179 at 25 THz and 255 at 30 THz for R = 50 um); below the limit it counts the list."""
+    m = sidecar.disc_modes(5e-5, freq_ghz)
+    assert len(m["cutoffs"]) == 114
+    want = count if count is not None else sum(1 for c in m["cutoffs"] if c["cutoff_ghz"] <= freq_ghz)
+    assert m["propagating_count"] == want
+
+
 def test_mode_label():
     assert sidecar.mode_label("TE", 1, 1) == "TE11"
     assert sidecar.mode_label("TE", 18, 1) == "TE18,1" and sidecar.mode_label("TM", 0, 10) == "TM0,10"
