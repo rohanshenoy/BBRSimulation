@@ -121,8 +121,9 @@ def _order(entries):
     return out
 
 
-def disc_modes(radius_m, freq_ghz, limit_ghz=LIST_LIMIT_GHZ):
-    """Closed ideal-PEC circular guide: TE_np = x'_np c/(2 pi R), TM_np = x_np c/(2 pi R)."""
+def _disc_entries(radius_m, limit_ghz):
+    """(cutoff_ghz, kind, m, p) of every TE_mp and TM_mp of a closed PEC circular guide with its cutoff
+    at or below limit_ghz, in list order."""
     from scipy.special import jn_zeros, jnp_zeros
     scale = C / (2 * math.pi * radius_m) / 1e9         # GHz per unit Bessel zero
     x_max = limit_ghz / scale
@@ -139,15 +140,24 @@ def disc_modes(radius_m, freq_ghz, limit_ghz=LIST_LIMIT_GHZ):
                 if x <= x_max:
                     entries.append((float(x) * scale, kind, m, p))
                     added = True
-        if not added:          # the first zero grows with m, so no higher m qualifies
+        # Order 0 can be empty while TE11 lies below the limit (x'_11 < j_01 < x'_01); from order 1
+        # on the first zero grows with the order, so the first empty order ends the search (CDX-006).
+        if not added and m >= 1:
             break
         m += 1
+    return _order(entries)
+
+
+def disc_modes(radius_m, freq_ghz, limit_ghz=LIST_LIMIT_GHZ):
+    """Closed ideal-PEC circular guide: TE_np = x'_np c/(2 pi R), TM_np = x_np c/(2 pi R). The list
+    stops at limit_ghz; propagating_count counts to the file's own frequency, above the limit too
+    (CDX-007), as the HFSS producer does."""
     cutoffs = [{"mode": mode_label(k, m, p), "cutoff_ghz": f, "degeneracy": 1 if m == 0 else 2}
-               for f, k, m, p in _order(entries)]
-    lowest = X11_PRIME * scale
+               for f, k, m, p in _disc_entries(radius_m, limit_ghz)]
+    lowest = X11_PRIME * C / (2 * math.pi * radius_m) / 1e9
     return {"cutoff_ghz": lowest, "mode": "TE11", "list_limit_ghz": limit_ghz,
             "polarization_filter_limit_ghz": lowest, "cutoffs": cutoffs,
-            "propagating_count": sum(1 for c in cutoffs if c["cutoff_ghz"] <= freq_ghz)}
+            "propagating_count": len(_disc_entries(radius_m, freq_ghz))}
 
 
 def modes_for(section, freq_ghz):
@@ -209,9 +219,30 @@ def _read_csv(base, stem, ephi, name, columns):
     # header, and fills a short row with NaN; both are rows with the wrong number of fields
     if not isinstance(df.index, pd.RangeIndex):
         raise ValueError(f"BBR013: {p}: data rows have more fields than the header")
-    if df.isna().to_numpy().any():
-        raise ValueError(f"BBR013: {p}: a row lacks fields or holds an empty field")
+    na = df.isna().to_numpy()
+    if na.any():
+        r, c = (int(x) for x in np.argwhere(na)[0])
+        raise ValueError(f"BBR013: {p}: a row lacks fields or holds an empty field or NaN "
+                         f"(line {r + 2}, column {columns[c]})")
+    # every field BBRHFSSData parses with Num, all but Freq and Ephi, is a finite number (CDX-001)
+    numeric = [c for c in columns if c not in ("Freq", "Ephi")]
+    bad = ~np.isfinite(df[numeric].apply(pd.to_numeric, errors="coerce").to_numpy(float))
+    if bad.any():
+        r, c = (int(x) for x in np.argwhere(bad)[0])
+        raise ValueError(f"BBR013: {p}: line {r + 2}, column {numeric[c]}: '{df[numeric[c]].iloc[r]}' is not "
+                         f"a finite number")
     return df
+
+
+def _rows_by_key(df, cols):
+    """{key: array of the cols of each incidence key's rows, in file order}, keys rounded to 0.01 deg
+    as BBRHFSSData rounds them."""
+    out = {}
+    for (p, t), g in df.groupby(["IWavePhi", "IWaveTheta"], sort=False):
+        k = (round(float(p), 2), round(float(t), 2))
+        v = g[list(cols)].to_numpy(float)
+        out[k] = np.vstack([out[k], v]) if k in out else v
+    return out
 
 
 def _describe_one(base, stem, ephi):
@@ -249,6 +280,10 @@ def _describe_one(base, stem, ephi):
         "keys": set(rows_key),
         "ff_keys": {(round(float(p), 2), round(float(t), 2)) for p, t in
                     ff[["IWavePhi", "IWaveTheta"]].itertuples(index=False)},
+        "freq_tokens": {"far_field.csv": sorted(ff.Freq.astype(str).unique()),
+                        "waveguide.csv": sorted(wg.Freq.astype(str).unique())},
+        "ff_rows": _rows_by_key(ff, ("Phi", "Theta")),
+        "exit_rows": _rows_by_key(wg, ("X", "Y", "Z")),
     }
 
 
@@ -530,7 +565,12 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
             raise ValueError(f"BBR025: symmetry.{k} is false; the sampler folds by both mirrors "
                              "and serves both ends from one table")
     _req(sym, "rotational", "symmetry.", "bool")
-    _req(sc, "boundaries", "", "dict")
+    # the boundary model the transport implements: radiation end faces, PEC walls; non-transmission is
+    # specular reflection with no wall loss, and the mode formulas assume a closed PEC guide (CDX-003)
+    bd = _req(sc, "boundaries", "", "dict")
+    _expect(_req(bd, "entrance", "boundaries.", "str"), "radiation", "boundaries.entrance")
+    _expect(_req(bd, "exit", "boundaries.", "str"), "radiation", "boundaries.exit")
+    _expect(_req(bd, "walls", "boundaries.", "str"), "PEC", "boundaries.walls")
 
     ext = _req(_req(sc, "geometry", "", "dict"), "extent_mm", "geometry.", "dict")  # F11
     for k in "plg":
@@ -553,6 +593,26 @@ def _contains(section, y, z):
     return y * y + z * z <= section["radius_m"] ** 2 * (1 + SECTION_REL)
 
 
+def _nodes(values, axis, tol):
+    """The node index of each value on a declared axis, node i at min + i (max - min)/(count - 1),
+    or -1 off it: matched to 1e-6 of the step, to tol when the axis has one node (as BBRHFSSData)."""
+    v = np.asarray(values, float)
+    lo, hi, n = axis["min"], axis["max"], axis["count"]
+    if n <= 1:
+        return np.where(np.abs(v - lo) <= tol, 0, -1)
+    step = (hi - lo) / (n - 1)
+    i = np.rint((v - lo) / step).astype(int)
+    return np.where((i >= 0) & (i < n) & (np.abs(v - (lo + i * step)) <= 1e-6 * step), i, -1)
+
+
+def _node_at(axis, i):
+    return axis["min"] if axis["count"] <= 1 else axis["min"] + i * (axis["max"] - axis["min"]) / (axis["count"] - 1)
+
+
+def _axis_text(name, axis):
+    return f"{name} {axis['min']!r} to {axis['max']!r} in {axis['count']} nodes"
+
+
 def _check_one(stem, d, sc, exempt):
     """C1-C5 on the description of one polarization; exempt holds the (key, Y, Z) that C5 lets
     lie outside the section."""
@@ -560,8 +620,18 @@ def _check_one(stem, d, sc, exempt):
     ff, xf = sc["far_field"], sc["exit_field"]
     if d["far_field"]["columns"] != ff["columns"] or d["exit_field"]["columns"] != xf["columns"]:
         raise ValueError(f"BBR013: {tag}: a CSV header differs from the sidecar's columns")              # C1
-    # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them; the waveguide keys must lie on the
-    # declared grid, and the far-field keys must equal them (BBR007 in BBRHFSSData too)
+    # every Freq token parses and agrees with the directory frequency to 0.1 %, as BBRHFSSData checks
+    # each row (BBR009; CDX-001)
+    f_dir = hfss.parse_frequency_GHz(stem.rsplit("_", 1)[1])
+    for name, tokens in d["freq_tokens"].items():
+        for tok in tokens:
+            f = hfss.parse_frequency_GHz(tok)
+            if f is None or f_dir is None or abs(f - f_dir) > 1e-3 * f_dir:
+                raise ValueError(f"BBR009: {tag}/{name}: Freq column {tok!r} does not match the directory "
+                                 f"frequency {f_dir} GHz (tolerance 0.1 %)")
+    # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them; the waveguide keys must equal the
+    # declared grid, and the far-field keys must equal them (BBR007 in BBRHFSSData too). A declared
+    # key without rows would be served by its nearest neighbour, another incidence's tables (CDX-021).
     phis = {round(float(v), 2) for v in sc["excitation"]["incident_phi_deg"]}
     thetas = {round(float(v), 2) for v in sc["excitation"]["incident_theta_deg"]}
     off = sorted(k for k in d["keys"] if k[0] not in phis or k[1] not in thetas)
@@ -571,6 +641,10 @@ def _check_one(stem, d, sc, exempt):
         raise ValueError(f"BBR007: {tag}: far_field.csv and waveguide.csv disagree on incidence keys "
                          f"(far field only {sorted(d['ff_keys'] - d['keys'])}, "
                          f"waveguide only {sorted(d['keys'] - d['ff_keys'])})")
+    missing = sorted({(p, t) for p in phis for t in thetas} - d["keys"])
+    if missing:
+        raise ValueError(f"BBR007: {tag}: declared incidence keys {missing} have no rows; the nearest-key "
+                         f"lookup would serve another incidence's tables for them")
     for name in ("theta_deg", "phi_deg"):                                                               # C3
         got, want = d["far_field"][name], ff[name]
         if got["count"] != want["count"] or got["min"] < want["min"] - 1e-9 or got["max"] > want["max"] + 1e-9:
@@ -608,6 +682,49 @@ def _check_one(stem, d, sc, exempt):
     if outside:
         raise ValueError(f"BBR025: {tag}: {len(outside)} exit point(s) outside the declared "
                          f"cross-section, e.g. {outside[0]}")
+    # C3, C4 per key (CDX-022): every far-field row on a node of the declared Phi x Theta grid and
+    # every exit point on a node of the declared Y x Z lattice, no node twice in one key, every key
+    # holding all of them (the whole exit lattice, or with "omitted" its nodes inside the section).
+    # The dataset-wide checks above cannot see a repeated row, an uneven axis or keys that differ
+    # in compensating ways.
+    phi_ax, theta_ax = ff["phi_deg"], ff["theta_deg"]
+    y_ax, z_ax = xf["grid"]["y_e"], xf["grid"]["z_e"]
+    y_tol = 1e-9 * max(abs(y_ax["min"]), abs(y_ax["max"]))
+    z_tol = 1e-9 * max(abs(z_ax["min"]), abs(z_ax["max"]))
+    lattice = {(i, j) for i in range(y_ax["count"]) for j in range(z_ax["count"])
+               if not omitted or _contains(xf["cross_section"], _node_at(y_ax, i), _node_at(z_ax, j))}
+    for k, rows in d["ff_rows"].items():
+        i, j = _nodes(rows[:, 0], phi_ax, 1e-9), _nodes(rows[:, 1], theta_ax, 1e-9)
+        off = np.nonzero((i < 0) | (j < 0))[0]
+        if len(off):
+            r = rows[off[0]]
+            raise ValueError(f"BBR012: {tag}: far-field row (Phi, Theta) = ({float(r[0])!r}, {float(r[1])!r}) of key {k} is not a "
+                             f"node of the declared grid {_axis_text('Phi', phi_ax)} x {_axis_text('Theta', theta_ax)}")
+        seen = set()
+        for n, pair in enumerate(zip(i.tolist(), j.tolist())):
+            if pair in seen:
+                raise ValueError(f"BBR012: {tag}: far-field point (Phi, Theta) = ({float(rows[n, 0])!r}, {float(rows[n, 1])!r}) "
+                                 f"appears twice in key {k}")
+            seen.add(pair)
+        if len(seen) != phi_ax["count"] * theta_ax["count"]:
+            raise ValueError(f"BBR012: {tag}: key {k} holds {len(seen)} of the {phi_ax['count'] * theta_ax['count']} "
+                             f"nodes of the declared far-field grid")
+    for k, rows in d["exit_rows"].items():
+        i, j = _nodes(rows[:, 1], y_ax, y_tol), _nodes(rows[:, 2], z_ax, z_tol)
+        off = np.nonzero((i < 0) | (j < 0))[0]
+        if len(off):
+            r = rows[off[0]]
+            raise ValueError(f"BBR012: {tag}: exit point (Y, Z) = ({float(r[1])!r}, {float(r[2])!r}) m of key {k} is not a node of "
+                             f"the declared lattice {_axis_text('Y', y_ax)} x {_axis_text('Z', z_ax)}")
+        seen = set()
+        for n, pair in enumerate(zip(i.tolist(), j.tolist())):
+            if pair in seen:
+                raise ValueError(f"BBR012: {tag}: exit point (Y, Z) = ({float(rows[n, 1])!r}, {float(rows[n, 2])!r}) m appears "
+                                 f"twice in key {k}")
+            seen.add(pair)
+        if seen != lattice:
+            raise ValueError(f"BBR012: {tag}: key {k} holds {len(seen)} exit points; every key holds each of the "
+                             f"{len(lattice)} declared lattice nodes{' inside the section' if omitted else ''} once")
 
 
 def check_csvs(base, stem, sc):
@@ -632,6 +749,19 @@ def check_csvs(base, stem, sc):
     for what, get in agree:
         if get(d0) != get(d1):
             raise ValueError(f"BBR012: {stem}: Ephi=1 {what} {get(d1)} differ from Ephi=0's {get(d0)}")
+    # BBRHFSSData pairs each key's Ephi=1 rows with its Ephi=0 rows by order and requires each pair at
+    # the same far-field (Phi, Theta) to 1e-9 deg and exit (X, Y, Z) to 1e-12 m (BBR012). A polarization
+    # with its rows reordered passes every check above (CDX-002).
+    for what, rows, names, tol in (("far-field row", "ff_rows", "(Phi, Theta)", 1e-9),
+                                   ("exit point", "exit_rows", "(X, Y, Z)", 1e-12)):
+        for k, a in d0[rows].items():
+            b = d1[rows][k]
+            bad = np.nonzero(np.any(np.abs(a - b) > tol, axis=1))[0]
+            if len(bad):
+                n = int(bad[0])
+                raise ValueError(f"BBR012: {stem}: key {k}: Ephi=1 {what} {n} lies at {names} = "
+                                 f"{tuple(float(v) for v in b[n])}, the Ephi=0 one at {tuple(float(v) for v in a[n])}; "
+                                 f"BBRHFSSData pairs the two polarizations' rows by order")
 
 
 def _same(got, want, where="modes"):
@@ -673,4 +803,7 @@ def check_full(base, dataset_id, stem, dir_freq_ghz):
                 raise ValueError(f"BBR024: {path_for(base, stem)}: files[{rel!r}].{k} is {got.get(k)!r}, "
                                  f"the CSV gives {entry[k]!r}")
     check_csvs(base, stem, sc)
+    # the load-time checks of the BBRHFSSData constructor, BBR027 included (CDX-008): a dataset that
+    # passes here but refuses to load would stop a Geant4 run at the first photon of its frequency
+    hfss.load_dataset(stem, base)
     return sc

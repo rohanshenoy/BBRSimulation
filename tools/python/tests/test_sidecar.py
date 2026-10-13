@@ -61,6 +61,36 @@ def test_disc_modes_round_gap():
     assert any("," in c["mode"] for c in m["cutoffs"])          # n reaches 10 within 20 THz
 
 
+@pytest.mark.parametrize("radius_m,modes", [
+    (4.39e-6, []),                     # TE11 just above the 20 THz list limit (at R = 4.39246 um it is on it)
+    (4.40e-6, ["TE11"]),               # TE11 below the limit, order 0 still empty: the CDX-006 window
+    (5.73e-6, ["TE11"]),               # TM01, the first order-0 root, just above the limit
+    (5.75e-6, ["TE11", "TM01"]),       # TM01 enters (at R = 5.73713 um it is on the limit)
+])
+def test_disc_modes_order_zero_empty(radius_m, modes):
+    """CDX-006: between R = 4.39246 and 5.73713 um order 0 has no cutoff below 20 THz while TE11
+    has; the search must not stop at the empty order 0."""
+    assert [c["mode"] for c in sidecar.disc_modes(radius_m, 18000.0)["cutoffs"]] == modes
+
+
+def test_disc_modes_5um_matches_the_producer():
+    """Codex's probe: R = 5 um at 18000 GHz; the HFSS producer lists TE11 at 17569.85 GHz, count 1."""
+    m = sidecar.disc_modes(5e-6, 18000.0)
+    assert [(c["mode"], round(c["cutoff_ghz"], 2), c["degeneracy"]) for c in m["cutoffs"]] == [("TE11", 17569.85, 2)]
+    assert m["propagating_count"] == 1
+
+
+@pytest.mark.parametrize("freq_ghz,count", [(2000.0, 1), (19000.0, None), (20000.0, 114), (25000.0, 179),
+                                             (30000.0, 255)])
+def test_disc_propagating_count_beyond_the_list(freq_ghz, count):
+    """CDX-007: the list stops at 20 THz, the count runs to the file's frequency (the HFSS producer's
+    179 at 25 THz and 255 at 30 THz for R = 50 um); below the limit it counts the list."""
+    m = sidecar.disc_modes(5e-5, freq_ghz)
+    assert len(m["cutoffs"]) == 114
+    want = count if count is not None else sum(1 for c in m["cutoffs"] if c["cutoff_ghz"] <= freq_ghz)
+    assert m["propagating_count"] == want
+
+
 def test_mode_label():
     assert sidecar.mode_label("TE", 1, 1) == "TE11"
     assert sidecar.mode_label("TE", 18, 1) == "TE18,1" and sidecar.mode_label("TM", 0, 10) == "TM0,10"
@@ -88,8 +118,11 @@ def test_build_then_full_check(tmp_path):
     (lambda s: s["symmetry"].update(mirror_l=False), "BBR025"),
     (lambda s: s["modes"].update(cutoff_ghz=15.5), "BBR025"),
     (lambda s: s["far_field"].update(columns=s["far_field"]["columns"][::-1]), "BBR025"),
+    (lambda s: s["boundaries"].update(walls="finite-conductivity"), "BBR025"),
+    (lambda s: s["boundaries"].update(entrance="port"), "BBR025"),
+    (lambda s: s["boundaries"].pop("exit"), "BBR024"),
 ], ids=["schema", "id", "label", "type", "rotated-frame", "exit-z", "incidence", "field-frame",
-        "polygon", "cos-theta", "mirror", "cutoff", "columns"])
+        "polygon", "cos-theta", "mirror", "cutoff", "columns", "walls", "entrance", "exit-missing"])
 def test_check_rejects(tmp_path, edit, code):
     base = str(tmp_path)
     stem = write_tiny(base)
@@ -178,14 +211,15 @@ def test_check_full_checks_ephi1(tmp_path, name, transform, match, edit):
 
 
 def test_check_csvs_polarizations_agree(tmp_path):
-    """Ephi=1 keys on the declared grid but unlike Ephi=0's: BBR012."""
+    """Ephi=1 keys on the declared grid but unlike Ephi=0's: since C2 requires every declared key
+    (CDX-021), each polarization lacks one, and Ephi=0 is checked first (BBR007)."""
     base = str(tmp_path)
     stem = write_tiny(base)
     sc = tiny_sidecar(base, stem)
     sc["excitation"]["incident_theta_deg"] = [135.0, 180.0]
     for name in ("far_field.csv", "waveguide.csv"):
         rewrite(base, stem, 1, name, lambda t: t.replace(",0,180,", ",0,135,"))
-    with pytest.raises(ValueError, match="^BBR012: c_500GHz: Ephi=1 incidence keys"):
+    with pytest.raises(ValueError, match=r"^BBR007: c_500GHz_Ephi=0: declared incidence keys \[\(0.0, 135.0\)\]"):
         sidecar.check_csvs(base, stem, sc)
 
 
@@ -328,6 +362,211 @@ def test_check_csvs_omitted_refuses_more_values_than_declared(tmp_path):
     sidecar.check(sc, "c", stem, 500.0)
     with pytest.raises(ValueError, match="^BBR012: c_500GHz_Ephi=0: exit grid y_e .*more distinct values"):
         sidecar.check_csvs(base, stem, sc)
+
+
+# --- CDX-021, CDX-022: complete declared grids, per key ------------------------------------------
+
+GRID_KEYS = ((0.0, 135.0), (0.0, 180.0), (45.0, 135.0), (45.0, 180.0))
+
+
+def write_grid(base, ff=((0, 60), (0, 120)), exit_yz=((0.001, 0.0),), skip_key=None, label="500GHz"):
+    """The grid fixtures of Codex's deep-debug review (CDX-021, CDX-022): keys {0, 45} x {135, 180},
+    T0 = 0.75 at (0, 180) and 0.25 elsewhere, T1 = 0.25; every key holds the far-field rows ff and the
+    exit rows exit_yz, in that order; skip_key leaves one key out of all four CSVs."""
+    stem = f"c_{label}"
+    keys = [k for k in GRID_KEYS if k != skip_key]
+    for e, field in ((0, "0,1,0,0,0,0"), (1, "0,0,1,0,0,0")):
+        d = os.path.join(base, f"{stem}_Ephi={e}")
+        os.makedirs(d)
+        with open(os.path.join(d, "far_field.csv"), "w") as fh:
+            fh.write(FF_HDR + "".join(f"{label},{e},{p},{t},{fp},{ft},0.1,0.0,0.2,0.05\n"
+                                      for p, t in keys for fp, ft in ff))
+        with open(os.path.join(d, "waveguide.csv"), "w") as fh:
+            fh.write(WG_HDR + "".join(
+                f"{label},{e},{p},{t},{0.75 if (e, p, t) == (0, 0.0, 180.0) else 0.25},1.0,0,{y},{z},{field}\n"
+                for p, t in keys for y, z in exit_yz))
+    return stem
+
+
+def drop_key(text, key):
+    """text without the rows of incidence key (phi, theta), as write_grid formats it."""
+    return "".join(line for line in text.splitlines(keepends=True) if f",{key[0]},{key[1]}," not in line)
+
+
+def test_grid_complete_passes(tmp_path):
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sidecar.write(base, stem, tiny_sidecar(base, stem))
+    sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_c2_declared_key_missing(tmp_path):
+    """CDX-021: the builder declares {0, 45} x {135, 180} from the other keys, but (0, 180) has no
+    rows in any CSV; BBRsim would serve (0, 135) at normal incidence, T0 0.25 instead of 0.75."""
+    base = str(tmp_path)
+    stem = write_grid(base, skip_key=(0.0, 180.0))
+    sc = tiny_sidecar(base, stem)
+    assert sc["excitation"]["incident_phi_deg"] == [0.0, 45.0]
+    assert sc["excitation"]["incident_theta_deg"] == [135.0, 180.0]
+    sidecar.write(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR007: c_500GHz_Ephi=0: declared incidence keys \[\(0.0, 180.0\)\] "
+                                         r"have no rows"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+@pytest.mark.parametrize("ephi,names,match", [
+    (0, ("far_field.csv",), r"^BBR007: c_500GHz_Ephi=0: far_field.csv and waveguide.csv disagree"),
+    (0, ("waveguide.csv",), r"^BBR007: c_500GHz_Ephi=0: far_field.csv and waveguide.csv disagree"),
+    (1, ("far_field.csv", "waveguide.csv"), r"^BBR007: c_500GHz_Ephi=1: declared incidence keys \[\(0.0, 180.0\)\]"),
+], ids=["one-table-far-field", "one-table-waveguide", "one-polarization"])
+def test_c2_key_missing_from_part_of_the_data(tmp_path, ephi, names, match):
+    """CDX-021's other two cases: a key missing from one table, and from one polarization only."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    for name in names:
+        rewrite(base, stem, ephi, name, lambda t: drop_key(t, (0.0, 180.0)))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=match):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+@pytest.mark.parametrize("kw,match", [
+    (dict(ff=((0, 60), (0, 60), (30, 60), (30, 120))),
+     r"far-field point \(Phi, Theta\) = \(0.0, 60.0\) appears twice in key \(0.0, 135.0\)"),
+    (dict(ff=((0, 60), (0, 120), (0, 61), (30, 60), (30, 120), (30, 61))),
+     r"far-field row \(Phi, Theta\) = \(0.0, 61.0\) of key \(0.0, 135.0\) is not a node of the declared grid "
+     r"Phi 0.0 to 30.0 in 2 nodes x Theta 60.0 to 120.0 in 3 nodes"),
+    (dict(exit_yz=((-0.001, -5e-6), (-0.001, 5e-6), (0.0, -5e-6), (0.0, -5e-6), (0.001, -5e-6), (0.001, 5e-6))),
+     r"exit point \(Y, Z\) = \(0.0, -5e-06\) m appears twice in key \(0.0, 135.0\)"),
+    (dict(exit_yz=((-0.001, 0.0), (0.0, 0.0), (0.0015, 0.0))),
+     r"exit point \(Y, Z\) = \(0.0, 0.0\) m of key \(0.0, 135.0\) is not a node of the declared lattice"),
+], ids=["duplicate-far-field-point", "uneven-far-field-axis", "duplicate-exit-point", "uneven-exit-axis"])
+def test_c3_c4_per_key_grids(tmp_path, kw, match):
+    """CDX-022: Codex's fixtures (and an uneven exit axis) pass the dataset-wide counts; the per-key
+    node checks refuse them."""
+    base = str(tmp_path)
+    stem = write_grid(base, **kw)
+    sidecar.write(base, stem, tiny_sidecar(base, stem))
+    with pytest.raises(ValueError, match=f"^BBR012: c_500GHz_Ephi=0: {match}"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_c3_keys_differing_in_compensating_ways(tmp_path):
+    """CDX-022: (0, 135) holds (0, 60) and (30, 120), (0, 180) holds (30, 60) and (0, 120): the union
+    is the declared 2 x 2 grid, so only the per-key check sees that each key holds half of it."""
+    base = str(tmp_path)
+    stem = write_grid(base, ff=((0, 60), (30, 120)))
+    for e in (0, 1):
+        rewrite(base, stem, e, "far_field.csv",
+                lambda t: t.replace(",0.0,180.0,0,60,", ",0.0,180.0,30,60,").replace(",0.0,180.0,30,120,", ",0.0,180.0,0,120,"))
+    sidecar.write(base, stem, tiny_sidecar(base, stem))
+    with pytest.raises(ValueError, match=r"^BBR012: c_500GHz_Ephi=0: key \(0.0, 135.0\) holds 2 of the 4 nodes"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_check_full_refuses_a_transmitting_key_without_support(tmp_path):
+    """CDX-008 in the preflight: Ephi=0 transmits (T0 = 0.25 at (0, 135)) but its far field is zero
+    everywhere; BBRHFSSData refuses it at load (BBR027), so check_full must too, before a run."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 0, "far_field.csv", lambda t: t.replace(",0.1,0.0,0.2,0.05\n", ",0.0,0.0,0.0,0.0\n"))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR027: c_500GHz key \(0.0, 135.0\): T0 = 0.25 > 0, but its far field "
+                                         r"has no outward intensity"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_c3_pole_rows_are_valid(tmp_path):
+    """Theta = 0 at two Phi is one direction but two grid nodes: valid (CDX-022 compares coordinate
+    pairs, not directions)."""
+    base = str(tmp_path)
+    stem = write_grid(base, ff=((0, 0), (90, 0), (0, 90), (90, 90)))
+    sidecar.write(base, stem, tiny_sidecar(base, stem))
+    sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_c4_omitted_requires_every_inside_node(tmp_path):
+    """With "omitted" the per-key exit set is the lattice inside the section: R = 15 um at a 10 um step
+    holds -10, 0 and +10 um; dropping the centre point is refused."""
+    base = str(tmp_path)
+    stem = write_disc(base)
+    for e in (0, 1):
+        rewrite(base, stem, e, "waveguide.csv", lambda t: "".join(l for l in t.splitlines(keepends=True)
+                                                                if ",0,0.0," not in l))
+    sc = disc_sidecar(base, stem, "omitted")
+    sc["exit_field"]["grid"]["y_e"] = {"min": -2e-5, "max": 2e-5, "count": 5}
+    with pytest.raises(ValueError, match=r"^BBR012: c_500GHz_Ephi=0: key \(0.0, 180.0\) holds 2 exit points; every "
+                                         r"key holds each of the 3 declared lattice nodes inside the section once"):
+        sidecar.check_csvs(base, stem, sc)
+
+
+def swap_pairs(text):
+    """text with its data rows traded in consecutive pairs (each key's two rows swap places)."""
+    head, *rows = text.splitlines(keepends=True)
+    for i in range(0, len(rows) - 1, 2):
+        rows[i], rows[i + 1] = rows[i + 1], rows[i]
+    return head + "".join(rows)
+
+
+@pytest.mark.parametrize("name,kw,match", [
+    ("waveguide.csv", dict(exit_yz=((-0.001, 0.0), (0.001, 0.0))),
+     r"exit point 0 lies at \(X, Y, Z\) = \(0.0, 0.001, 0.0\), the Ephi=0 one at \(0.0, -0.001, 0.0\)"),
+    ("far_field.csv", dict(),
+     r"far-field row 0 lies at \(Phi, Theta\) = \(0.0, 120.0\), the Ephi=0 one at \(0.0, 60.0\)"),
+], ids=["exit-rows-swapped", "far-field-rows-swapped"])
+def test_check_csvs_pairs_rows_by_order(tmp_path, name, kw, match):
+    """CDX-002: Ephi=1 with each key's two rows swapped keeps every key, grid, count and checksum, but
+    BBRHFSSData pairs the rows by order (BBR012); the preflight must refuse it too."""
+    base = str(tmp_path)
+    stem = write_grid(base, **kw)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, name, swap_pairs)
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=rf"^BBR012: c_500GHz: key \(0.0, 135.0\): Ephi=1 {match}"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_check_csvs_unequal_row_counts(tmp_path):
+    """CDX-002's unequal-count case: one Ephi=1 key with a row fewer."""
+    base = str(tmp_path)
+    stem = write_grid(base, exit_yz=((-0.001, 0.0), (0.001, 0.0)))
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, "waveguide.csv", lambda t: t.replace(t.splitlines(keepends=True)[1], "", 1))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR012: c_500GHz_Ephi=1: exit-point rows per incidence key differ"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+@pytest.mark.parametrize("name,old,new,match", [
+    ("far_field.csv", ",0.2,0.05\n", ",inf,0.05\n", r"line 2, column rEtheta_real: 'inf' is not a finite number"),
+    ("far_field.csv", ",0.2,0.05\n", ",-inf,0.05\n", r"line 2, column rEtheta_real: '-inf' is not a finite number"),
+    ("far_field.csv", ",0.2,0.05\n", ",nan,0.05\n", r"empty field or NaN \(line 2, column rEtheta_real\)"),
+    ("waveguide.csv", ",0.25,1.0,", ",inf,1.0,", r"line 2, column OutgoingPower: 'inf' is not a finite number"),
+    ("waveguide.csv", ",0.25,1.0,", ",abc,1.0,", r"line 2, column OutgoingPower: 'abc' is not a finite number"),
+], ids=["inf", "minus-inf", "nan", "outgoing-power-inf", "not-a-number"])
+def test_check_full_rejects_non_finite(tmp_path, name, old, new, match):
+    """CDX-001: a value BBRHFSSData would refuse at load (BBR013) fails the preflight too, with the
+    file, line and column, even with fresh checksums."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, name, lambda t: t.replace(old, new, 1))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=rf"^BBR013: .*c_500GHz_Ephi=1/{name}: .*{match}"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_check_full_rejects_a_foreign_freq_token(tmp_path):
+    """BBRHFSSData refuses a Freq token more than 0.1 % from the directory frequency (BBR009)."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, "far_field.csv", lambda t: t.replace("500GHz,1,0.0,180.0,", "450GHz,1,0.0,180.0,", 1))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR009: c_500GHz_Ephi=1/far_field.csv: Freq column '450GHz'"):
+        sidecar.check_full(base, "c", stem, 500.0)
 
 
 # --- fix round 2: the physics-only invariant, the disc modes, load(), malformed CSVs -------------
@@ -574,11 +813,11 @@ def test_validator_fails_a_missing_sidecar(tmp_path, repo_root):
 def test_validator_cross_frequency_disagreement_names_the_block(tmp_path, repo_root):
     base = tmp_path / "wg"
     tiny_dataset(str(base))
-    tiny_dataset(str(base), label="600GHz", edit=lambda s: s["boundaries"].update(walls="finite-conductivity"))
+    tiny_dataset(str(base), label="600GHz", edit=lambda s: s["symmetry"].update(rotational=True))
     rc, rows, tail = run_validator(repo_root, base)
     assert rc == 1 and rows == [
         f"  PASS {base}/c_500GHz",
-        f"  FAIL {base}/c_600GHz: disagrees with c_500GHz on the frequency-independent block(s) boundaries"]
+        f"  FAIL {base}/c_600GHz: disagrees with c_500GHz on the frequency-independent block(s) symmetry"]
     assert tail == ["2 dataset(s) checked, 1 failing", "RESULT: FAIL"]
 
 

@@ -312,8 +312,14 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
       Fail("BBR025", path, std::string("symmetry.") + k + " is false; the sampler folds by both transverse mirrors "
                                                           "and serves both ends from one table");
   r.Bool(sym, "rotational", "symmetry.");
+  // The boundary model the transport implements: radiation end faces and PEC walls. A
+  // non-transmission is booked as specular reflection with no wall loss, and the mode formulas
+  // assume a closed PEC guide (CDX-003).
   const json& boundaries = r.At(j, "boundaries", "");
   if (!boundaries.is_object()) Fail("BBR024", path, "boundaries must be an object");
+  r.Expect(r.Str(boundaries, "entrance", "boundaries."), "radiation", "boundaries.entrance");
+  r.Expect(r.Str(boundaries, "exit", "boundaries."), "radiation", "boundaries.exit");
+  r.Expect(r.Str(boundaries, "walls", "boundaries."), "PEC", "boundaries.walls");
 
   // F11: geometry (compared with the placed solid by BBRCrackLibrary; info only).
   const json& geo = r.At(j, "geometry", "");

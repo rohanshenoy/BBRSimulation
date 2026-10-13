@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
       // The parallel plate is symmetric under y -> -y and z -> -z. With the same uniforms,
       // a mirrored input must give the same decision and the mirrored direction, exit
       // position (crack centred at the origin) and polarization (up to sign).
-      TempDir d; UseData(d, hfssfix::NineKey());
+      TempDir d; UseData(d, hfssfix::NineKeyGrid());
       World w; ScriptedEngine eng;
       CLHEP::MixMaxRng gen(12345);
       auto My = [](G4ThreeVector v) { return G4ThreeVector(v.x(), -v.y(), v.z()); };

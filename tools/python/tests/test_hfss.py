@@ -14,9 +14,10 @@ GRID = [(-90.0, 90.0), (0.0, 90.0), (45.0, 60.0), (0.0, 120.0)]   # (Phi, Theta)
 
 
 def write_dataset(base, stem, T=(0.5, 0.9), ratio_over_one=False, freq="500GHz", grid1=None,
-                  fields=((0, 0, 0), (0, 0, 0))):
+                  fields=((0, 1, 0), (0, 0, 1))):
     """Two keys, a 4-point far field and one exit point per key; fields[e] is the
-    complex (Ex, Ey, Ez) of the Ephi=e exit point (zero: rho = 0)."""
+    complex (Ex, Ey, Ez) of the Ephi=e exit point (default orthogonal: rho = 0; a
+    transmitting polarization needs a nonzero one, BBR027)."""
     for e in (0, 1):
         d = os.path.join(base, f"{stem}_Ephi={e}")
         os.makedirs(d)
@@ -453,7 +454,7 @@ def write_exit_dataset(base, stem, points, f0, f1):
 
 def test_exit_position_weights(tmp_path):
     # Three exit points; weight_j = |Et E0_j + Ep E1_j|^2 summed over components
-    # (BBRHFSSData::SampleExitPosition), normalized; uniform when every weight is zero.
+    # (BBRHFSSData::SampleExitPosition), normalized; BBR027 when every weight is zero.
     pts = [(-1e-5, 0.0), (0.0, 2e-5), (3e-5, -4e-5)]
     f0 = [(0, 1, 0), (0, 0, 1), (0, 0, 0)]
     f1 = [(0, 1, 0), (0, 0, -1), (0, 0, 2j)]
@@ -467,9 +468,23 @@ def test_exit_position_weights(tmp_path):
     # cancels (0), point 2 in quadrature (|2j R2|^2 = 2).
     assert np.allclose(hfss.exit_position_weights(d, R2, R2), [0.5, 0.0, 0.5])
     assert np.allclose(hfss.exit_position_weights(d, R2, -R2), [0.0, 0.5, 0.5])
+    # CDX-008: T = 0.4 > 0 with no exit field at all is refused at load, not sampled uniformly.
     write_exit_dataset(tmp_path / "zero", "c_500GHz", pts, [(0, 0, 0)] * 3, [(0, 0, 0)] * 3)
-    z = hfss.load_dataset("c_500GHz", str(tmp_path / "zero"))[(0.0, 180.0)]
-    assert np.allclose(hfss.exit_position_weights(z, R2, R2), [1 / 3] * 3)
+    with pytest.raises(ValueError, match=r"^BBR027: c_500GHz key \(0.0, 180.0\): T0 = 0.4 > 0, but its exit field "
+                                         r"is zero at every exit point"):
+        hfss.load_dataset("c_500GHz", str(tmp_path / "zero"))
+
+
+def test_weights_refuse_cancelling_fields(tmp_path):
+    """CDX-008: the basis fields cancel for one mixed polarization; the mirror raises BBR027, as the
+    samplers do, instead of returning uniform weights."""
+    write_exit_dataset(tmp_path, "c_500GHz", [(0.0, 0.0)], [(0, 1, 0)], [(0, -1, 0)])
+    d = hfss.load_dataset("c_500GHz", str(tmp_path))[(0.0, 180.0)]
+    with pytest.raises(ValueError, match=r"^BBR027: no exit field for \(E_theta, E_phi\)"):
+        hfss.exit_position_weights(d, R2, R2)
+    with pytest.raises(ValueError, match=r"^BBR027: no outward far-field intensity"):
+        hfss.direction_weights(d, R2, -R2)   # the two polarizations' far fields are equal: they cancel here
+    assert np.allclose(hfss.exit_position_weights(d, 1.0, 0.0), [1.0])
 
 
 def test_random_polarization_mean_is_average(tmp_path):

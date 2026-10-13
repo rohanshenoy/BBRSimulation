@@ -38,6 +38,26 @@ BBRHFSSData LoadChecked(TempDir& d, const Dataset& ds, const hfssfix::SidecarPar
   return BBRHFSSData(wg.string(), stem, 500., &sc);
 }
 
+// Keys with their own far-field rows ("Phi,Theta") and the same exit rows ("Y,Z") in both
+// polarizations: T0 = 3/4, T1 = 1/4, rEtheta = 1 (Ephi=0) and rEphi = 1 (Ephi=1) at every far-field
+// row, Ey (Ephi=0) and Ez (Ephi=1) at every exit point (the CDX-022 cases).
+Dataset Keys(const std::vector<std::pair<std::string, std::vector<std::string>>>& ffByKey,
+             const std::vector<std::string>& ex) {
+  Dataset d{hfssfix::FF_HDR, hfssfix::WG_HDR, hfssfix::FF_HDR, hfssfix::WG_HDR};
+  for (const auto& [k, ff] : ffByKey) {
+    for (const auto& r : ff) {
+      d.ff0 += "500GHz,0," + k + "," + r + ",0,0,1,0\n";
+      d.ff1 += "500GHz,1," + k + "," + r + ",1,0,0,0\n";
+    }
+    for (const auto& r : ex) {
+      d.wg0 += "500GHz,0," + k + ",3,4,0," + r + ",0,1,0,0,0,0\n";
+      d.wg1 += "500GHz,1," + k + ",1,4,0," + r + ",0,0,1,0,0,0\n";
+    }
+  }
+  return d;
+}
+Dataset Rows(const std::vector<std::string>& ff, const std::vector<std::string>& ex) { return Keys({{"0,180", ff}}, ex); }
+
 // text with every `from` replaced by `to`; throws if `from` is absent, so a stale edit cannot pass.
 std::string ReplaceAll(std::string text, const std::string& from, const std::string& to) {
   if (text.find(from) == std::string::npos) throw std::runtime_error("ReplaceAll: '" + from + "' not in the text");
@@ -109,7 +129,8 @@ int main(int argc, char** argv) {
       // by ~5e-13, past the "just above" draw).
       Dataset ds = hfssfix::Mini500();
       ds.ff0 = std::string(hfssfix::FF_HDR) + "500GHz,0,0,180,0,90,0,0,1,0\n500GHz,0,0,180,30,90,0,0,1,0\n500GHz,0,0,180,60,90,1,0,1,0\n";
-      ds.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90,0,0,0,0\n500GHz,1,0,180,30,90,0,0,0,0\n500GHz,1,0,180,60,90,0,0,0,0\n";
+      // Ephi=1 (T1 = 1/4) radiates too, as every transmitting polarization must (BBR027); E_phi = 0 never sees it.
+      ds.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90,1,0,0,0\n500GHz,1,0,180,30,90,0,0,0,0\n500GHz,1,0,180,60,90,0,0,0,0\n";
       TempDir d; auto h = Load(d, ds);
       ScriptedEngine eng{0.25, 0.2500000000001, 0.5, 0.75, 1.0};
       G4Random::setTheEngine(&eng);
@@ -126,7 +147,7 @@ int main(int argc, char** argv) {
       // Row A in the exit-face plane (Phi = -90), row B at Theta = 0, row C straight out.
       Dataset ds = hfssfix::Mini500();
       ds.ff0 = std::string(hfssfix::FF_HDR) + "500GHz,0,0,180,-90,90,0,0,1,0\n500GHz,0,0,180,0,0,0,0,1,0\n500GHz,0,0,180,0,90,0,0,1,0\n";
-      ds.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,-90,90,0,0,0,0\n500GHz,1,0,180,0,0,0,0,0,0\n500GHz,1,0,180,0,90,0,0,0,0\n";
+      ds.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,-90,90,0,0,0,0\n500GHz,1,0,180,0,0,0,0,0,0\n500GHz,1,0,180,0,90,1,0,0,0\n";
       TempDir d; auto h = Load(d, ds);
       ScriptedEngine eng{1e-12, 0.5, 1.0};
       G4Random::setTheEngine(&eng);
@@ -157,7 +178,7 @@ int main(int argc, char** argv) {
       // ignores); fields (0,1,0) and (1,1,1) -> |E|^2 weights exactly 1 and 3 -> CDF 0.25, 1.
       Dataset ds = hfssfix::Mini500();
       ds.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,1,1,0.005,0.001,0,0,1,0,0,0,0\n500GHz,0,0,180,1,1,0.005,-0.002,0.00001,1,1,1,0,0,0\n";
-      ds.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,1,0.005,0.001,0,0,0,0,0,0,0\n500GHz,1,0,180,1,1,0.005,-0.002,0.00001,0,0,0,0,0,0\n";
+      ds.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,1,0.005,0.001,0,0,0,1,0,0,0\n500GHz,1,0,180,1,1,0.005,-0.002,0.00001,0,0,1,0,0,0\n";
       TempDir d; auto h = Load(d, ds);
       ScriptedEngine eng{0.2, 0.25, 0.26};
       G4Random::setTheEngine(&eng);
@@ -210,9 +231,58 @@ int main(int argc, char** argv) {
       Dataset nn = hfssfix::Mini500();
       nn.ff0 = std::string(hfssfix::FF_HDR) + "500GHz,0,0,180,0,90,0,0,nan,0\n";
       TempDir d2; ExpectG4Exception("BBR013", [&] { Load(d2, nn); }, "BBRHFSSData");
+      // CDX-001: an infinite amplitude or power, of either sign, is refused at load too.
+      for (const char* inf : {"inf", "-inf", "INF"}) {
+        Dataset fi = hfssfix::Mini500();
+        fi.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90," + inf + ",0,0,0\n";
+        TempDir d4; ExpectG4Exception("BBR013", [&] { Load(d4, fi); }, "BBRHFSSData", "rEphi_real");
+        Dataset wi = hfssfix::Mini500();
+        wi.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180," + inf + ",4,0,0,0,0,1,0,0,0,0\n";
+        TempDir d5; ExpectG4Exception("BBR013", [&] { Load(d5, wi); }, "BBRHFSSData", "OutgoingPower");
+      }
       Dataset sr = hfssfix::Mini500();
       sr.wg0 += "500GHz,0,0,180,3,4,0,0.001,0\n";   // a short row: 9 of 15 fields
       TempDir d3; ExpectG4Exception("BBR013", [&] { Load(d3, sr); }, "BBRHFSSData");
+    }},
+    {"zero_support_fatal", [] {
+      // CDX-008: a transmitting state must have outward far-field intensity and exit field.
+      Dataset ff0 = hfssfix::Mini500();   // T0 = 3/4 with an all-zero Ephi=0 far field
+      ff0.ff0 = std::string(hfssfix::FF_HDR) + "500GHz,0,0,180,0,90,0,0,0,0\n";
+      TempDir d1; ExpectG4Exception("BBR027", [&] { Load(d1, ff0); }, "BBRHFSSData",
+                                    "key (0, 180): T0 = 0.75 > 0, but its far field has no outward intensity");
+      Dataset plane = hfssfix::Mini500();   // the only far-field row lies in the exit-face plane (Phi = -90)
+      plane.ff0 = ReplaceAll(plane.ff0, ",0,180,0,90,", ",0,180,-90,90,");
+      plane.ff1 = ReplaceAll(plane.ff1, ",0,180,0,90,", ",0,180,-90,90,");
+      TempDir d2; ExpectG4Exception("BBR027", [&] { Load(d2, plane); }, "BBRHFSSData", "far field has no outward intensity");
+      Dataset ex1 = hfssfix::Mini500();   // T1 = 1/4 with an all-zero Ephi=1 exit field
+      ex1.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,0,0,0,0,0\n";
+      TempDir d3; ExpectG4Exception("BBR027", [&] { Load(d3, ex1); }, "BBRHFSSData",
+                                    "key (0, 180): T1 = 0.25 > 0, but its exit field is zero at every exit point");
+      // A zero-filled point outside the section is never a fallback: with no field anywhere, the load fails.
+      Dataset outside = hfssfix::Mini500();
+      outside.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,3,4,0,0,0,0,0,0,0,0,0\n500GHz,0,0,180,3,4,0,0.01,0,0,0,0,0,0,0\n";
+      outside.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,0,1,0,0,0\n500GHz,1,0,180,1,4,0,0.01,0,0,0,0,0,0,0\n";
+      TempDir d4; ExpectG4Exception("BBR027", [&] { Load(d4, outside); }, "BBRHFSSData", "T0 = 0.75 > 0, but its exit field is zero");
+      // A state that does not transmit needs no support: T1 = 0 with no Ephi=1 field loads.
+      Dataset dark = hfssfix::Mini500();
+      dark.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90,0,0,0,0\n";
+      dark.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,0,4,0,0,0,0,0,0,0,0,0\n";
+      TempDir d5; CHECK_NEAR(Load(d5, dark).GetTransmittance(0, 1, 0, 180), 0., 0.);
+      // Mixed-state cancellation: F1 = -F0 and E1 = -E0 with T0 = 3/4, T1 = 1/4, so at E_theta = E_phi
+      // T = (sqrt(3/4) - sqrt(1/4))^2 / 2 = 0.067 > 0 while both samplers have zero weight everywhere.
+      Dataset cancel = hfssfix::Mini500();
+      cancel.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90,0,0,-1,0\n";
+      cancel.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,-1,0,0,0,0\n";
+      TempDir d6; const auto h = Load(d6, cancel);
+      const double c = std::sqrt(0.5);
+      CHECK_NEAR(h.GetTransmittance(c, c, 0, 180), 0.5 * std::pow(std::sqrt(0.75) - 0.5, 2), 1e-12);
+      G4ThreeVector pol;
+      ExpectG4Exception("BBR027", [&] { h.SampleOutgoingDirection(c, c, 0, 180, G4ThreeVector(0, 0, 1), G4ThreeVector(0, 1, 0),
+                                                                  G4ThreeVector(1, 0, 0), pol); },
+                        "BBRHFSSData::SampleOutgoingDirection", "the basis far fields cancel");
+      ExpectG4Exception("BBR027", [&] { h.SampleExitPosition(c, c, 0, 180, G4ThreeVector(), G4ThreeVector(0, 1, 0),
+                                                             G4ThreeVector(0, 0, 1)); },
+                        "BBRHFSSData::SampleExitPosition", "the basis exit fields cancel at every point");
     }},
     {"real_data_smoke", [] {
       // Independent numbers: awk over the shipped CSVs (first row per key, Out/In). The
@@ -302,7 +372,7 @@ int main(int argc, char** argv) {
     }},
     {"sidecar_checks_pass", [] {
       TempDir d1; CHECK_NEAR(LoadChecked(d1, hfssfix::Mini500()).GetFrequencyGHz(), 500., 0);
-      TempDir d2; LoadChecked(d2, hfssfix::NineKey());                 // 3 far-field rows, 2 exit points per key
+      TempDir d2; LoadChecked(d2, hfssfix::NineKeyGrid());             // 9 far-field rows, 4 exit points per key
       TempDir d3; LoadChecked(d3, hfssfix::WrapKeys("500", "0.01"));   // the section grows to the 10 mm rows
     }},
     {"sidecar_c1_header", [] {
@@ -342,6 +412,13 @@ int main(int argc, char** argv) {
       p.thetas = {135.};
       TempDir d; ExpectG4Exception("BBR007", [&] { LoadChecked(d, hfssfix::Mini500(), &p); },
                                    "BBRHFSSData", "incidence key (0, 180) is not on the declared");
+    }},
+    {"sidecar_c2_key_missing", [] {
+      // CDX-021: ThreeKey's sidecar declares {0, 90} x {135, 180}, but (90,135) has no rows; the
+      // nearest-key lookup would serve (90,180)'s or (0,135)'s tables for it.
+      TempDir d; ExpectG4Exception("BBR007", [&] { LoadChecked(d, hfssfix::ThreeKey()); }, "BBRHFSSData",
+                                   "1 declared incidence key(s) have no rows: (90, 135)");
+      TempDir d2; LoadChecked(d2, hfssfix::FourKey());   // the same grid, complete
     }},
     {"sidecar_c3_far_field", [] {
       const Dataset ds = hfssfix::NineKey();
@@ -418,12 +495,40 @@ int main(int argc, char** argv) {
                                     "BBRHFSSData", "the exit grid has 3 Y and 1 Z values; the sidecar declares 2 and 1 "
                                                    "(with outside_points omitted the retained counts may be smaller, not larger)");
     }},
+    {"sidecar_c3_c4_per_key", [] {
+      // CDX-022: the dataset-wide counts pass each of these; the per-key checks do not.
+      const std::vector<std::string> one = {"0.001,0"};
+      TempDir d1; ExpectG4Exception("BBR012", [&] { LoadChecked(d1, Rows({"0,60", "0,60", "30,60", "30,120"}, one)); },
+                                    "BBRHFSSData", "far-field point (Phi, Theta) = (0, 60) appears twice in key (0, 180)");
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadChecked(d2, Rows({"0,60", "0,120", "0,61", "30,60", "30,120", "30,61"}, one)); },
+                                    "BBRHFSSData", "far-field row (Phi, Theta) = (0, 61) of key (0, 180) is not a node of the declared "
+                                                   "grid Phi 0 to 30 in 2 nodes x Theta 60 to 120 in 3 nodes");
+      // Two keys whose far fields differ in compensating ways: the union is the 2 x 2 grid.
+      TempDir d3; ExpectG4Exception("BBR012", [&] {
+        LoadChecked(d3, Keys({{"0,135", {"0,60", "30,120"}}, {"0,180", {"30,60", "0,120"}}}, one)); },
+        "BBRHFSSData", "key (0, 135) holds 2 of the 4 nodes of the declared far-field grid");
+      const std::vector<std::string> ff = {"0,90"};
+      TempDir d4; ExpectG4Exception("BBR012", [&] {
+        LoadChecked(d4, Rows(ff, {"-0.001,-5e-06", "-0.001,5e-06", "0,-5e-06", "0,-5e-06", "0.001,-5e-06", "0.001,5e-06"})); },
+        "BBRHFSSData", "exit point (Y, Z) = (0, -5e-06) m appears twice in key (0, 180)");
+      TempDir d5; ExpectG4Exception("BBR012", [&] { LoadChecked(d5, Rows(ff, {"-0.001,0", "0,0", "0.0015,0"})); },
+                                    "BBRHFSSData", "exit point (Y, Z) = (0, 0) m of key (0, 180) is not a node of the declared lattice");
+      // Valid: the pole rows Theta = 0 at two Phi (one direction, two grid nodes), and single-node axes.
+      TempDir d6; LoadChecked(d6, Rows({"0,0", "90,0", "0,90", "90,90"}, one));
+      // "omitted": a lattice node inside the section without a retained point is missing.
+      Dataset disc = Rows(ff, {"-1e-05,0", "1e-05,0"});
+      auto w = hfssfix::SidecarFrom("c_500GHz", disc);
+      w.disc = true; w.radius = 1.5e-5; w.yMin = -2e-5; w.yMax = 2e-5; w.yCount = 5; w.outsidePoints = "omitted";
+      TempDir d7; ExpectG4Exception("BBR012", [&] { LoadChecked(d7, disc, &w); }, "BBRHFSSData",
+                                    "key (0, 180) holds 2 exit points; every key holds each of the 3 declared lattice nodes "
+                                    "inside the section once");
+    }},
     {"sidecar_c5_outside_section", [] {
       const Dataset ds = hfssfix::WrapKeys("500", "0.01");   // exit points at Y = 10 mm
       auto p = hfssfix::SidecarFrom("c_500GHz", ds);
       p.yHalf = 5e-3;                                       // the declared section ends at 5 mm
       TempDir d; ExpectG4Exception("BBR025", [&] { LoadChecked(d, ds, &p); }, "BBRHFSSData",
-                                   "5 exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = (0.01, 1e-05) m");
+                                   "6 exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = (0.01, 1e-05) m");
       // Two offenders in one key: the message names the first, as the Python check does.
       Dataset two = hfssfix::Mini500();
       two.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,3,4,0,0,0,0,1,0,0,0,0\n"

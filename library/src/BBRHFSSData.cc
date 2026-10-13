@@ -163,6 +163,36 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
       ds.T_Ephi1 /= lam;
     }
   }
+
+  // A basis polarization that transmits needs somewhere to go: outward far-field intensity (the
+  // weight SampleOutgoingDirection draws from) and exit field (SampleExitPosition's). Without
+  // either there is no distribution, and BBRsim does not invent one (BBR027; CDX-008).
+  for (const auto& [key, ds] : fData)
+    for (const int e : {0, 1}) {
+      const G4double T = e ? ds.T_Ephi1 : ds.T_Ephi0;
+      if (!(T > 0.)) continue;
+      G4double ff = 0., ex = 0.;
+      for (const auto& fp : ds.farField) {
+        const G4double sinT = std::sin(fp.theta_deg * CLHEP::pi / 180.);
+        if (sinT * std::cos(fp.phi_deg * CLHEP::pi / 180.) < kMinNormalComponent) continue;
+        ff += e ? sinT * (fp.rEtheta_re_1 * fp.rEtheta_re_1 + fp.rEtheta_im_1 * fp.rEtheta_im_1 +
+                          fp.rEphi_re_1 * fp.rEphi_re_1 + fp.rEphi_im_1 * fp.rEphi_im_1)
+                : sinT * (fp.rEtheta_re_0 * fp.rEtheta_re_0 + fp.rEtheta_im_0 * fp.rEtheta_im_0 +
+                          fp.rEphi_re_0 * fp.rEphi_re_0 + fp.rEphi_im_0 * fp.rEphi_im_0);
+      }
+      for (const auto& ep : ds.exitPoints)
+        ex += e ? ep.Ex_re_1 * ep.Ex_re_1 + ep.Ex_im_1 * ep.Ex_im_1 + ep.Ey_re_1 * ep.Ey_re_1 + ep.Ey_im_1 * ep.Ey_im_1 +
+                  ep.Ez_re_1 * ep.Ez_re_1 + ep.Ez_im_1 * ep.Ez_im_1
+                : ep.Ex_re_0 * ep.Ex_re_0 + ep.Ex_im_0 * ep.Ex_im_0 + ep.Ey_re_0 * ep.Ey_re_0 + ep.Ey_im_0 * ep.Ey_im_0 +
+                  ep.Ez_re_0 * ep.Ez_re_0 + ep.Ez_im_0 * ep.Ez_im_0;
+      if (!(ff > 0.) || !(ex > 0.)) {
+        G4ExceptionDescription ed;
+        ed << "Dataset " << dirStem << " key (" << key.first << ", " << key.second << "): T" << e << " = " << T
+           << " > 0, but its " << (ff > 0. ? "exit field is zero at every exit point" : "far field has no outward intensity")
+           << "; BBRsim does not invent a direction or exit-position distribution.";
+        G4Exception("BBRHFSSData", "BBR027", FatalException, ed);
+      }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +421,7 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
 // Lookup and query
 // ---------------------------------------------------------------------------
 
-// C2-C5 (validation/README.md, Dataset sidecars): every key on the declared grid; per key
+// C2-C5 (validation/README.md, Dataset sidecars): the keys equal the declared grid; per key
 // the declared far-field and exit row counts; every far-field and exit row in
 // the declared ranges; the distinct-value counts (equal to the declared ones, or
 // with outside_points "omitted" at most the declared exit-lattice counts); X = 0;
@@ -463,6 +493,18 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
       }
     }
   }
+  // C2: every declared key has rows. A declared key without them would be served by its nearest
+  // neighbour (FindDataset), another incidence's tables (CDX-021).
+  std::set<std::pair<G4double, G4double>> missing;
+  for (const G4double p : sc.incidentPhiDeg)
+    for (const G4double t : sc.incidentThetaDeg)
+      if (!fData.count(MakeKey(p, t))) missing.insert(MakeKey(p, t));
+  if (!missing.empty()) {
+    std::string list;
+    for (const auto& [p, t] : missing) list += (list.empty() ? "" : ", ") + fmt(p, t);
+    fail("BBR007", std::to_string(missing.size()) + " declared incidence key(s) have no rows: " + list +
+                   "; the nearest-key lookup would serve another incidence's tables for them");
+  }
   if (G4int(phis.size()) != sc.farFieldPhi.count || G4int(thetas.size()) != sc.farFieldTheta.count)
     fail("BBR012", "the far field has " + std::to_string(phis.size()) + " Phi and " + std::to_string(thetas.size()) +
                    " Theta values; the sidecar declares " + std::to_string(sc.farFieldPhi.count) + " and " +
@@ -482,6 +524,58 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
   if (outside)
     fail("BBR025", std::to_string(outside) + " exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = " +
                    fmt(outY, outZ) + " m");
+
+  // C3, C4 per key (CDX-022): every far-field row lies on a node of the declared Phi x Theta grid
+  // and every exit point on a node of the declared Y x Z lattice, no node twice in one key, and
+  // every key holds all of them: the whole far-field grid, and the whole exit lattice or, with
+  // "omitted", its nodes inside the declared section. Node i of an axis is
+  // min + i (max - min)/(count - 1), matched to 1e-6 of that step (to the range tolerance when the
+  // axis has one node). The dataset-wide counts above cannot see a repeated row, an uneven axis
+  // or keys that differ in compensating ways.
+  auto node = [](G4double v, const BBRAxisRange& a, G4double tol) -> long {
+    if (a.count <= 1) return std::abs(v - a.min) <= tol ? 0 : -1;
+    const G4double step = (a.max - a.min) / (a.count - 1);
+    const long i = std::lround((v - a.min) / step);
+    return (i >= 0 && i < a.count && std::abs(v - (a.min + i * step)) <= 1e-6 * step) ? i : -1;
+  };
+  auto at = [](const BBRAxisRange& a, long i) { return a.count <= 1 ? a.min : a.min + i * (a.max - a.min) / (a.count - 1); };
+  auto axis = [&](const char* name, const BBRAxisRange& a) {
+    return std::string(name) + " " + num(a.min) + " to " + num(a.max) + " in " + std::to_string(a.count) + " nodes";
+  };
+  const std::size_t ffNodes = std::size_t(sc.farFieldPhi.count) * std::size_t(sc.farFieldTheta.count);
+  std::set<std::pair<long, long>> lattice;   // the exit-lattice nodes every key holds
+  for (long i = 0; i < sc.exitY.count; ++i)
+    for (long j = 0; j < sc.exitZ.count; ++j)
+      if (!omitted || sc.crossSection.Contains(at(sc.exitY, i), at(sc.exitZ, j))) lattice.insert({i, j});
+  for (const auto& [key, ds] : fData) {
+    const std::string k = fmt(key.first, key.second);
+    std::set<std::pair<long, long>> seen;
+    for (const auto& fp : ds.farField) {
+      const long i = node(fp.phi_deg, sc.farFieldPhi, 1e-9), j = node(fp.theta_deg, sc.farFieldTheta, 1e-9);
+      if (i < 0 || j < 0)
+        fail("BBR012", "far-field row (Phi, Theta) = " + fmt(fp.phi_deg, fp.theta_deg) + " of key " + k +
+                       " is not a node of the declared grid " + axis("Phi", sc.farFieldPhi) + " x " +
+                       axis("Theta", sc.farFieldTheta));
+      if (!seen.insert({i, j}).second)
+        fail("BBR012", "far-field point (Phi, Theta) = " + fmt(fp.phi_deg, fp.theta_deg) + " appears twice in key " + k);
+    }
+    if (seen.size() != ffNodes)
+      fail("BBR012", "key " + k + " holds " + std::to_string(seen.size()) + " of the " + std::to_string(ffNodes) +
+                     " nodes of the declared far-field grid");
+    seen.clear();
+    for (const auto& ep : ds.exitPoints) {
+      const long i = node(ep.y, sc.exitY, yTol), j = node(ep.z, sc.exitZ, zTol);
+      if (i < 0 || j < 0)
+        fail("BBR012", "exit point (Y, Z) = " + fmt(ep.y, ep.z) + " m of key " + k + " is not a node of the declared lattice " +
+                       axis("Y", sc.exitY) + " x " + axis("Z", sc.exitZ));
+      if (!seen.insert({i, j}).second)
+        fail("BBR012", "exit point (Y, Z) = " + fmt(ep.y, ep.z) + " m appears twice in key " + k);
+    }
+    if (seen != lattice)
+      fail("BBR012", "key " + k + " holds " + std::to_string(seen.size()) + " exit points; every key holds each of the " +
+                     std::to_string(lattice.size()) + " declared lattice nodes" + (omitted ? " inside the section" : "") +
+                     " once");
+  }
 }
 
 const BBRHFSSData::AngleDataset& BBRHFSSData::FindDataset(
@@ -545,17 +639,20 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
     cdf[i]  = sum;
   }
 
-  std::size_t k;
-  if (sum > 0.) {
-    for (auto& c : cdf) c /= sum;
-    G4double U = G4UniformRand();
-    k = (std::size_t)(
-        std::lower_bound(cdf.begin(), cdf.end(), U) - cdf.begin());
-    if (k >= N) k = N - 1;
-  } else {
-    // Degenerate dataset (all amplitudes zero): fall back to a uniform pick.
-    k = std::min<std::size_t>(N - 1, (std::size_t)(G4UniformRand() * N));
+  // The two basis far fields can cancel for one mixed polarization; never invent a uniform pick,
+  // which would bypass the outward-direction guard (BBR027; CDX-008).
+  if (!(sum > 0.)) {
+    G4ExceptionDescription ed;
+    ed << "No outward far-field intensity for (E_theta, E_phi) = (" << E_theta << ", " << E_phi
+       << ") at incidence (" << iwavePhi_deg << ", " << iwaveTheta_deg << "): the basis far fields cancel. "
+       << "BBRsim does not invent a direction distribution.";
+    G4Exception("BBRHFSSData::SampleOutgoingDirection", "BBR027", FatalException, ed);
+    pol_out = G4ThreeVector();
+    return normal_hat;
   }
+  for (auto& c : cdf) c /= sum;
+  std::size_t k = (std::size_t)(std::lower_bound(cdf.begin(), cdf.end(), G4UniformRand()) - cdf.begin());
+  if (k >= N) k = N - 1;
 
   const auto& fp = ff[k];
   G4double T_rad = fp.theta_deg * CLHEP::pi / 180.;
@@ -617,16 +714,19 @@ G4ThreeVector BBRHFSSData::SampleExitPosition(
     cdf[j]  = sum;
   }
 
-  std::size_t j;
-  if (sum > 0.) {
-    for (auto& c : cdf) c /= sum;
-    G4double U = G4UniformRand();
-    j = (std::size_t)(
-        std::lower_bound(cdf.begin(), cdf.end(), U) - cdf.begin());
-    if (j >= M) j = M - 1;
-  } else {
-    j = std::min<std::size_t>(M - 1, (std::size_t)(G4UniformRand() * M));
+  // The two basis exit fields can cancel for one mixed polarization; never invent a uniform pick,
+  // which could choose a zero-filled point outside the section (BBR027; CDX-008).
+  if (!(sum > 0.)) {
+    G4ExceptionDescription ed;
+    ed << "No exit field for (E_theta, E_phi) = (" << E_theta << ", " << E_phi << ") at incidence ("
+       << iwavePhi_deg << ", " << iwaveTheta_deg << "): the basis exit fields cancel at every point. "
+       << "BBRsim does not invent an exit-position distribution.";
+    G4Exception("BBRHFSSData::SampleExitPosition", "BBR027", FatalException, ed);
+    return exit_face_center;
   }
+  for (auto& c : cdf) c /= sum;
+  std::size_t j = (std::size_t)(std::lower_bound(cdf.begin(), cdf.end(), G4UniformRand()) - cdf.begin());
+  if (j >= M) j = M - 1;
 
   const auto& ep = eps[j];
   // HFSS coordinates are SI (meters); Geant4's base unit is mm, so multiply by

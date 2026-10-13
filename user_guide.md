@@ -339,8 +339,8 @@ sidecars](validation/README.md#dataset-sidecars).
 
 **`BBR025`**: the dataset declares a convention or a geometry BBRsim does not
 implement. The message names the field (a frame, incidence, far-field or
-polarization definition, or the modes block) and the one convention the
-sampler implements; or, at `/run/initialize`, it names the crack volume whose
+polarization definition, the boundary model, or the modes block) and the one
+convention the sampler implements; or, at `/run/initialize`, it names the crack volume whose
 solid the declared exit cross-section does not fit strictly inside (make the
 Geant4 section larger than the HFSS one by a recorded margin, as the 52/102 µm
 test-world gaps are, and check that local x is the propagation axis: a bare
@@ -348,6 +348,15 @@ test-world gaps are, and check that local x is the propagation axis: a bare
 exit points outside the declared cross-section. A dataset produced outside the
 canonical pose is rejected, not remapped. See [Dataset
 sidecars](validation/README.md#dataset-sidecars).
+
+**`BBR027`**: a dataset gives a transmitting polarization nowhere to go. At
+the first load of a frequency, a key's basis polarization has T > 0 but its
+far field has no outward intensity (every row zero or in the exit-face plane)
+or its exit field is zero at every exit point; mid-run, the two basis far
+fields or exit fields cancel for one photon's mixed polarization. BBRsim no
+longer draws a uniform direction or exit point instead. The export is
+inconsistent: check it with `check_dataset_sidecars.py` and ask the HFSS side
+for a re-export. See [Dataset sidecars](validation/README.md#dataset-sidecars).
 
 **A `BBR026` banner in a Planck run**: a warning, not an error. A photon's
 frequency and the grid frequency serving it lie on opposite sides of the

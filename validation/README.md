@@ -229,7 +229,7 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 - F7 `exit_field`: `"exit_cs"`, `points_in_si` true, `"x_e=0"`, `columns` in the order `BBRHFSSData` reads, and `field_in_ref_cs` agreeing with `field_components_frame` (false with `"hfss_global"`, true with `"exit_cs"`; the frame is otherwise recorded only, because BBRsim uses the components only through \|E\|² and Σ E₀·E₁*) (`BBR025`); `outside_points` is `none`, `omitted` or `zero` (`BBR024`).
 - F8 `exit_field.cross_section`: `rectangle` or `disc` with positive dimensions (`BBR024` for an unknown shape or a dimension ≤ 0); `polygon` is reserved and not supported yet (`BBR025`).
 - F9 `transmittance`: the supported `definition` string and `incoming_includes_cos_theta` false (`BBR025`).
-- F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`).
+- F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`). `boundaries`: `entrance` and `exit` `"radiation"`, `walls` `"PEC"`, the model the transport implements: a non-transmission is specular reflection with no wall loss, and the mode formulas assume a closed PEC guide (`BBR025`; a missing or mistyped field is `BBR024`).
 - F11 `geometry.extent_mm`: p, l, g > 0 (`BBR024`); compared with the placed solid's bounding limits along local x, y, z, printed as one `[BBR]` info line and stored as `hfss_extent_mm` and `geant4_extent_mm` in `data.hfss_datasets` of each `<stem>.metadata.json` (info only, not a warning).
 - F12 `exit_field.cross_section` against the placed solid, at the first run initialization, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset, is strictly inside the solid. With `rim_points` `"included"`, the recorded Geant4 margin is what makes this pass (`BBR025`).
 - F13 `modes.mode`, `.cutoff_ghz`, `.polarization_filter_limit_ghz`: re-derived from `cross_section` to 1e-6 relative with closed forms (rectangle f_mn = (c/2)·√((m/a)² + (n/b)²), c = 299792458 m/s; disc TE11 with x′₁₁ = 1.8411837813). The full lists are re-derived only by the Python validator, with scipy (`BBR025`).
@@ -237,9 +237,9 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 At the CSV load, per frequency, in `BBRHFSSData`:
 
 - C1 the CSV headers equal `far_field.columns` and `exit_field.columns` (`BBR013`).
-- C2 every incidence key of the CSVs lies on the declared `incident_phi_deg` × `incident_theta_deg` grid. This is a subset check, not an equality: HFSS grids are complete, test grids may be sparse. Within one polarization, `far_field.csv` and `waveguide.csv` carry the same key set (`BBR007` for either).
-- C3 per key, the far-field row count equals `points_per_key` and every Phi and Theta lies in the declared [min, max]; over the whole file the distinct Phi and Theta counts equal the declared counts (`BBR012`). Only the Python validator checks the `step`: when `count` > 1 it must equal (max − min)/(count − 1) of the data to 1e-9 relative (`BBR012`).
-- C4 X = 0 on every exit row; the exit rows per key and polarization equal `points_per_key_retained`; every Y and Z lies in the declared `grid` range, and the distinct Y and Z counts equal the declared counts. With `outside_points` `"omitted"` the retained counts may be smaller than the declared ones, never larger: the producer declares the whole export lattice and drops the lattice points outside the section, so a round face whose radius is not a multiple of the step leaves its outermost lattice columns without a retained point (`BBR012`).
+- C2 the incidence keys of the CSVs equal the declared `incident_phi_deg` × `incident_theta_deg` grid: a key off the grid and a declared key without rows are both `BBR007`. A missing key would otherwise be served by its nearest neighbour, another incidence's tables. A smaller grid is declared as a smaller product; a single key is a 1 × 1 grid. Within one polarization, `far_field.csv` and `waveguide.csv` carry the same key set (`BBR007` for either).
+- C3 per key, the far-field row count equals `points_per_key` and every Phi and Theta lies in the declared [min, max]; over the whole file the distinct Phi and Theta counts equal the declared counts (`BBR012`). Only the Python validator checks the `step`: when `count` > 1 it must equal (max − min)/(count − 1) of the data to 1e-9 relative (`BBR012`). Then per key: every row lies on a node of the declared Phi × Theta grid, node i of an axis at min + i·(max − min)/(count − 1) to 1e-6 of that step; no node appears twice; and every key holds all count(Phi) × count(Theta) nodes (`BBR012`). Coordinate pairs are compared, not directions, so the Theta = 0 rows at every Phi stay valid.
+- C4 X = 0 on every exit row; the exit rows per key and polarization equal `points_per_key_retained`; every Y and Z lies in the declared `grid` range, and the distinct Y and Z counts equal the declared counts. With `outside_points` `"omitted"` the retained counts may be smaller than the declared ones, never larger: the producer declares the whole export lattice and drops the lattice points outside the section, so a round face whose radius is not a multiple of the step leaves its outermost lattice columns without a retained point (`BBR012`). Then per key, after C5: every exit point lies on a node of the declared Y × Z lattice (nodes as in C3), no node twice, and every key holds every node: the whole lattice with `"none"` and `"zero"`, the nodes inside the declared section with `"omitted"` (`BBR012`).
 - C5 every exit point, at any key and either polarization, lies inside the declared cross-section; the message gives the count and an offending point (`BBR025`). With `outside_points` `"zero"`, a point outside the section is exempt when its six field components are exactly zero in both polarizations; with `"none"` or `"omitted"` every point must lie inside. C5 checks the data against the sidecar, F12 the sidecar against the geometry; together they put every exit point that carries field inside the placed solid.
 
 C1-C5 run on both polarizations, and the two must agree: the Ephi=1 CSVs have
@@ -248,17 +248,24 @@ Ephi=0 CSVs (`BBR012`; `BBRHFSSData` also pairs the rows by position). A CSV
 row with the wrong number of fields, or an empty field, is `BBR013`.
 
 The containment tolerance is 1e-6 relative (the HFSS runner's own; never use a
-stricter one). Incidence keys are rounded to 0.01° before the C2 subset test,
+stricter one). Incidence keys are rounded to 0.01° before the C2 comparison,
 as `BBRHFSSData` rounds them. The far-field ranges use 1e-9 degrees and the
 exit-grid ranges 1e-9 relative to the largest declared |value|.
+
+After C1-C5, at every load with or without a sidecar, a basis polarization
+with T > 0 must have outward far-field intensity (directions in the exit-face
+plane carry none) and nonzero exit field somewhere; a dataset where it has
+neither cannot be sampled, and BBRsim refuses it rather than draw uniformly
+(`BBR027`). The same code stops a run whose photon's mixed polarization makes
+the two basis far fields or exit fields cancel everywhere.
 
 At run time, `BBR026` (a `JustWarning`, once per dataset and direction) fires
 when a photon's frequency and the grid frequency serving it lie on opposite
 sides of `modes.cutoff_ghz`; the runner tolerates it only where it is expected.
 
-Recorded but not checked against the conventions BBRsim implements (of these,
-only `boundaries`, `geometry.shape` and `symmetry.rotational` enter the
-agreement across frequencies): `provenance`, `boundaries`, `geometry.shape`,
+Recorded, and except `boundaries` (F10) not checked against the conventions
+BBRsim implements (of these, only `boundaries`, `geometry.shape` and
+`symmetry.rotational` enter the agreement across frequencies): `provenance`, `boundaries`, `geometry.shape`,
 `geometry.bounding_box_mm`, `symmetry.rotational`, `pose_rule` and the origins
 (`frames.exit_cs.origin_mm_global`, `excitation.origin_mm_global`) are copied
 verbatim into `<stem>.metadata.json`, a missing one as `null`. They go in
@@ -282,8 +289,10 @@ the trio `<stem>_Ephi=0/`, `<stem>_Ephi=1/` and `<stem>.dataset.json`; other
 files (a tree manifest, `SHA256SUMS`) are ignored, and a stem missing any part
 of the trio fails. A complete dataset is checked with
 `bbrsim.sidecar.check_full`: F1-F11 and F13, the full mode lists re-derived
-with scipy, the sha256, size and row count of the four CSVs, and C1-C5 on both
-polarizations. The frequencies of one ID in one directory must also agree on
+with scipy, the sha256, size and row count of the four CSVs, C1-C5 on both
+polarizations, and the load-time checks of `bbrsim.hfss.load_dataset`
+(`BBR027` included), so a dataset that passes cannot stop a run at its first
+photon. The frequencies of one ID in one directory must also agree on
 the frequency-independent blocks (`bbrsim.sidecar.invariant_diff` names the
 blocks that differ). It prints one `PASS` or `FAIL` line per dataset, after the
 agreement check, and a `FAIL` line for a directory argument that cannot be

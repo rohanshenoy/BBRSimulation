@@ -73,12 +73,14 @@ bbrsim_add_test_program(testHFSSData LABEL unit
   CASES parse_frequency mini_loads transmittance_mixing load_cap_first_row nearest_key
         direction_cdf zero_weight_rows coherent_cross_term_in_direction exit_position
         err_missing_files err_no_keys err_key_mismatch err_freq_column err_ephi1_row_mismatch
-        err_bad_number real_data_smoke transmittance_coherent real_data_diagonal_key
-        sidecar_checks_pass sidecar_c1_header sidecar_c1_bom sidecar_c2_key_off_grid sidecar_c3_far_field
-        sidecar_c4_exit_rows sidecar_c5_outside_section sidecar_c5_zero_outside sidecar_real_data
+        err_bad_number zero_support_fatal real_data_smoke transmittance_coherent real_data_diagonal_key
+        sidecar_checks_pass sidecar_c1_header sidecar_c1_bom sidecar_c2_key_off_grid sidecar_c2_key_missing
+        sidecar_c3_far_field
+        sidecar_c4_exit_rows sidecar_c3_c4_per_key sidecar_c5_outside_section sidecar_c5_zero_outside sidecar_real_data
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 bbrsim_add_test_program(testSidecar LABEL unit
-  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only invariant_diff field_types
+  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f10_boundaries f13_modes
+        invariant_physics_only invariant_diff field_types
         recorded_fields f12_fits_solid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
