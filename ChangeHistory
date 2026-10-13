@@ -1,3 +1,4 @@
+2026-10-13  codexfix : HFSS data checks hardened (CDX-001 to 003, 006 to 008, 021, 022): the declared key grid complete; each key's far-field grid and exit lattice node by node; rows paired, finite numbers and Freq tokens in the preflight; radiation and PEC boundaries only; disc mode lists and counts as the producer's; BBR027 when a transmitting state has nowhere to go.
 2026-10-08  treecheck : Real-tree frequency check: make_tree_check.py writes a test-world run for any HFSS data tree, check_tree_run.py checks it against bbrsim.hfss; the mirror computes photon frequencies in CLHEP's arithmetic.
 2026-10-05  cutoff : BBR026 when a photon and its HFSS dataset lie on opposite sides of the lowest-mode cutoff.
 2026-10-05  roundgap : Straight round gap (opt-in /bbr/testworld/roundGap, G4DisplacedSolid tube) validated against a mock dataset.
