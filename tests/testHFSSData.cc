@@ -129,7 +129,8 @@ int main(int argc, char** argv) {
       // by ~5e-13, past the "just above" draw).
       Dataset ds = hfssfix::Mini500();
       ds.ff0 = std::string(hfssfix::FF_HDR) + "500GHz,0,0,180,0,90,0,0,1,0\n500GHz,0,0,180,30,90,0,0,1,0\n500GHz,0,0,180,60,90,1,0,1,0\n";
-      ds.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90,0,0,0,0\n500GHz,1,0,180,30,90,0,0,0,0\n500GHz,1,0,180,60,90,0,0,0,0\n";
+      // Ephi=1 (T1 = 1/4) radiates too, as every transmitting polarization must (BBR027); E_phi = 0 never sees it.
+      ds.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90,1,0,0,0\n500GHz,1,0,180,30,90,0,0,0,0\n500GHz,1,0,180,60,90,0,0,0,0\n";
       TempDir d; auto h = Load(d, ds);
       ScriptedEngine eng{0.25, 0.2500000000001, 0.5, 0.75, 1.0};
       G4Random::setTheEngine(&eng);
@@ -146,7 +147,7 @@ int main(int argc, char** argv) {
       // Row A in the exit-face plane (Phi = -90), row B at Theta = 0, row C straight out.
       Dataset ds = hfssfix::Mini500();
       ds.ff0 = std::string(hfssfix::FF_HDR) + "500GHz,0,0,180,-90,90,0,0,1,0\n500GHz,0,0,180,0,0,0,0,1,0\n500GHz,0,0,180,0,90,0,0,1,0\n";
-      ds.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,-90,90,0,0,0,0\n500GHz,1,0,180,0,0,0,0,0,0\n500GHz,1,0,180,0,90,0,0,0,0\n";
+      ds.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,-90,90,0,0,0,0\n500GHz,1,0,180,0,0,0,0,0,0\n500GHz,1,0,180,0,90,1,0,0,0\n";
       TempDir d; auto h = Load(d, ds);
       ScriptedEngine eng{1e-12, 0.5, 1.0};
       G4Random::setTheEngine(&eng);
@@ -177,7 +178,7 @@ int main(int argc, char** argv) {
       // ignores); fields (0,1,0) and (1,1,1) -> |E|^2 weights exactly 1 and 3 -> CDF 0.25, 1.
       Dataset ds = hfssfix::Mini500();
       ds.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,1,1,0.005,0.001,0,0,1,0,0,0,0\n500GHz,0,0,180,1,1,0.005,-0.002,0.00001,1,1,1,0,0,0\n";
-      ds.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,1,0.005,0.001,0,0,0,0,0,0,0\n500GHz,1,0,180,1,1,0.005,-0.002,0.00001,0,0,0,0,0,0\n";
+      ds.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,1,0.005,0.001,0,0,0,1,0,0,0\n500GHz,1,0,180,1,1,0.005,-0.002,0.00001,0,0,1,0,0,0\n";
       TempDir d; auto h = Load(d, ds);
       ScriptedEngine eng{0.2, 0.25, 0.26};
       G4Random::setTheEngine(&eng);
@@ -242,6 +243,46 @@ int main(int argc, char** argv) {
       Dataset sr = hfssfix::Mini500();
       sr.wg0 += "500GHz,0,0,180,3,4,0,0.001,0\n";   // a short row: 9 of 15 fields
       TempDir d3; ExpectG4Exception("BBR013", [&] { Load(d3, sr); }, "BBRHFSSData");
+    }},
+    {"zero_support_fatal", [] {
+      // CDX-008: a transmitting state must have outward far-field intensity and exit field.
+      Dataset ff0 = hfssfix::Mini500();   // T0 = 3/4 with an all-zero Ephi=0 far field
+      ff0.ff0 = std::string(hfssfix::FF_HDR) + "500GHz,0,0,180,0,90,0,0,0,0\n";
+      TempDir d1; ExpectG4Exception("BBR027", [&] { Load(d1, ff0); }, "BBRHFSSData",
+                                    "key (0, 180): T0 = 0.75 > 0, but its far field has no outward intensity");
+      Dataset plane = hfssfix::Mini500();   // the only far-field row lies in the exit-face plane (Phi = -90)
+      plane.ff0 = ReplaceAll(plane.ff0, ",0,180,0,90,", ",0,180,-90,90,");
+      plane.ff1 = ReplaceAll(plane.ff1, ",0,180,0,90,", ",0,180,-90,90,");
+      TempDir d2; ExpectG4Exception("BBR027", [&] { Load(d2, plane); }, "BBRHFSSData", "far field has no outward intensity");
+      Dataset ex1 = hfssfix::Mini500();   // T1 = 1/4 with an all-zero Ephi=1 exit field
+      ex1.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,0,0,0,0,0\n";
+      TempDir d3; ExpectG4Exception("BBR027", [&] { Load(d3, ex1); }, "BBRHFSSData",
+                                    "key (0, 180): T1 = 0.25 > 0, but its exit field is zero at every exit point");
+      // A zero-filled point outside the section is never a fallback: with no field anywhere, the load fails.
+      Dataset outside = hfssfix::Mini500();
+      outside.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,3,4,0,0,0,0,0,0,0,0,0\n500GHz,0,0,180,3,4,0,0.01,0,0,0,0,0,0,0\n";
+      outside.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,0,1,0,0,0\n500GHz,1,0,180,1,4,0,0.01,0,0,0,0,0,0,0\n";
+      TempDir d4; ExpectG4Exception("BBR027", [&] { Load(d4, outside); }, "BBRHFSSData", "T0 = 0.75 > 0, but its exit field is zero");
+      // A state that does not transmit needs no support: T1 = 0 with no Ephi=1 field loads.
+      Dataset dark = hfssfix::Mini500();
+      dark.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90,0,0,0,0\n";
+      dark.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,0,4,0,0,0,0,0,0,0,0,0\n";
+      TempDir d5; CHECK_NEAR(Load(d5, dark).GetTransmittance(0, 1, 0, 180), 0., 0.);
+      // Mixed-state cancellation: F1 = -F0 and E1 = -E0 with T0 = 3/4, T1 = 1/4, so at E_theta = E_phi
+      // T = (sqrt(3/4) - sqrt(1/4))^2 / 2 = 0.067 > 0 while both samplers have zero weight everywhere.
+      Dataset cancel = hfssfix::Mini500();
+      cancel.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90,0,0,-1,0\n";
+      cancel.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,-1,0,0,0,0\n";
+      TempDir d6; const auto h = Load(d6, cancel);
+      const double c = std::sqrt(0.5);
+      CHECK_NEAR(h.GetTransmittance(c, c, 0, 180), 0.5 * std::pow(std::sqrt(0.75) - 0.5, 2), 1e-12);
+      G4ThreeVector pol;
+      ExpectG4Exception("BBR027", [&] { h.SampleOutgoingDirection(c, c, 0, 180, G4ThreeVector(0, 0, 1), G4ThreeVector(0, 1, 0),
+                                                                  G4ThreeVector(1, 0, 0), pol); },
+                        "BBRHFSSData::SampleOutgoingDirection", "the basis far fields cancel");
+      ExpectG4Exception("BBR027", [&] { h.SampleExitPosition(c, c, 0, 180, G4ThreeVector(), G4ThreeVector(0, 1, 0),
+                                                             G4ThreeVector(0, 0, 1)); },
+                        "BBRHFSSData::SampleExitPosition", "the basis exit fields cancel at every point");
     }},
     {"real_data_smoke", [] {
       // Independent numbers: awk over the shipped CSVs (first row per key, Out/In). The

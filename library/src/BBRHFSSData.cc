@@ -163,6 +163,36 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
       ds.T_Ephi1 /= lam;
     }
   }
+
+  // A basis polarization that transmits needs somewhere to go: outward far-field intensity (the
+  // weight SampleOutgoingDirection draws from) and exit field (SampleExitPosition's). Without
+  // either there is no distribution, and BBRsim does not invent one (BBR027; CDX-008).
+  for (const auto& [key, ds] : fData)
+    for (const int e : {0, 1}) {
+      const G4double T = e ? ds.T_Ephi1 : ds.T_Ephi0;
+      if (!(T > 0.)) continue;
+      G4double ff = 0., ex = 0.;
+      for (const auto& fp : ds.farField) {
+        const G4double sinT = std::sin(fp.theta_deg * CLHEP::pi / 180.);
+        if (sinT * std::cos(fp.phi_deg * CLHEP::pi / 180.) < kMinNormalComponent) continue;
+        ff += e ? sinT * (fp.rEtheta_re_1 * fp.rEtheta_re_1 + fp.rEtheta_im_1 * fp.rEtheta_im_1 +
+                          fp.rEphi_re_1 * fp.rEphi_re_1 + fp.rEphi_im_1 * fp.rEphi_im_1)
+                : sinT * (fp.rEtheta_re_0 * fp.rEtheta_re_0 + fp.rEtheta_im_0 * fp.rEtheta_im_0 +
+                          fp.rEphi_re_0 * fp.rEphi_re_0 + fp.rEphi_im_0 * fp.rEphi_im_0);
+      }
+      for (const auto& ep : ds.exitPoints)
+        ex += e ? ep.Ex_re_1 * ep.Ex_re_1 + ep.Ex_im_1 * ep.Ex_im_1 + ep.Ey_re_1 * ep.Ey_re_1 + ep.Ey_im_1 * ep.Ey_im_1 +
+                  ep.Ez_re_1 * ep.Ez_re_1 + ep.Ez_im_1 * ep.Ez_im_1
+                : ep.Ex_re_0 * ep.Ex_re_0 + ep.Ex_im_0 * ep.Ex_im_0 + ep.Ey_re_0 * ep.Ey_re_0 + ep.Ey_im_0 * ep.Ey_im_0 +
+                  ep.Ez_re_0 * ep.Ez_re_0 + ep.Ez_im_0 * ep.Ez_im_0;
+      if (!(ff > 0.) || !(ex > 0.)) {
+        G4ExceptionDescription ed;
+        ed << "Dataset " << dirStem << " key (" << key.first << ", " << key.second << "): T" << e << " = " << T
+           << " > 0, but its " << (ff > 0. ? "exit field is zero at every exit point" : "far field has no outward intensity")
+           << "; BBRsim does not invent a direction or exit-position distribution.";
+        G4Exception("BBRHFSSData", "BBR027", FatalException, ed);
+      }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -609,17 +639,20 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
     cdf[i]  = sum;
   }
 
-  std::size_t k;
-  if (sum > 0.) {
-    for (auto& c : cdf) c /= sum;
-    G4double U = G4UniformRand();
-    k = (std::size_t)(
-        std::lower_bound(cdf.begin(), cdf.end(), U) - cdf.begin());
-    if (k >= N) k = N - 1;
-  } else {
-    // Degenerate dataset (all amplitudes zero): fall back to a uniform pick.
-    k = std::min<std::size_t>(N - 1, (std::size_t)(G4UniformRand() * N));
+  // The two basis far fields can cancel for one mixed polarization; never invent a uniform pick,
+  // which would bypass the outward-direction guard (BBR027; CDX-008).
+  if (!(sum > 0.)) {
+    G4ExceptionDescription ed;
+    ed << "No outward far-field intensity for (E_theta, E_phi) = (" << E_theta << ", " << E_phi
+       << ") at incidence (" << iwavePhi_deg << ", " << iwaveTheta_deg << "): the basis far fields cancel. "
+       << "BBRsim does not invent a direction distribution.";
+    G4Exception("BBRHFSSData::SampleOutgoingDirection", "BBR027", FatalException, ed);
+    pol_out = G4ThreeVector();
+    return normal_hat;
   }
+  for (auto& c : cdf) c /= sum;
+  std::size_t k = (std::size_t)(std::lower_bound(cdf.begin(), cdf.end(), G4UniformRand()) - cdf.begin());
+  if (k >= N) k = N - 1;
 
   const auto& fp = ff[k];
   G4double T_rad = fp.theta_deg * CLHEP::pi / 180.;
@@ -681,16 +714,19 @@ G4ThreeVector BBRHFSSData::SampleExitPosition(
     cdf[j]  = sum;
   }
 
-  std::size_t j;
-  if (sum > 0.) {
-    for (auto& c : cdf) c /= sum;
-    G4double U = G4UniformRand();
-    j = (std::size_t)(
-        std::lower_bound(cdf.begin(), cdf.end(), U) - cdf.begin());
-    if (j >= M) j = M - 1;
-  } else {
-    j = std::min<std::size_t>(M - 1, (std::size_t)(G4UniformRand() * M));
+  // The two basis exit fields can cancel for one mixed polarization; never invent a uniform pick,
+  // which could choose a zero-filled point outside the section (BBR027; CDX-008).
+  if (!(sum > 0.)) {
+    G4ExceptionDescription ed;
+    ed << "No exit field for (E_theta, E_phi) = (" << E_theta << ", " << E_phi << ") at incidence ("
+       << iwavePhi_deg << ", " << iwaveTheta_deg << "): the basis exit fields cancel at every point. "
+       << "BBRsim does not invent an exit-position distribution.";
+    G4Exception("BBRHFSSData::SampleExitPosition", "BBR027", FatalException, ed);
+    return exit_face_center;
   }
+  for (auto& c : cdf) c /= sum;
+  std::size_t j = (std::size_t)(std::lower_bound(cdf.begin(), cdf.end(), G4UniformRand()) - cdf.begin());
+  if (j >= M) j = M - 1;
 
   const auto& ep = eps[j];
   // HFSS coordinates are SI (meters); Geant4's base unit is mm, so multiply by

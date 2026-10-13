@@ -252,6 +252,13 @@ stricter one). Incidence keys are rounded to 0.01° before the C2 comparison,
 as `BBRHFSSData` rounds them. The far-field ranges use 1e-9 degrees and the
 exit-grid ranges 1e-9 relative to the largest declared |value|.
 
+After C1-C5, at every load with or without a sidecar, a basis polarization
+with T > 0 must have outward far-field intensity (directions in the exit-face
+plane carry none) and nonzero exit field somewhere; a dataset where it has
+neither cannot be sampled, and BBRsim refuses it rather than draw uniformly
+(`BBR027`). The same code stops a run whose photon's mixed polarization makes
+the two basis far fields or exit fields cancel everywhere.
+
 At run time, `BBR026` (a `JustWarning`, once per dataset and direction) fires
 when a photon's frequency and the grid frequency serving it lie on opposite
 sides of `modes.cutoff_ghz`; the runner tolerates it only where it is expected.

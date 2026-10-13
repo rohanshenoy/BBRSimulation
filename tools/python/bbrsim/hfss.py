@@ -77,7 +77,9 @@ def load_dataset(dir_stem, base_dir=None):
     must sit at the same far-field (Phi, Theta) and exit-point (X, Y, Z), with the
     same row count and no key of their own (BBR012); the two CSVs must have the
     same incidence keys (BBR007; BBR000 when neither has one); a key whose largest
-    transmittance over linear polarizations exceeds 1 has T0 and T1 divided by it.
+    transmittance over linear polarizations exceeds 1 has T0 and T1 divided by it;
+    a basis polarization with T > 0 needs outward far-field intensity and exit field
+    (BBR027).
     The C++ errors are raised here as ValueError naming the code. No sidecar is
     read: the Python-side sidecar checks (F1-F13, C1-C5) are bbrsim.sidecar and
     validation/check_dataset_sidecars.py.
@@ -147,6 +149,18 @@ def load_dataset(dir_stem, base_dir=None):
         lam = float(0.5 * (T[0] + T[1]) + np.hypot(0.5 * (T[0] - T[1]), c))
         if lam > 1.0:
             T = {e: T[e] / lam for e in (0, 1)}
+        # BBR027 (BBRHFSSData constructor): a transmitting basis polarization needs outward far-field
+        # intensity and exit field somewhere (CDX-008)
+        sinT = np.sin(np.radians(a.Theta.to_numpy(float)))
+        outward = sinT * np.cos(np.radians(a.Phi.to_numpy(float))) >= K_MIN_NORMAL_COMPONENT
+        for e, f in ((0, a), (1, b)):
+            if T[e] > 0:
+                ff_w = float(np.sum((sinT * (f.rEtheta_real ** 2 + f.rEtheta_imag ** 2 + f.rEphi_real ** 2
+                                             + f.rEphi_imag ** 2).to_numpy(float))[outward]))
+                ex_w = float(np.sum(np.abs(E[e]) ** 2))
+                if not ff_w > 0 or not ex_w > 0:
+                    what = "exit field is zero at every exit point" if ff_w > 0 else "far field has no outward intensity"
+                    raise ValueError(f"BBR027: {dataset_id} key {key}: T{e} = {T[e]!r} > 0, but its {what}")
         out[key] = AngleDataset(
             key, T[0], T[1],
             a.Theta.to_numpy(float), a.Phi.to_numpy(float),
@@ -271,20 +285,25 @@ def direction_weights(ds, E_theta, E_phi):
     w = sinT * (np.abs(Fth) ** 2 + np.abs(Fph) ** 2)
     w = np.where(cosN < K_MIN_NORMAL_COMPONENT, 0., w)
     s = w.sum()
-    return w / s if s > 0 else np.full_like(w, 1. / len(w))
+    if not s > 0:   # the basis far fields cancel: BBRHFSSData raises BBR027, it never draws uniformly
+        raise ValueError(f"BBR027: no outward far-field intensity for (E_theta, E_phi) = ({E_theta}, {E_phi}) "
+                         f"at key {ds.key}")
+    return w / s
 
 
 def exit_position_weights(ds, E_theta, E_phi):
     """Normalised sampling weights over the exit points (rows of waveguide.csv).
 
     weight_j = |E_theta E0_j + E_phi E1_j|^2 summed over (Ex, Ey, Ez), the runtime CDF
-    of BBRHFSSData::SampleExitPosition; uniform when every weight is zero, as the C++
-    then draws a uniform index. Point j sits at ds.exit_y_m[j] along theta_f and
+    of BBRHFSSData::SampleExitPosition; BBR027 when every weight is zero, as the C++
+    then refuses to draw. Point j sits at ds.exit_y_m[j] along theta_f and
     ds.exit_z_m[j] along phi_f from the exit-face centre.
     """
     w = np.sum(np.abs(E_theta * ds.E0 + E_phi * ds.E1) ** 2, axis=1)
     s = w.sum()
-    return w / s if s > 0 else np.full(len(w), 1. / len(w))
+    if not s > 0:
+        raise ValueError(f"BBR027: no exit field for (E_theta, E_phi) = ({E_theta}, {E_phi}) at key {ds.key}")
+    return w / s
 
 
 def outgoing_directions(ds, inc):

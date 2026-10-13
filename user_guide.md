@@ -349,6 +349,15 @@ exit points outside the declared cross-section. A dataset produced outside the
 canonical pose is rejected, not remapped. See [Dataset
 sidecars](validation/README.md#dataset-sidecars).
 
+**`BBR027`**: a dataset gives a transmitting polarization nowhere to go. At
+the first load of a frequency, a key's basis polarization has T > 0 but its
+far field has no outward intensity (every row zero or in the exit-face plane)
+or its exit field is zero at every exit point; mid-run, the two basis far
+fields or exit fields cancel for one photon's mixed polarization. BBRsim no
+longer draws a uniform direction or exit point instead. The export is
+inconsistent: check it with `check_dataset_sidecars.py` and ask the HFSS side
+for a re-export. See [Dataset sidecars](validation/README.md#dataset-sidecars).
+
 **A `BBR026` banner in a Planck run**: a warning, not an error. A photon's
 frequency and the grid frequency serving it lie on opposite sides of the
 guide's lowest-mode cutoff (`modes.cutoff_ghz`), so the table was computed in
