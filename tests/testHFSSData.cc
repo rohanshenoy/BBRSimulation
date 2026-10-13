@@ -38,6 +38,26 @@ BBRHFSSData LoadChecked(TempDir& d, const Dataset& ds, const hfssfix::SidecarPar
   return BBRHFSSData(wg.string(), stem, 500., &sc);
 }
 
+// Keys with their own far-field rows ("Phi,Theta") and the same exit rows ("Y,Z") in both
+// polarizations: T0 = 3/4, T1 = 1/4, rEtheta = 1 (Ephi=0) and rEphi = 1 (Ephi=1) at every far-field
+// row, Ey (Ephi=0) and Ez (Ephi=1) at every exit point (the CDX-022 cases).
+Dataset Keys(const std::vector<std::pair<std::string, std::vector<std::string>>>& ffByKey,
+             const std::vector<std::string>& ex) {
+  Dataset d{hfssfix::FF_HDR, hfssfix::WG_HDR, hfssfix::FF_HDR, hfssfix::WG_HDR};
+  for (const auto& [k, ff] : ffByKey) {
+    for (const auto& r : ff) {
+      d.ff0 += "500GHz,0," + k + "," + r + ",0,0,1,0\n";
+      d.ff1 += "500GHz,1," + k + "," + r + ",1,0,0,0\n";
+    }
+    for (const auto& r : ex) {
+      d.wg0 += "500GHz,0," + k + ",3,4,0," + r + ",0,1,0,0,0,0\n";
+      d.wg1 += "500GHz,1," + k + ",1,4,0," + r + ",0,0,1,0,0,0\n";
+    }
+  }
+  return d;
+}
+Dataset Rows(const std::vector<std::string>& ff, const std::vector<std::string>& ex) { return Keys({{"0,180", ff}}, ex); }
+
 // text with every `from` replaced by `to`; throws if `from` is absent, so a stale edit cannot pass.
 std::string ReplaceAll(std::string text, const std::string& from, const std::string& to) {
   if (text.find(from) == std::string::npos) throw std::runtime_error("ReplaceAll: '" + from + "' not in the text");
@@ -302,7 +322,7 @@ int main(int argc, char** argv) {
     }},
     {"sidecar_checks_pass", [] {
       TempDir d1; CHECK_NEAR(LoadChecked(d1, hfssfix::Mini500()).GetFrequencyGHz(), 500., 0);
-      TempDir d2; LoadChecked(d2, hfssfix::NineKey());                 // 3 far-field rows, 2 exit points per key
+      TempDir d2; LoadChecked(d2, hfssfix::NineKeyGrid());             // 9 far-field rows, 4 exit points per key
       TempDir d3; LoadChecked(d3, hfssfix::WrapKeys("500", "0.01"));   // the section grows to the 10 mm rows
     }},
     {"sidecar_c1_header", [] {
@@ -424,6 +444,34 @@ int main(int argc, char** argv) {
       TempDir d9; ExpectG4Exception("BBR012", [&] { LoadChecked(d9, disc, &w); },
                                     "BBRHFSSData", "the exit grid has 3 Y and 1 Z values; the sidecar declares 2 and 1 "
                                                    "(with outside_points omitted the retained counts may be smaller, not larger)");
+    }},
+    {"sidecar_c3_c4_per_key", [] {
+      // CDX-022: the dataset-wide counts pass each of these; the per-key checks do not.
+      const std::vector<std::string> one = {"0.001,0"};
+      TempDir d1; ExpectG4Exception("BBR012", [&] { LoadChecked(d1, Rows({"0,60", "0,60", "30,60", "30,120"}, one)); },
+                                    "BBRHFSSData", "far-field point (Phi, Theta) = (0, 60) appears twice in key (0, 180)");
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadChecked(d2, Rows({"0,60", "0,120", "0,61", "30,60", "30,120", "30,61"}, one)); },
+                                    "BBRHFSSData", "far-field row (Phi, Theta) = (0, 61) of key (0, 180) is not a node of the declared "
+                                                   "grid Phi 0 to 30 in 2 nodes x Theta 60 to 120 in 3 nodes");
+      // Two keys whose far fields differ in compensating ways: the union is the 2 x 2 grid.
+      TempDir d3; ExpectG4Exception("BBR012", [&] {
+        LoadChecked(d3, Keys({{"0,135", {"0,60", "30,120"}}, {"0,180", {"30,60", "0,120"}}}, one)); },
+        "BBRHFSSData", "key (0, 135) holds 2 of the 4 nodes of the declared far-field grid");
+      const std::vector<std::string> ff = {"0,90"};
+      TempDir d4; ExpectG4Exception("BBR012", [&] {
+        LoadChecked(d4, Rows(ff, {"-0.001,-5e-06", "-0.001,5e-06", "0,-5e-06", "0,-5e-06", "0.001,-5e-06", "0.001,5e-06"})); },
+        "BBRHFSSData", "exit point (Y, Z) = (0, -5e-06) m appears twice in key (0, 180)");
+      TempDir d5; ExpectG4Exception("BBR012", [&] { LoadChecked(d5, Rows(ff, {"-0.001,0", "0,0", "0.0015,0"})); },
+                                    "BBRHFSSData", "exit point (Y, Z) = (0, 0) m of key (0, 180) is not a node of the declared lattice");
+      // Valid: the pole rows Theta = 0 at two Phi (one direction, two grid nodes), and single-node axes.
+      TempDir d6; LoadChecked(d6, Rows({"0,0", "90,0", "0,90", "90,90"}, one));
+      // "omitted": a lattice node inside the section without a retained point is missing.
+      Dataset disc = Rows(ff, {"-1e-05,0", "1e-05,0"});
+      auto w = hfssfix::SidecarFrom("c_500GHz", disc);
+      w.disc = true; w.radius = 1.5e-5; w.yMin = -2e-5; w.yMax = 2e-5; w.yCount = 5; w.outsidePoints = "omitted";
+      TempDir d7; ExpectG4Exception("BBR012", [&] { LoadChecked(d7, disc, &w); }, "BBRHFSSData",
+                                    "key (0, 180) holds 2 exit points; every key holds each of the 3 declared lattice nodes "
+                                    "inside the section once");
     }},
     {"sidecar_c5_outside_section", [] {
       const Dataset ds = hfssfix::WrapKeys("500", "0.01");   // exit points at Y = 10 mm

@@ -494,6 +494,58 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
   if (outside)
     fail("BBR025", std::to_string(outside) + " exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = " +
                    fmt(outY, outZ) + " m");
+
+  // C3, C4 per key (CDX-022): every far-field row lies on a node of the declared Phi x Theta grid
+  // and every exit point on a node of the declared Y x Z lattice, no node twice in one key, and
+  // every key holds all of them: the whole far-field grid, and the whole exit lattice or, with
+  // "omitted", its nodes inside the declared section. Node i of an axis is
+  // min + i (max - min)/(count - 1), matched to 1e-6 of that step (to the range tolerance when the
+  // axis has one node). The dataset-wide counts above cannot see a repeated row, an uneven axis
+  // or keys that differ in compensating ways.
+  auto node = [](G4double v, const BBRAxisRange& a, G4double tol) -> long {
+    if (a.count <= 1) return std::abs(v - a.min) <= tol ? 0 : -1;
+    const G4double step = (a.max - a.min) / (a.count - 1);
+    const long i = std::lround((v - a.min) / step);
+    return (i >= 0 && i < a.count && std::abs(v - (a.min + i * step)) <= 1e-6 * step) ? i : -1;
+  };
+  auto at = [](const BBRAxisRange& a, long i) { return a.count <= 1 ? a.min : a.min + i * (a.max - a.min) / (a.count - 1); };
+  auto axis = [&](const char* name, const BBRAxisRange& a) {
+    return std::string(name) + " " + num(a.min) + " to " + num(a.max) + " in " + std::to_string(a.count) + " nodes";
+  };
+  const std::size_t ffNodes = std::size_t(sc.farFieldPhi.count) * std::size_t(sc.farFieldTheta.count);
+  std::set<std::pair<long, long>> lattice;   // the exit-lattice nodes every key holds
+  for (long i = 0; i < sc.exitY.count; ++i)
+    for (long j = 0; j < sc.exitZ.count; ++j)
+      if (!omitted || sc.crossSection.Contains(at(sc.exitY, i), at(sc.exitZ, j))) lattice.insert({i, j});
+  for (const auto& [key, ds] : fData) {
+    const std::string k = fmt(key.first, key.second);
+    std::set<std::pair<long, long>> seen;
+    for (const auto& fp : ds.farField) {
+      const long i = node(fp.phi_deg, sc.farFieldPhi, 1e-9), j = node(fp.theta_deg, sc.farFieldTheta, 1e-9);
+      if (i < 0 || j < 0)
+        fail("BBR012", "far-field row (Phi, Theta) = " + fmt(fp.phi_deg, fp.theta_deg) + " of key " + k +
+                       " is not a node of the declared grid " + axis("Phi", sc.farFieldPhi) + " x " +
+                       axis("Theta", sc.farFieldTheta));
+      if (!seen.insert({i, j}).second)
+        fail("BBR012", "far-field point (Phi, Theta) = " + fmt(fp.phi_deg, fp.theta_deg) + " appears twice in key " + k);
+    }
+    if (seen.size() != ffNodes)
+      fail("BBR012", "key " + k + " holds " + std::to_string(seen.size()) + " of the " + std::to_string(ffNodes) +
+                     " nodes of the declared far-field grid");
+    seen.clear();
+    for (const auto& ep : ds.exitPoints) {
+      const long i = node(ep.y, sc.exitY, yTol), j = node(ep.z, sc.exitZ, zTol);
+      if (i < 0 || j < 0)
+        fail("BBR012", "exit point (Y, Z) = " + fmt(ep.y, ep.z) + " m of key " + k + " is not a node of the declared lattice " +
+                       axis("Y", sc.exitY) + " x " + axis("Z", sc.exitZ));
+      if (!seen.insert({i, j}).second)
+        fail("BBR012", "exit point (Y, Z) = " + fmt(ep.y, ep.z) + " m appears twice in key " + k);
+    }
+    if (seen != lattice)
+      fail("BBR012", "key " + k + " holds " + std::to_string(seen.size()) + " exit points; every key holds each of the " +
+                     std::to_string(lattice.size()) + " declared lattice nodes" + (omitted ? " inside the section" : "") +
+                     " once");
+  }
 }
 
 const BBRHFSSData::AngleDataset& BBRHFSSData::FindDataset(

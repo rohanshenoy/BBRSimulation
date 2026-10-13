@@ -214,6 +214,17 @@ def _read_csv(base, stem, ephi, name, columns):
     return df
 
 
+def _rows_by_key(df, cols):
+    """{key: array of the cols of each incidence key's rows, in file order}, keys rounded to 0.01 deg
+    as BBRHFSSData rounds them."""
+    out = {}
+    for (p, t), g in df.groupby(["IWavePhi", "IWaveTheta"], sort=False):
+        k = (round(float(p), 2), round(float(t), 2))
+        v = g[list(cols)].to_numpy(float)
+        out[k] = np.vstack([out[k], v]) if k in out else v
+    return out
+
+
 def _describe_one(base, stem, ephi):
     """What the two CSVs of one polarization contain: header, incidence keys, grids, per-key counts."""
     ff = _read_csv(base, stem, ephi, "far_field.csv", FF_COLUMNS)
@@ -249,6 +260,8 @@ def _describe_one(base, stem, ephi):
         "keys": set(rows_key),
         "ff_keys": {(round(float(p), 2), round(float(t), 2)) for p, t in
                     ff[["IWavePhi", "IWaveTheta"]].itertuples(index=False)},
+        "ff_rows": _rows_by_key(ff, ("Phi", "Theta")),
+        "exit_rows": _rows_by_key(wg, ("X", "Y", "Z")),
     }
 
 
@@ -553,6 +566,26 @@ def _contains(section, y, z):
     return y * y + z * z <= section["radius_m"] ** 2 * (1 + SECTION_REL)
 
 
+def _nodes(values, axis, tol):
+    """The node index of each value on a declared axis, node i at min + i (max - min)/(count - 1),
+    or -1 off it: matched to 1e-6 of the step, to tol when the axis has one node (as BBRHFSSData)."""
+    v = np.asarray(values, float)
+    lo, hi, n = axis["min"], axis["max"], axis["count"]
+    if n <= 1:
+        return np.where(np.abs(v - lo) <= tol, 0, -1)
+    step = (hi - lo) / (n - 1)
+    i = np.rint((v - lo) / step).astype(int)
+    return np.where((i >= 0) & (i < n) & (np.abs(v - (lo + i * step)) <= 1e-6 * step), i, -1)
+
+
+def _node_at(axis, i):
+    return axis["min"] if axis["count"] <= 1 else axis["min"] + i * (axis["max"] - axis["min"]) / (axis["count"] - 1)
+
+
+def _axis_text(name, axis):
+    return f"{name} {axis['min']!r} to {axis['max']!r} in {axis['count']} nodes"
+
+
 def _check_one(stem, d, sc, exempt):
     """C1-C5 on the description of one polarization; exempt holds the (key, Y, Z) that C5 lets
     lie outside the section."""
@@ -613,6 +646,49 @@ def _check_one(stem, d, sc, exempt):
     if outside:
         raise ValueError(f"BBR025: {tag}: {len(outside)} exit point(s) outside the declared "
                          f"cross-section, e.g. {outside[0]}")
+    # C3, C4 per key (CDX-022): every far-field row on a node of the declared Phi x Theta grid and
+    # every exit point on a node of the declared Y x Z lattice, no node twice in one key, every key
+    # holding all of them (the whole exit lattice, or with "omitted" its nodes inside the section).
+    # The dataset-wide checks above cannot see a repeated row, an uneven axis or keys that differ
+    # in compensating ways.
+    phi_ax, theta_ax = ff["phi_deg"], ff["theta_deg"]
+    y_ax, z_ax = xf["grid"]["y_e"], xf["grid"]["z_e"]
+    y_tol = 1e-9 * max(abs(y_ax["min"]), abs(y_ax["max"]))
+    z_tol = 1e-9 * max(abs(z_ax["min"]), abs(z_ax["max"]))
+    lattice = {(i, j) for i in range(y_ax["count"]) for j in range(z_ax["count"])
+               if not omitted or _contains(xf["cross_section"], _node_at(y_ax, i), _node_at(z_ax, j))}
+    for k, rows in d["ff_rows"].items():
+        i, j = _nodes(rows[:, 0], phi_ax, 1e-9), _nodes(rows[:, 1], theta_ax, 1e-9)
+        off = np.nonzero((i < 0) | (j < 0))[0]
+        if len(off):
+            r = rows[off[0]]
+            raise ValueError(f"BBR012: {tag}: far-field row (Phi, Theta) = ({float(r[0])!r}, {float(r[1])!r}) of key {k} is not a "
+                             f"node of the declared grid {_axis_text('Phi', phi_ax)} x {_axis_text('Theta', theta_ax)}")
+        seen = set()
+        for n, pair in enumerate(zip(i.tolist(), j.tolist())):
+            if pair in seen:
+                raise ValueError(f"BBR012: {tag}: far-field point (Phi, Theta) = ({float(rows[n, 0])!r}, {float(rows[n, 1])!r}) "
+                                 f"appears twice in key {k}")
+            seen.add(pair)
+        if len(seen) != phi_ax["count"] * theta_ax["count"]:
+            raise ValueError(f"BBR012: {tag}: key {k} holds {len(seen)} of the {phi_ax['count'] * theta_ax['count']} "
+                             f"nodes of the declared far-field grid")
+    for k, rows in d["exit_rows"].items():
+        i, j = _nodes(rows[:, 1], y_ax, y_tol), _nodes(rows[:, 2], z_ax, z_tol)
+        off = np.nonzero((i < 0) | (j < 0))[0]
+        if len(off):
+            r = rows[off[0]]
+            raise ValueError(f"BBR012: {tag}: exit point (Y, Z) = ({float(r[1])!r}, {float(r[2])!r}) m of key {k} is not a node of "
+                             f"the declared lattice {_axis_text('Y', y_ax)} x {_axis_text('Z', z_ax)}")
+        seen = set()
+        for n, pair in enumerate(zip(i.tolist(), j.tolist())):
+            if pair in seen:
+                raise ValueError(f"BBR012: {tag}: exit point (Y, Z) = ({float(rows[n, 1])!r}, {float(rows[n, 2])!r}) m appears "
+                                 f"twice in key {k}")
+            seen.add(pair)
+        if seen != lattice:
+            raise ValueError(f"BBR012: {tag}: key {k} holds {len(seen)} exit points; every key holds each of the "
+                             f"{len(lattice)} declared lattice nodes{' inside the section' if omitted else ''} once")
 
 
 def check_csvs(base, stem, sc):

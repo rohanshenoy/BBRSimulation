@@ -113,6 +113,38 @@ inline Dataset NineKey() {
   return d;
 }
 
+// NineKey on a complete grid (CDX-022), for loads that must pass every check: per key the far
+// field is Phi {-40, 10, 60} x Theta {40, 75, 110}, NineKey's three rows at (10, 40), (-40, 75)
+// and (60, 110) with smaller amplitudes at the other six nodes, and the exit field the lattice
+// Y {-2, 1} mm x Z {5, 10} um, NineKey's two points plus two without field. NineKey itself is
+// not a complete grid: the C3/C4 tests that use it stop at the dataset-wide checks.
+inline Dataset NineKeyGrid() {
+  const char* keys[] = {"0,90", "45,90", "90,90", "0,135", "45,135", "90,135", "0,180", "45,180", "90,180"};
+  Dataset d{FF_HDR, WG_HDR, FF_HDR, WG_HDR};
+  for (const char* key : keys) {
+    const std::string k = std::string(key) + ",";
+    for (const char* theta : {"40", "75", "110"})
+      for (const char* phi : {"-40", "10", "60"}) {
+        const std::string pt = std::string(phi) + "," + theta;
+        std::string a0 = "0.05,0.02,0.03,-0.01", a1 = "0.02,-0.03,0.04,0.01";
+        if (pt == "10,40")  { a0 = "0.9,0.0,0.1,0.4";  a1 = "0.3,0.1,0.8,-0.2"; }
+        if (pt == "-40,75") { a0 = "0.2,-0.3,0.7,0.1"; a1 = "-0.5,0.2,0.1,0.6"; }
+        if (pt == "60,110") { a0 = "0.5,0.1,-0.6,0.3"; a1 = "0.4,0.4,-0.3,0.2"; }
+        d.ff0 += "500GHz,0," + k + pt + "," + a0 + "\n";
+        d.ff1 += "500GHz,1," + k + pt + "," + a1 + "\n";
+      }
+    d.wg0 += "500GHz,0," + k + "0.9,1,0,0.001,1e-05,0.7,0.1,0.4,0.2,0,0\n";
+    d.wg0 += "500GHz,0," + k + "0.9,1,0,-0.002,5e-06,0.1,0.8,0.3,0,0.2,0.1\n";
+    d.wg0 += "500GHz,0," + k + "0.9,1,0,0.001,5e-06,0,0,0,0,0,0\n";
+    d.wg0 += "500GHz,0," + k + "0.9,1,0,-0.002,1e-05,0,0,0,0,0,0\n";
+    d.wg1 += "500GHz,1," + k + "0.3,1,0,0.001,1e-05,0.2,0.5,0.1,0,0.3,0\n";
+    d.wg1 += "500GHz,1," + k + "0.3,1,0,-0.002,5e-06,0.6,0.1,0.2,0.1,0,0.4\n";
+    d.wg1 += "500GHz,1," + k + "0.3,1,0,0.001,5e-06,0,0,0,0,0,0\n";
+    d.wg1 += "500GHz,1," + k + "0.3,1,0,-0.002,1e-05,0,0,0,0,0,0\n";
+  }
+  return d;
+}
+
 // --- sidecars (schema 1.0) ---------------------------------------------------
 // BBRCrackLibrary refuses a dataset without <stem>.dataset.json (BBR024), so
 // WriteDataset writes one, derived from the dataset's own rows by SidecarFrom.

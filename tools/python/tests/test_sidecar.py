@@ -398,6 +398,64 @@ def test_c2_key_missing_from_part_of_the_data(tmp_path, ephi, names, match):
         sidecar.check_full(base, "c", stem, 500.0)
 
 
+@pytest.mark.parametrize("kw,match", [
+    (dict(ff=((0, 60), (0, 60), (30, 60), (30, 120))),
+     r"far-field point \(Phi, Theta\) = \(0.0, 60.0\) appears twice in key \(0.0, 135.0\)"),
+    (dict(ff=((0, 60), (0, 120), (0, 61), (30, 60), (30, 120), (30, 61))),
+     r"far-field row \(Phi, Theta\) = \(0.0, 61.0\) of key \(0.0, 135.0\) is not a node of the declared grid "
+     r"Phi 0.0 to 30.0 in 2 nodes x Theta 60.0 to 120.0 in 3 nodes"),
+    (dict(exit_yz=((-0.001, -5e-6), (-0.001, 5e-6), (0.0, -5e-6), (0.0, -5e-6), (0.001, -5e-6), (0.001, 5e-6))),
+     r"exit point \(Y, Z\) = \(0.0, -5e-06\) m appears twice in key \(0.0, 135.0\)"),
+    (dict(exit_yz=((-0.001, 0.0), (0.0, 0.0), (0.0015, 0.0))),
+     r"exit point \(Y, Z\) = \(0.0, 0.0\) m of key \(0.0, 135.0\) is not a node of the declared lattice"),
+], ids=["duplicate-far-field-point", "uneven-far-field-axis", "duplicate-exit-point", "uneven-exit-axis"])
+def test_c3_c4_per_key_grids(tmp_path, kw, match):
+    """CDX-022: Codex's fixtures (and an uneven exit axis) pass the dataset-wide counts; the per-key
+    node checks refuse them."""
+    base = str(tmp_path)
+    stem = write_grid(base, **kw)
+    sidecar.write(base, stem, tiny_sidecar(base, stem))
+    with pytest.raises(ValueError, match=f"^BBR012: c_500GHz_Ephi=0: {match}"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_c3_keys_differing_in_compensating_ways(tmp_path):
+    """CDX-022: (0, 135) holds (0, 60) and (30, 120), (0, 180) holds (30, 60) and (0, 120): the union
+    is the declared 2 x 2 grid, so only the per-key check sees that each key holds half of it."""
+    base = str(tmp_path)
+    stem = write_grid(base, ff=((0, 60), (30, 120)))
+    for e in (0, 1):
+        rewrite(base, stem, e, "far_field.csv",
+                lambda t: t.replace(",0.0,180.0,0,60,", ",0.0,180.0,30,60,").replace(",0.0,180.0,30,120,", ",0.0,180.0,0,120,"))
+    sidecar.write(base, stem, tiny_sidecar(base, stem))
+    with pytest.raises(ValueError, match=r"^BBR012: c_500GHz_Ephi=0: key \(0.0, 135.0\) holds 2 of the 4 nodes"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_c3_pole_rows_are_valid(tmp_path):
+    """Theta = 0 at two Phi is one direction but two grid nodes: valid (CDX-022 compares coordinate
+    pairs, not directions)."""
+    base = str(tmp_path)
+    stem = write_grid(base, ff=((0, 0), (90, 0), (0, 90), (90, 90)))
+    sidecar.write(base, stem, tiny_sidecar(base, stem))
+    sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_c4_omitted_requires_every_inside_node(tmp_path):
+    """With "omitted" the per-key exit set is the lattice inside the section: R = 15 um at a 10 um step
+    holds -10, 0 and +10 um; dropping the centre point is refused."""
+    base = str(tmp_path)
+    stem = write_disc(base)
+    for e in (0, 1):
+        rewrite(base, stem, e, "waveguide.csv", lambda t: "".join(l for l in t.splitlines(keepends=True)
+                                                                if ",0,0.0," not in l))
+    sc = disc_sidecar(base, stem, "omitted")
+    sc["exit_field"]["grid"]["y_e"] = {"min": -2e-5, "max": 2e-5, "count": 5}
+    with pytest.raises(ValueError, match=r"^BBR012: c_500GHz_Ephi=0: key \(0.0, 180.0\) holds 2 exit points; every "
+                                         r"key holds each of the 3 declared lattice nodes inside the section once"):
+        sidecar.check_csvs(base, stem, sc)
+
+
 # --- fix round 2: the physics-only invariant, the disc modes, load(), malformed CSVs -------------
 
 def built(tmp_path):
