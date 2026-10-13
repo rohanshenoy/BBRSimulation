@@ -237,7 +237,7 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 At the CSV load, per frequency, in `BBRHFSSData`:
 
 - C1 the CSV headers equal `far_field.columns` and `exit_field.columns` (`BBR013`).
-- C2 every incidence key of the CSVs lies on the declared `incident_phi_deg` × `incident_theta_deg` grid. This is a subset check, not an equality: HFSS grids are complete, test grids may be sparse. Within one polarization, `far_field.csv` and `waveguide.csv` carry the same key set (`BBR007` for either).
+- C2 the incidence keys of the CSVs equal the declared `incident_phi_deg` × `incident_theta_deg` grid: a key off the grid and a declared key without rows are both `BBR007`. A missing key would otherwise be served by its nearest neighbour, another incidence's tables. A smaller grid is declared as a smaller product; a single key is a 1 × 1 grid. Within one polarization, `far_field.csv` and `waveguide.csv` carry the same key set (`BBR007` for either).
 - C3 per key, the far-field row count equals `points_per_key` and every Phi and Theta lies in the declared [min, max]; over the whole file the distinct Phi and Theta counts equal the declared counts (`BBR012`). Only the Python validator checks the `step`: when `count` > 1 it must equal (max − min)/(count − 1) of the data to 1e-9 relative (`BBR012`).
 - C4 X = 0 on every exit row; the exit rows per key and polarization equal `points_per_key_retained`; every Y and Z lies in the declared `grid` range, and the distinct Y and Z counts equal the declared counts. With `outside_points` `"omitted"` the retained counts may be smaller than the declared ones, never larger: the producer declares the whole export lattice and drops the lattice points outside the section, so a round face whose radius is not a multiple of the step leaves its outermost lattice columns without a retained point (`BBR012`).
 - C5 every exit point, at any key and either polarization, lies inside the declared cross-section; the message gives the count and an offending point (`BBR025`). With `outside_points` `"zero"`, a point outside the section is exempt when its six field components are exactly zero in both polarizations; with `"none"` or `"omitted"` every point must lie inside. C5 checks the data against the sidecar, F12 the sidecar against the geometry; together they put every exit point that carries field inside the placed solid.
@@ -248,7 +248,7 @@ Ephi=0 CSVs (`BBR012`; `BBRHFSSData` also pairs the rows by position). A CSV
 row with the wrong number of fields, or an empty field, is `BBR013`.
 
 The containment tolerance is 1e-6 relative (the HFSS runner's own; never use a
-stricter one). Incidence keys are rounded to 0.01° before the C2 subset test,
+stricter one). Incidence keys are rounded to 0.01° before the C2 comparison,
 as `BBRHFSSData` rounds them. The far-field ranges use 1e-9 degrees and the
 exit-grid ranges 1e-9 relative to the largest declared |value|.
 

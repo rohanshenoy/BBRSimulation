@@ -36,7 +36,8 @@ inline Dataset Mini500() {
   return d;
 }
 
-// Three keys with distinct T0 (T1 = 0), one far-field row and one exit point each.
+// Three keys with distinct T0 (T1 = 0), one far-field row and one exit point each. Not a complete
+// grid: its sidecar declares {0, 90} x {135, 180}, which lacks (90,135) (CDX-021).
 inline Dataset ThreeKey() {
   Dataset d;
   d.ff0 = std::string(FF_HDR) + "500GHz,0,0,135,0,90,0,0,1,0\n500GHz,0,0,180,0,90,0,0,1,0\n500GHz,0,90,180,0,90,0,0,1,0\n";
@@ -46,27 +47,43 @@ inline Dataset ThreeKey() {
   return d;
 }
 
-// Five keys for the wrapper tests, at frequency <freq>GHz: the three keys of
-// ThreeKey plus (90,135) and (45,135). Polarization filters (T0 = 1, T1 = 0) at
-// (0,135) and (0,180); T0 = T1 = 1 at (45,135), (90,135) and (90,180), where the
-// orthogonal exit fields (y for Ephi=0, z for Ephi=1, rho = 0) make T = 1 for
-// every polarization. One far-field row per key, at a direction that identifies
-// the key:
-//   (0,135) -> (Phi, Theta) = (30, 60)   (45,135) -> (0, 60)   (90,135) -> (60, 90)
-//   (0,180) -> (0, 90)                   (90,180) -> (0, 45)
+// ThreeKey plus (90,135), T0 = 0.6: the complete {0, 90} x {135, 180} grid that ThreeKey's
+// sidecar declares.
+inline Dataset FourKey() {
+  Dataset d = ThreeKey();
+  d.ff0 += "500GHz,0,90,135,0,90,0,0,1,0\n";
+  d.ff1 += "500GHz,1,90,135,0,90,1,0,0,0\n";
+  d.wg0 += "500GHz,0,90,135,0.6,1,0,0,0,0,1,0,0,0,0\n";
+  d.wg1 += "500GHz,1,90,135,0,1,0,0,0,0,0,1,0,0,0\n";
+  return d;
+}
+
+// Six keys for the wrapper tests, at frequency <freq>GHz: {0, 45, 90} x {135, 180},
+// the complete grid their sidecar declares (CDX-021). Polarization filters (T0 = 1,
+// T1 = 0) at (0,135) and (0,180); T0 = T1 = 1 at the other four keys, where the
+// orthogonal exit fields (y for Ephi=0, z for Ephi=1, rho = 0) make T = 1 for every
+// polarization. Each key's far field is the full grid Phi {0, 30, 60} x Theta
+// {30, 60, 90} (CDX-022), with intensity only at the direction that identifies the key:
+//   (0,135) -> (Phi, Theta) = (30, 60)   (45,135) -> (0, 60)    (90,135) -> (60, 90)
+//   (0,180) -> (0, 90)                   (45,180) -> (30, 90)   (90,180) -> (0, 30)
 // One exit point per key at CSV (Y, Z) = (exitY m, 10 um).
 inline Dataset WrapKeys(const std::string& freq = "500", const std::string& exitY = "0.001") {
   struct Row { const char* key; const char* phiTheta; const char* t0; const char* t1; };
   const Row rows[] = {
-    {"0,135", "30,60", "1", "0"}, {"45,135", "0,60", "1", "1"}, {"90,135", "60,90", "1", "1"},
-    {"0,180", "0,90", "1", "0"},  {"90,180", "0,45", "1", "1"},
+    {"0,135", "30,60", "1", "0"}, {"45,135", "0,60", "1", "1"},  {"90,135", "60,90", "1", "1"},
+    {"0,180", "0,90", "1", "0"},  {"45,180", "30,90", "1", "1"}, {"90,180", "0,30", "1", "1"},
   };
   const std::string f = freq + "GHz,";
   Dataset d{FF_HDR, WG_HDR, FF_HDR, WG_HDR};
   for (const auto& r : rows) {
-    const std::string k = std::string(r.key) + ",", pt = std::string(r.phiTheta) + ",";
-    d.ff0 += f + "0," + k + pt + "0,0,1,0\n";
-    d.ff1 += f + "1," + k + pt + "1,0,0,0\n";
+    const std::string k = std::string(r.key) + ",";
+    for (const char* theta : {"30", "60", "90"})
+      for (const char* phi : {"0", "30", "60"}) {
+        const std::string pt = std::string(phi) + "," + theta;
+        const bool lit = pt == r.phiTheta;
+        d.ff0 += f + "0," + k + pt + (lit ? ",0,0,1,0\n" : ",0,0,0,0\n");
+        d.ff1 += f + "1," + k + pt + (lit ? ",1,0,0,0\n" : ",0,0,0,0\n");
+      }
     d.wg0 += f + "0," + k + r.t0 + ",1,0," + exitY + ",1e-05,0,1,0,0,0,0\n";
     d.wg1 += f + "1," + k + r.t1 + ",1,0," + exitY + ",1e-05,0,0,1,0,0,0\n";
   }

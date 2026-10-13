@@ -391,7 +391,7 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
 // Lookup and query
 // ---------------------------------------------------------------------------
 
-// C2-C5 (validation/README.md, Dataset sidecars): every key on the declared grid; per key
+// C2-C5 (validation/README.md, Dataset sidecars): the keys equal the declared grid; per key
 // the declared far-field and exit row counts; every far-field and exit row in
 // the declared ranges; the distinct-value counts (equal to the declared ones, or
 // with outside_points "omitted" at most the declared exit-lattice counts); X = 0;
@@ -462,6 +462,18 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
         }
       }
     }
+  }
+  // C2: every declared key has rows. A declared key without them would be served by its nearest
+  // neighbour (FindDataset), another incidence's tables (CDX-021).
+  std::set<std::pair<G4double, G4double>> missing;
+  for (const G4double p : sc.incidentPhiDeg)
+    for (const G4double t : sc.incidentThetaDeg)
+      if (!fData.count(MakeKey(p, t))) missing.insert(MakeKey(p, t));
+  if (!missing.empty()) {
+    std::string list;
+    for (const auto& [p, t] : missing) list += (list.empty() ? "" : ", ") + fmt(p, t);
+    fail("BBR007", std::to_string(missing.size()) + " declared incidence key(s) have no rows: " + list +
+                   "; the nearest-key lookup would serve another incidence's tables for them");
   }
   if (G4int(phis.size()) != sc.farFieldPhi.count || G4int(thetas.size()) != sc.farFieldTheta.count)
     fail("BBR012", "the far field has " + std::to_string(phis.size()) + " Phi and " + std::to_string(thetas.size()) +

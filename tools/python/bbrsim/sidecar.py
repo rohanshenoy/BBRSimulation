@@ -560,8 +560,9 @@ def _check_one(stem, d, sc, exempt):
     ff, xf = sc["far_field"], sc["exit_field"]
     if d["far_field"]["columns"] != ff["columns"] or d["exit_field"]["columns"] != xf["columns"]:
         raise ValueError(f"BBR013: {tag}: a CSV header differs from the sidecar's columns")              # C1
-    # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them; the waveguide keys must lie on the
-    # declared grid, and the far-field keys must equal them (BBR007 in BBRHFSSData too)
+    # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them; the waveguide keys must equal the
+    # declared grid, and the far-field keys must equal them (BBR007 in BBRHFSSData too). A declared
+    # key without rows would be served by its nearest neighbour, another incidence's tables (CDX-021).
     phis = {round(float(v), 2) for v in sc["excitation"]["incident_phi_deg"]}
     thetas = {round(float(v), 2) for v in sc["excitation"]["incident_theta_deg"]}
     off = sorted(k for k in d["keys"] if k[0] not in phis or k[1] not in thetas)
@@ -571,6 +572,10 @@ def _check_one(stem, d, sc, exempt):
         raise ValueError(f"BBR007: {tag}: far_field.csv and waveguide.csv disagree on incidence keys "
                          f"(far field only {sorted(d['ff_keys'] - d['keys'])}, "
                          f"waveguide only {sorted(d['keys'] - d['ff_keys'])})")
+    missing = sorted({(p, t) for p in phis for t in thetas} - d["keys"])
+    if missing:
+        raise ValueError(f"BBR007: {tag}: declared incidence keys {missing} have no rows; the nearest-key "
+                         f"lookup would serve another incidence's tables for them")
     for name in ("theta_deg", "phi_deg"):                                                               # C3
         got, want = d["far_field"][name], ff[name]
         if got["count"] != want["count"] or got["min"] < want["min"] - 1e-9 or got["max"] > want["max"] + 1e-9:

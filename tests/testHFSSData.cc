@@ -343,6 +343,13 @@ int main(int argc, char** argv) {
       TempDir d; ExpectG4Exception("BBR007", [&] { LoadChecked(d, hfssfix::Mini500(), &p); },
                                    "BBRHFSSData", "incidence key (0, 180) is not on the declared");
     }},
+    {"sidecar_c2_key_missing", [] {
+      // CDX-021: ThreeKey's sidecar declares {0, 90} x {135, 180}, but (90,135) has no rows; the
+      // nearest-key lookup would serve (90,180)'s or (0,135)'s tables for it.
+      TempDir d; ExpectG4Exception("BBR007", [&] { LoadChecked(d, hfssfix::ThreeKey()); }, "BBRHFSSData",
+                                   "1 declared incidence key(s) have no rows: (90, 135)");
+      TempDir d2; LoadChecked(d2, hfssfix::FourKey());   // the same grid, complete
+    }},
     {"sidecar_c3_far_field", [] {
       const Dataset ds = hfssfix::NineKey();
       const auto p = hfssfix::SidecarFrom("c_500GHz", ds);
@@ -423,7 +430,7 @@ int main(int argc, char** argv) {
       auto p = hfssfix::SidecarFrom("c_500GHz", ds);
       p.yHalf = 5e-3;                                       // the declared section ends at 5 mm
       TempDir d; ExpectG4Exception("BBR025", [&] { LoadChecked(d, ds, &p); }, "BBRHFSSData",
-                                   "5 exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = (0.01, 1e-05) m");
+                                   "6 exit point(s) lie outside the declared cross-section, e.g. (Y, Z) = (0.01, 1e-05) m");
       // Two offenders in one key: the message names the first, as the Python check does.
       Dataset two = hfssfix::Mini500();
       two.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,3,4,0,0,0,0,1,0,0,0,0\n"

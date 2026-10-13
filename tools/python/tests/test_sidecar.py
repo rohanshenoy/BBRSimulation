@@ -178,14 +178,15 @@ def test_check_full_checks_ephi1(tmp_path, name, transform, match, edit):
 
 
 def test_check_csvs_polarizations_agree(tmp_path):
-    """Ephi=1 keys on the declared grid but unlike Ephi=0's: BBR012."""
+    """Ephi=1 keys on the declared grid but unlike Ephi=0's: since C2 requires every declared key
+    (CDX-021), each polarization lacks one, and Ephi=0 is checked first (BBR007)."""
     base = str(tmp_path)
     stem = write_tiny(base)
     sc = tiny_sidecar(base, stem)
     sc["excitation"]["incident_theta_deg"] = [135.0, 180.0]
     for name in ("far_field.csv", "waveguide.csv"):
         rewrite(base, stem, 1, name, lambda t: t.replace(",0,180,", ",0,135,"))
-    with pytest.raises(ValueError, match="^BBR012: c_500GHz: Ephi=1 incidence keys"):
+    with pytest.raises(ValueError, match=r"^BBR007: c_500GHz_Ephi=0: declared incidence keys \[\(0.0, 135.0\)\]"):
         sidecar.check_csvs(base, stem, sc)
 
 
@@ -328,6 +329,73 @@ def test_check_csvs_omitted_refuses_more_values_than_declared(tmp_path):
     sidecar.check(sc, "c", stem, 500.0)
     with pytest.raises(ValueError, match="^BBR012: c_500GHz_Ephi=0: exit grid y_e .*more distinct values"):
         sidecar.check_csvs(base, stem, sc)
+
+
+# --- CDX-021, CDX-022: complete declared grids, per key ------------------------------------------
+
+GRID_KEYS = ((0.0, 135.0), (0.0, 180.0), (45.0, 135.0), (45.0, 180.0))
+
+
+def write_grid(base, ff=((0, 60), (0, 120)), exit_yz=((0.001, 0.0),), skip_key=None, label="500GHz"):
+    """The grid fixtures of Codex's deep-debug review (CDX-021, CDX-022): keys {0, 45} x {135, 180},
+    T0 = 0.75 at (0, 180) and 0.25 elsewhere, T1 = 0.25; every key holds the far-field rows ff and the
+    exit rows exit_yz, in that order; skip_key leaves one key out of all four CSVs."""
+    stem = f"c_{label}"
+    keys = [k for k in GRID_KEYS if k != skip_key]
+    for e, field in ((0, "0,1,0,0,0,0"), (1, "0,0,1,0,0,0")):
+        d = os.path.join(base, f"{stem}_Ephi={e}")
+        os.makedirs(d)
+        with open(os.path.join(d, "far_field.csv"), "w") as fh:
+            fh.write(FF_HDR + "".join(f"{label},{e},{p},{t},{fp},{ft},0.1,0.0,0.2,0.05\n"
+                                      for p, t in keys for fp, ft in ff))
+        with open(os.path.join(d, "waveguide.csv"), "w") as fh:
+            fh.write(WG_HDR + "".join(
+                f"{label},{e},{p},{t},{0.75 if (e, p, t) == (0, 0.0, 180.0) else 0.25},1.0,0,{y},{z},{field}\n"
+                for p, t in keys for y, z in exit_yz))
+    return stem
+
+
+def drop_key(text, key):
+    """text without the rows of incidence key (phi, theta), as write_grid formats it."""
+    return "".join(line for line in text.splitlines(keepends=True) if f",{key[0]},{key[1]}," not in line)
+
+
+def test_grid_complete_passes(tmp_path):
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sidecar.write(base, stem, tiny_sidecar(base, stem))
+    sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_c2_declared_key_missing(tmp_path):
+    """CDX-021: the builder declares {0, 45} x {135, 180} from the other keys, but (0, 180) has no
+    rows in any CSV; BBRsim would serve (0, 135) at normal incidence, T0 0.25 instead of 0.75."""
+    base = str(tmp_path)
+    stem = write_grid(base, skip_key=(0.0, 180.0))
+    sc = tiny_sidecar(base, stem)
+    assert sc["excitation"]["incident_phi_deg"] == [0.0, 45.0]
+    assert sc["excitation"]["incident_theta_deg"] == [135.0, 180.0]
+    sidecar.write(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR007: c_500GHz_Ephi=0: declared incidence keys \[\(0.0, 180.0\)\] "
+                                         r"have no rows"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+@pytest.mark.parametrize("ephi,names,match", [
+    (0, ("far_field.csv",), r"^BBR007: c_500GHz_Ephi=0: far_field.csv and waveguide.csv disagree"),
+    (0, ("waveguide.csv",), r"^BBR007: c_500GHz_Ephi=0: far_field.csv and waveguide.csv disagree"),
+    (1, ("far_field.csv", "waveguide.csv"), r"^BBR007: c_500GHz_Ephi=1: declared incidence keys \[\(0.0, 180.0\)\]"),
+], ids=["one-table-far-field", "one-table-waveguide", "one-polarization"])
+def test_c2_key_missing_from_part_of_the_data(tmp_path, ephi, names, match):
+    """CDX-021's other two cases: a key missing from one table, and from one polarization only."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    for name in names:
+        rewrite(base, stem, ephi, name, lambda t: drop_key(t, (0.0, 180.0)))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=match):
+        sidecar.check_full(base, "c", stem, 500.0)
 
 
 # --- fix round 2: the physics-only invariant, the disc modes, load(), malformed CSVs -------------
