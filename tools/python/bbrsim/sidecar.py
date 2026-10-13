@@ -139,7 +139,9 @@ def disc_modes(radius_m, freq_ghz, limit_ghz=LIST_LIMIT_GHZ):
                 if x <= x_max:
                     entries.append((float(x) * scale, kind, m, p))
                     added = True
-        if not added:          # the first zero grows with m, so no higher m qualifies
+        # Order 0 can be empty while TE11 lies below the limit (x'_11 < j_01 < x'_01); from order 1
+        # on the first zero grows with the order, so the first empty order ends the search (CDX-006).
+        if not added and m >= 1:
             break
         m += 1
     cutoffs = [{"mode": mode_label(k, m, p), "cutoff_ghz": f, "degeneracy": 1 if m == 0 else 2}

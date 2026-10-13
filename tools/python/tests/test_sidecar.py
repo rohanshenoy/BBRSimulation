@@ -61,6 +61,25 @@ def test_disc_modes_round_gap():
     assert any("," in c["mode"] for c in m["cutoffs"])          # n reaches 10 within 20 THz
 
 
+@pytest.mark.parametrize("radius_m,modes", [
+    (4.39e-6, []),                     # TE11 just above the 20 THz list limit (at R = 4.39246 um it is on it)
+    (4.40e-6, ["TE11"]),               # TE11 below the limit, order 0 still empty: the CDX-006 window
+    (5.73e-6, ["TE11"]),               # TM01, the first order-0 root, just above the limit
+    (5.75e-6, ["TE11", "TM01"]),       # TM01 enters (at R = 5.73713 um it is on the limit)
+])
+def test_disc_modes_order_zero_empty(radius_m, modes):
+    """CDX-006: between R = 4.39246 and 5.73713 um order 0 has no cutoff below 20 THz while TE11
+    has; the search must not stop at the empty order 0."""
+    assert [c["mode"] for c in sidecar.disc_modes(radius_m, 18000.0)["cutoffs"]] == modes
+
+
+def test_disc_modes_5um_matches_the_producer():
+    """Codex's probe: R = 5 um at 18000 GHz; the HFSS producer lists TE11 at 17569.85 GHz, count 1."""
+    m = sidecar.disc_modes(5e-6, 18000.0)
+    assert [(c["mode"], round(c["cutoff_ghz"], 2), c["degeneracy"]) for c in m["cutoffs"]] == [("TE11", 17569.85, 2)]
+    assert m["propagating_count"] == 1
+
+
 def test_mode_label():
     assert sidecar.mode_label("TE", 1, 1) == "TE11"
     assert sidecar.mode_label("TE", 18, 1) == "TE18,1" and sidecar.mode_label("TM", 0, 10) == "TM0,10"
