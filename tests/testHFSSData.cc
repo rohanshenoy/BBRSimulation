@@ -230,6 +230,15 @@ int main(int argc, char** argv) {
       Dataset nn = hfssfix::Mini500();
       nn.ff0 = std::string(hfssfix::FF_HDR) + "500GHz,0,0,180,0,90,0,0,nan,0\n";
       TempDir d2; ExpectG4Exception("BBR013", [&] { Load(d2, nn); }, "BBRHFSSData");
+      // CDX-001: an infinite amplitude or power, of either sign, is refused at load too.
+      for (const char* inf : {"inf", "-inf", "INF"}) {
+        Dataset fi = hfssfix::Mini500();
+        fi.ff1 = std::string(hfssfix::FF_HDR) + "500GHz,1,0,180,0,90," + inf + ",0,0,0\n";
+        TempDir d4; ExpectG4Exception("BBR013", [&] { Load(d4, fi); }, "BBRHFSSData", "rEphi_real");
+        Dataset wi = hfssfix::Mini500();
+        wi.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180," + inf + ",4,0,0,0,0,1,0,0,0,0\n";
+        TempDir d5; ExpectG4Exception("BBR013", [&] { Load(d5, wi); }, "BBRHFSSData", "OutgoingPower");
+      }
       Dataset sr = hfssfix::Mini500();
       sr.wg0 += "500GHz,0,0,180,3,4,0,0.001,0\n";   // a short row: 9 of 15 fields
       TempDir d3; ExpectG4Exception("BBR013", [&] { Load(d3, sr); }, "BBRHFSSData");

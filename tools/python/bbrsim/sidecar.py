@@ -209,8 +209,18 @@ def _read_csv(base, stem, ephi, name, columns):
     # header, and fills a short row with NaN; both are rows with the wrong number of fields
     if not isinstance(df.index, pd.RangeIndex):
         raise ValueError(f"BBR013: {p}: data rows have more fields than the header")
-    if df.isna().to_numpy().any():
-        raise ValueError(f"BBR013: {p}: a row lacks fields or holds an empty field")
+    na = df.isna().to_numpy()
+    if na.any():
+        r, c = (int(x) for x in np.argwhere(na)[0])
+        raise ValueError(f"BBR013: {p}: a row lacks fields or holds an empty field or NaN "
+                         f"(line {r + 2}, column {columns[c]})")
+    # every field BBRHFSSData parses with Num, all but Freq and Ephi, is a finite number (CDX-001)
+    numeric = [c for c in columns if c not in ("Freq", "Ephi")]
+    bad = ~np.isfinite(df[numeric].apply(pd.to_numeric, errors="coerce").to_numpy(float))
+    if bad.any():
+        r, c = (int(x) for x in np.argwhere(bad)[0])
+        raise ValueError(f"BBR013: {p}: line {r + 2}, column {numeric[c]}: '{df[numeric[c]].iloc[r]}' is not "
+                         f"a finite number")
     return df
 
 
@@ -260,6 +270,8 @@ def _describe_one(base, stem, ephi):
         "keys": set(rows_key),
         "ff_keys": {(round(float(p), 2), round(float(t), 2)) for p, t in
                     ff[["IWavePhi", "IWaveTheta"]].itertuples(index=False)},
+        "freq_tokens": {"far_field.csv": sorted(ff.Freq.astype(str).unique()),
+                        "waveguide.csv": sorted(wg.Freq.astype(str).unique())},
         "ff_rows": _rows_by_key(ff, ("Phi", "Theta")),
         "exit_rows": _rows_by_key(wg, ("X", "Y", "Z")),
     }
@@ -593,6 +605,15 @@ def _check_one(stem, d, sc, exempt):
     ff, xf = sc["far_field"], sc["exit_field"]
     if d["far_field"]["columns"] != ff["columns"] or d["exit_field"]["columns"] != xf["columns"]:
         raise ValueError(f"BBR013: {tag}: a CSV header differs from the sidecar's columns")              # C1
+    # every Freq token parses and agrees with the directory frequency to 0.1 %, as BBRHFSSData checks
+    # each row (BBR009; CDX-001)
+    f_dir = hfss.parse_frequency_GHz(stem.rsplit("_", 1)[1])
+    for name, tokens in d["freq_tokens"].items():
+        for tok in tokens:
+            f = hfss.parse_frequency_GHz(tok)
+            if f is None or f_dir is None or abs(f - f_dir) > 1e-3 * f_dir:
+                raise ValueError(f"BBR009: {tag}/{name}: Freq column {tok!r} does not match the directory "
+                                 f"frequency {f_dir} GHz (tolerance 0.1 %)")
     # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them; the waveguide keys must equal the
     # declared grid, and the far-field keys must equal them (BBR007 in BBRHFSSData too). A declared
     # key without rows would be served by its nearest neighbour, another incidence's tables (CDX-021).

@@ -493,6 +493,36 @@ def test_check_csvs_unequal_row_counts(tmp_path):
         sidecar.check_full(base, "c", stem, 500.0)
 
 
+@pytest.mark.parametrize("name,old,new,match", [
+    ("far_field.csv", ",0.2,0.05\n", ",inf,0.05\n", r"line 2, column rEtheta_real: 'inf' is not a finite number"),
+    ("far_field.csv", ",0.2,0.05\n", ",-inf,0.05\n", r"line 2, column rEtheta_real: '-inf' is not a finite number"),
+    ("far_field.csv", ",0.2,0.05\n", ",nan,0.05\n", r"empty field or NaN \(line 2, column rEtheta_real\)"),
+    ("waveguide.csv", ",0.25,1.0,", ",inf,1.0,", r"line 2, column OutgoingPower: 'inf' is not a finite number"),
+    ("waveguide.csv", ",0.25,1.0,", ",abc,1.0,", r"line 2, column OutgoingPower: 'abc' is not a finite number"),
+], ids=["inf", "minus-inf", "nan", "outgoing-power-inf", "not-a-number"])
+def test_check_full_rejects_non_finite(tmp_path, name, old, new, match):
+    """CDX-001: a value BBRHFSSData would refuse at load (BBR013) fails the preflight too, with the
+    file, line and column, even with fresh checksums."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, name, lambda t: t.replace(old, new, 1))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=rf"^BBR013: .*c_500GHz_Ephi=1/{name}: .*{match}"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_check_full_rejects_a_foreign_freq_token(tmp_path):
+    """BBRHFSSData refuses a Freq token more than 0.1 % from the directory frequency (BBR009)."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, "far_field.csv", lambda t: t.replace("500GHz,1,0.0,180.0,", "450GHz,1,0.0,180.0,", 1))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR009: c_500GHz_Ephi=1/far_field.csv: Freq column '450GHz'"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
 # --- fix round 2: the physics-only invariant, the disc modes, load(), malformed CSVs -------------
 
 def built(tmp_path):
