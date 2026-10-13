@@ -289,8 +289,10 @@ the trio `<stem>_Ephi=0/`, `<stem>_Ephi=1/` and `<stem>.dataset.json`; other
 files (a tree manifest, `SHA256SUMS`) are ignored, and a stem missing any part
 of the trio fails. A complete dataset is checked with
 `bbrsim.sidecar.check_full`: F1-F11 and F13, the full mode lists re-derived
-with scipy, the sha256, size and row count of the four CSVs, and C1-C5 on both
-polarizations. The frequencies of one ID in one directory must also agree on
+with scipy, the sha256, size and row count of the four CSVs, C1-C5 on both
+polarizations, and the load-time checks of `bbrsim.hfss.load_dataset`
+(`BBR027` included), so a dataset that passes cannot stop a run at its first
+photon. The frequencies of one ID in one directory must also agree on
 the frequency-independent blocks (`bbrsim.sidecar.invariant_diff` names the
 blocks that differ). It prints one `PASS` or `FAIL` line per dataset, after the
 agreement check, and a `FAIL` line for a directory argument that cannot be

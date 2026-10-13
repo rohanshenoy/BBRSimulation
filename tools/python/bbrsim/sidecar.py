@@ -803,4 +803,7 @@ def check_full(base, dataset_id, stem, dir_freq_ghz):
                 raise ValueError(f"BBR024: {path_for(base, stem)}: files[{rel!r}].{k} is {got.get(k)!r}, "
                                  f"the CSV gives {entry[k]!r}")
     check_csvs(base, stem, sc)
+    # the load-time checks of the BBRHFSSData constructor, BBR027 included (CDX-008): a dataset that
+    # passes here but refuses to load would stop a Geant4 run at the first photon of its frequency
+    hfss.load_dataset(stem, base)
     return sc

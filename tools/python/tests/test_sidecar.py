@@ -465,6 +465,19 @@ def test_c3_keys_differing_in_compensating_ways(tmp_path):
         sidecar.check_full(base, "c", stem, 500.0)
 
 
+def test_check_full_refuses_a_transmitting_key_without_support(tmp_path):
+    """CDX-008 in the preflight: Ephi=0 transmits (T0 = 0.25 at (0, 135)) but its far field is zero
+    everywhere; BBRHFSSData refuses it at load (BBR027), so check_full must too, before a run."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 0, "far_field.csv", lambda t: t.replace(",0.1,0.0,0.2,0.05\n", ",0.0,0.0,0.0,0.0\n"))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR027: c_500GHz key \(0.0, 135.0\): T0 = 0.25 > 0, but its far field "
+                                         r"has no outward intensity"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
 def test_c3_pole_rows_are_valid(tmp_path):
     """Theta = 0 at two Phi is one direction but two grid nodes: valid (CDX-022 compares coordinate
     pairs, not directions)."""
