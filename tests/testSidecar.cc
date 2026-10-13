@@ -180,13 +180,11 @@ int main(int argc, char** argv) {
       CHECK(a.InvariantDiff(pose).empty() && a.SameInvariant(pose));
       const auto sym = Parse(Edit(Valid(), "\"rotational\": false", "\"rotational\": true"));
       CHECK(a.InvariantDiff(sym) == V{"symmetry"} && !a.SameInvariant(sym));
-      const auto wall = Parse(Edit(Valid(), "\"walls\": \"PEC\"", "\"walls\": \"Cu\""));
-      CHECK(a.InvariantDiff(wall) == V{"boundaries"});
-      const auto both = Parse(Edit(Edit(Valid(), "\"walls\": \"PEC\"", "\"walls\": \"Cu\""),
-                                   "\"rotational\": false", "\"rotational\": true"));
-      CHECK(both.InvariantDiff(a) == (V{"symmetry", "boundaries"}));
+      // boundaries can no longer differ between sidecars that parse: F10 accepts one model (CDX-003).
       const auto geo = Parse(Edit(Valid(), "\"g\": 0.052", "\"g\": 0.06"));
       CHECK(a.InvariantDiff(geo) == V{"geometry"});
+      const auto both = Parse(Edit(Edit(Valid(), "\"g\": 0.052", "\"g\": 0.06"), "\"rotational\": false", "\"rotational\": true"));
+      CHECK(both.InvariantDiff(a) == (V{"symmetry", "geometry"}));
       const auto near = Parse(Edit(Valid(), "\"g\": 0.052", "\"g\": 0.0520000000001"));   // 2e-12 relative
       CHECK(a.InvariantDiff(near).empty());
       // Another exit section moves the modes it determines too (TE10 follows the long side).
@@ -197,6 +195,18 @@ int main(int argc, char** argv) {
       // A sidecar not produced by Parse has no invariant: no blocks named, and SameInvariant stays false.
       const BBRDatasetSidecar blank;
       CHECK(blank.InvariantDiff(a).empty() && a.InvariantDiff(blank).empty() && !a.SameInvariant(blank));
+    }},
+    {"f10_boundaries", [] {
+      // CDX-003: radiation end faces and PEC walls, the model the transport implements.
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), "\"walls\": \"PEC\"", "\"walls\": \"finite-conductivity\"")); },
+                        "BBRDatasetSidecar", "boundaries.walls is \"finite-conductivity\"; BBRsim implements only \"PEC\"");
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), "\"entrance\": \"radiation\"", "\"entrance\": \"port\"")); },
+                        "BBRDatasetSidecar", "boundaries.entrance is \"port\"; BBRsim implements only \"radiation\"");
+      ExpectG4Exception("BBR025", [&] { Parse(Edit(Valid(), "\"exit\": \"radiation\"", "\"exit\": \"PML\"")); },
+                        "BBRDatasetSidecar", "boundaries.exit is \"PML\"");
+      ExpectG4Exception("BBR024", [&] { Parse(Edit(Valid(), ", \"walls\": \"PEC\"", "")); },
+                        "BBRDatasetSidecar", "missing field boundaries.walls");
+      Parse(Valid());   // the supported declaration passes
     }},
     {"field_types", [] {
       // Mistyped fields are BBR024; a column list that is an array but not the

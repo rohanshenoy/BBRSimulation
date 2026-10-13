@@ -229,7 +229,7 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 - F7 `exit_field`: `"exit_cs"`, `points_in_si` true, `"x_e=0"`, `columns` in the order `BBRHFSSData` reads, and `field_in_ref_cs` agreeing with `field_components_frame` (false with `"hfss_global"`, true with `"exit_cs"`; the frame is otherwise recorded only, because BBRsim uses the components only through \|E\|² and Σ E₀·E₁*) (`BBR025`); `outside_points` is `none`, `omitted` or `zero` (`BBR024`).
 - F8 `exit_field.cross_section`: `rectangle` or `disc` with positive dimensions (`BBR024` for an unknown shape or a dimension ≤ 0); `polygon` is reserved and not supported yet (`BBR025`).
 - F9 `transmittance`: the supported `definition` string and `incoming_includes_cos_theta` false (`BBR025`).
-- F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`).
+- F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`). `boundaries`: `entrance` and `exit` `"radiation"`, `walls` `"PEC"`, the model the transport implements: a non-transmission is specular reflection with no wall loss, and the mode formulas assume a closed PEC guide (`BBR025`; a missing or mistyped field is `BBR024`).
 - F11 `geometry.extent_mm`: p, l, g > 0 (`BBR024`); compared with the placed solid's bounding limits along local x, y, z, printed as one `[BBR]` info line and stored as `hfss_extent_mm` and `geant4_extent_mm` in `data.hfss_datasets` of each `<stem>.metadata.json` (info only, not a warning).
 - F12 `exit_field.cross_section` against the placed solid, at the first run initialization, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset, is strictly inside the solid. With `rim_points` `"included"`, the recorded Geant4 margin is what makes this pass (`BBR025`).
 - F13 `modes.mode`, `.cutoff_ghz`, `.polarization_filter_limit_ghz`: re-derived from `cross_section` to 1e-6 relative with closed forms (rectangle f_mn = (c/2)·√((m/a)² + (n/b)²), c = 299792458 m/s; disc TE11 with x′₁₁ = 1.8411837813). The full lists are re-derived only by the Python validator, with scipy (`BBR025`).
@@ -256,9 +256,9 @@ At run time, `BBR026` (a `JustWarning`, once per dataset and direction) fires
 when a photon's frequency and the grid frequency serving it lie on opposite
 sides of `modes.cutoff_ghz`; the runner tolerates it only where it is expected.
 
-Recorded but not checked against the conventions BBRsim implements (of these,
-only `boundaries`, `geometry.shape` and `symmetry.rotational` enter the
-agreement across frequencies): `provenance`, `boundaries`, `geometry.shape`,
+Recorded, and except `boundaries` (F10) not checked against the conventions
+BBRsim implements (of these, only `boundaries`, `geometry.shape` and
+`symmetry.rotational` enter the agreement across frequencies): `provenance`, `boundaries`, `geometry.shape`,
 `geometry.bounding_box_mm`, `symmetry.rotational`, `pose_rule` and the origins
 (`frames.exit_cs.origin_mm_global`, `excitation.origin_mm_global`) are copied
 verbatim into `<stem>.metadata.json`, a missing one as `null`. They go in

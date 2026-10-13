@@ -339,8 +339,8 @@ sidecars](validation/README.md#dataset-sidecars).
 
 **`BBR025`**: the dataset declares a convention or a geometry BBRsim does not
 implement. The message names the field (a frame, incidence, far-field or
-polarization definition, or the modes block) and the one convention the
-sampler implements; or, at `/run/initialize`, it names the crack volume whose
+polarization definition, the boundary model, or the modes block) and the one
+convention the sampler implements; or, at `/run/initialize`, it names the crack volume whose
 solid the declared exit cross-section does not fit strictly inside (make the
 Geant4 section larger than the HFSS one by a recorded margin, as the 52/102 µm
 test-world gaps are, and check that local x is the propagation axis: a bare

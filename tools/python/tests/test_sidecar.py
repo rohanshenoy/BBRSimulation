@@ -88,8 +88,11 @@ def test_build_then_full_check(tmp_path):
     (lambda s: s["symmetry"].update(mirror_l=False), "BBR025"),
     (lambda s: s["modes"].update(cutoff_ghz=15.5), "BBR025"),
     (lambda s: s["far_field"].update(columns=s["far_field"]["columns"][::-1]), "BBR025"),
+    (lambda s: s["boundaries"].update(walls="finite-conductivity"), "BBR025"),
+    (lambda s: s["boundaries"].update(entrance="port"), "BBR025"),
+    (lambda s: s["boundaries"].pop("exit"), "BBR024"),
 ], ids=["schema", "id", "label", "type", "rotated-frame", "exit-z", "incidence", "field-frame",
-        "polygon", "cos-theta", "mirror", "cutoff", "columns"])
+        "polygon", "cos-theta", "mirror", "cutoff", "columns", "walls", "entrance", "exit-missing"])
 def test_check_rejects(tmp_path, edit, code):
     base = str(tmp_path)
     stem = write_tiny(base)
@@ -767,11 +770,11 @@ def test_validator_fails_a_missing_sidecar(tmp_path, repo_root):
 def test_validator_cross_frequency_disagreement_names_the_block(tmp_path, repo_root):
     base = tmp_path / "wg"
     tiny_dataset(str(base))
-    tiny_dataset(str(base), label="600GHz", edit=lambda s: s["boundaries"].update(walls="finite-conductivity"))
+    tiny_dataset(str(base), label="600GHz", edit=lambda s: s["symmetry"].update(rotational=True))
     rc, rows, tail = run_validator(repo_root, base)
     assert rc == 1 and rows == [
         f"  PASS {base}/c_500GHz",
-        f"  FAIL {base}/c_600GHz: disagrees with c_500GHz on the frequency-independent block(s) boundaries"]
+        f"  FAIL {base}/c_600GHz: disagrees with c_500GHz on the frequency-independent block(s) symmetry"]
     assert tail == ["2 dataset(s) checked, 1 failing", "RESULT: FAIL"]
 
 

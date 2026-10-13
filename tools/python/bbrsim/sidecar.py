@@ -555,7 +555,12 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
             raise ValueError(f"BBR025: symmetry.{k} is false; the sampler folds by both mirrors "
                              "and serves both ends from one table")
     _req(sym, "rotational", "symmetry.", "bool")
-    _req(sc, "boundaries", "", "dict")
+    # the boundary model the transport implements: radiation end faces, PEC walls; non-transmission is
+    # specular reflection with no wall loss, and the mode formulas assume a closed PEC guide (CDX-003)
+    bd = _req(sc, "boundaries", "", "dict")
+    _expect(_req(bd, "entrance", "boundaries.", "str"), "radiation", "boundaries.entrance")
+    _expect(_req(bd, "exit", "boundaries.", "str"), "radiation", "boundaries.exit")
+    _expect(_req(bd, "walls", "boundaries.", "str"), "PEC", "boundaries.walls")
 
     ext = _req(_req(sc, "geometry", "", "dict"), "extent_mm", "geometry.", "dict")  # F11
     for k in "plg":

@@ -79,7 +79,8 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         sidecar_c4_exit_rows sidecar_c3_c4_per_key sidecar_c5_outside_section sidecar_c5_zero_outside sidecar_real_data
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 bbrsim_add_test_program(testSidecar LABEL unit
-  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f13_modes invariant_physics_only invariant_diff field_types
+  CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f10_boundaries f13_modes
+        invariant_physics_only invariant_diff field_types
         recorded_fields f12_fits_solid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
