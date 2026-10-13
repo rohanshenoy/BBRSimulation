@@ -713,6 +713,19 @@ def check_csvs(base, stem, sc):
     for what, get in agree:
         if get(d0) != get(d1):
             raise ValueError(f"BBR012: {stem}: Ephi=1 {what} {get(d1)} differ from Ephi=0's {get(d0)}")
+    # BBRHFSSData pairs each key's Ephi=1 rows with its Ephi=0 rows by order and requires each pair at
+    # the same far-field (Phi, Theta) to 1e-9 deg and exit (X, Y, Z) to 1e-12 m (BBR012). A polarization
+    # with its rows reordered passes every check above (CDX-002).
+    for what, rows, names, tol in (("far-field row", "ff_rows", "(Phi, Theta)", 1e-9),
+                                   ("exit point", "exit_rows", "(X, Y, Z)", 1e-12)):
+        for k, a in d0[rows].items():
+            b = d1[rows][k]
+            bad = np.nonzero(np.any(np.abs(a - b) > tol, axis=1))[0]
+            if len(bad):
+                n = int(bad[0])
+                raise ValueError(f"BBR012: {stem}: key {k}: Ephi=1 {what} {n} lies at {names} = "
+                                 f"{tuple(float(v) for v in b[n])}, the Ephi=0 one at {tuple(float(v) for v in a[n])}; "
+                                 f"BBRHFSSData pairs the two polarizations' rows by order")
 
 
 def _same(got, want, where="modes"):

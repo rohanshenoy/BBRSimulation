@@ -456,6 +456,43 @@ def test_c4_omitted_requires_every_inside_node(tmp_path):
         sidecar.check_csvs(base, stem, sc)
 
 
+def swap_pairs(text):
+    """text with its data rows traded in consecutive pairs (each key's two rows swap places)."""
+    head, *rows = text.splitlines(keepends=True)
+    for i in range(0, len(rows) - 1, 2):
+        rows[i], rows[i + 1] = rows[i + 1], rows[i]
+    return head + "".join(rows)
+
+
+@pytest.mark.parametrize("name,kw,match", [
+    ("waveguide.csv", dict(exit_yz=((-0.001, 0.0), (0.001, 0.0))),
+     r"exit point 0 lies at \(X, Y, Z\) = \(0.0, 0.001, 0.0\), the Ephi=0 one at \(0.0, -0.001, 0.0\)"),
+    ("far_field.csv", dict(),
+     r"far-field row 0 lies at \(Phi, Theta\) = \(0.0, 120.0\), the Ephi=0 one at \(0.0, 60.0\)"),
+], ids=["exit-rows-swapped", "far-field-rows-swapped"])
+def test_check_csvs_pairs_rows_by_order(tmp_path, name, kw, match):
+    """CDX-002: Ephi=1 with each key's two rows swapped keeps every key, grid, count and checksum, but
+    BBRHFSSData pairs the rows by order (BBR012); the preflight must refuse it too."""
+    base = str(tmp_path)
+    stem = write_grid(base, **kw)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, name, swap_pairs)
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=rf"^BBR012: c_500GHz: key \(0.0, 135.0\): Ephi=1 {match}"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
+def test_check_csvs_unequal_row_counts(tmp_path):
+    """CDX-002's unequal-count case: one Ephi=1 key with a row fewer."""
+    base = str(tmp_path)
+    stem = write_grid(base, exit_yz=((-0.001, 0.0), (0.001, 0.0)))
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, "waveguide.csv", lambda t: t.replace(t.splitlines(keepends=True)[1], "", 1))
+    write_with_files(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR012: c_500GHz_Ephi=1: exit-point rows per incidence key differ"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
 # --- fix round 2: the physics-only invariant, the disc modes, load(), malformed CSVs -------------
 
 def built(tmp_path):
