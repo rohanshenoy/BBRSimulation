@@ -572,6 +572,16 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
     _expect(_req(bd, "exit", "boundaries.", "str"), "radiation", "boundaries.exit")
     _expect(_req(bd, "walls", "boundaries.", "str"), "PEC", "boundaries.walls")
 
+    # the gap must be vacuum (CDX-029); null or an absent key is accepted (the legacy sidecars carry null)
+    prov = sc.get("provenance")
+    if isinstance(prov, dict) and "material" in prov:
+        mat = prov["material"]
+        if isinstance(mat, str):
+            if mat.lower() != "vacuum":
+                raise ValueError(f"BBR025: provenance.material is {mat!r}; the gap must be vacuum")
+        elif mat is not None:
+            raise ValueError(f"BBR024: provenance.material must be a string or null, not {type(mat).__name__}")
+
     ext = _req(_req(sc, "geometry", "", "dict"), "extent_mm", "geometry.", "dict")  # F11
     for k in "plg":
         if not _req(ext, k, "geometry.extent_mm.", "num") > 0:

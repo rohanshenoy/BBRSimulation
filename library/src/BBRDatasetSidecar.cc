@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -322,6 +323,20 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
   r.Expect(r.Str(boundaries, "entrance", "boundaries."), "radiation", "boundaries.entrance");
   r.Expect(r.Str(boundaries, "exit", "boundaries."), "radiation", "boundaries.exit");
   r.Expect(r.Str(boundaries, "walls", "boundaries."), "PEC", "boundaries.walls");
+
+  // The gap must be vacuum (CDX-029): provenance.material, the producer's AEDT material name, may be
+  // null or absent (the legacy sidecars carry null) but a string must read "vacuum" in any case.
+  if (j.contains("provenance") && j.at("provenance").is_object() && j.at("provenance").contains("material")) {
+    const json& mat = j.at("provenance").at("material");
+    if (mat.is_string()) {
+      std::string lower = mat.get<std::string>();
+      for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      if (lower != "vacuum")
+        Fail("BBR025", path, "provenance.material is \"" + mat.get<std::string>() + "\"; the gap must be vacuum");
+    } else if (!mat.is_null()) {
+      Fail("BBR024", path, "provenance.material must be a string or null");
+    }
+  }
 
   // F11: geometry. p is compared with the placed solid's length in F12 (CheckFitsSolid); for a rectangle
   // l and g must equal the full widths of the declared exit section (CDX-028). A disc's l and g are not

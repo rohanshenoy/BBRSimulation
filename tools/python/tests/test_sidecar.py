@@ -148,6 +148,39 @@ def test_extent_section(tmp_path, key, factor, ok):
         sidecar.check(bad, "c", stem, 500.0)
 
 
+@pytest.mark.parametrize("value,code", [
+    ("vacuum", None), ("Vacuum", None), ("VACUUM", None), (None, None),
+    ("silicon", "BBR025"), ("", "BBR025"),
+    (3, "BBR024"), (True, "BBR024"), (["vacuum"], "BBR024"),
+])
+def test_material_vacuum(tmp_path, value, code):
+    """CDX-029: provenance.material, when a string, is 'vacuum' (case-insensitive); not a string or null is BBR024."""
+    base = str(tmp_path)
+    stem = write_tiny(base)
+    sc = copy.deepcopy(tiny_sidecar(base, stem))
+    sc["provenance"]["material"] = value
+    if code is None:
+        sidecar.check(sc, "c", stem, 500.0)
+        return
+    with pytest.raises(ValueError, match=rf"^{code}: provenance\.material") as e:
+        sidecar.check(sc, "c", stem, 500.0)
+    if isinstance(value, str):
+        assert repr(value) in str(e.value)
+
+
+def test_material_absent_or_null_schema1(tmp_path):
+    """The legacy sidecars carry material: null; null, an absent key and an absent provenance load under 1.x."""
+    base = str(tmp_path)
+    stem = write_tiny(base)
+    sc = copy.deepcopy(tiny_sidecar(base, stem))
+    sc["provenance"].pop("material", None)
+    sidecar.check(sc, "c", stem, 500.0)
+    sc["provenance"]["material"] = None
+    sidecar.check(sc, "c", stem, 500.0)
+    del sc["provenance"]
+    sidecar.check(sc, "c", stem, 500.0)
+
+
 def test_extent_section_disc_not_compared(tmp_path):
     """A disc's extent_mm is the HFSS bounding box; it is not compared with 2R here."""
     base = str(tmp_path)

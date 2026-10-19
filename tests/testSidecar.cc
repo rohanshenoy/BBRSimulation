@@ -346,6 +346,33 @@ int main(int argc, char** argv) {
       d["geometry"]["extent_mm"]["l"] = 0.1234;
       Parse(d.dump(2));
     }},
+    {"material_vacuum", [] {
+      // CDX-029: provenance.material, when a string, must be "vacuum" (case-insensitive).
+      auto with = [](const json& v) {
+        json j = json::parse(Valid());
+        j["provenance"]["material"] = v;
+        return j.dump(2);
+      };
+      Parse(with("vacuum"));
+      Parse(with("Vacuum"));
+      Parse(with("VACUUM"));
+      ExpectG4Exception("BBR025", [&] { Parse(with("silicon")); }, "BBRDatasetSidecar", "provenance.material");
+      ExpectG4Exception("BBR025", [&] { Parse(with("silicon")); }, "BBRDatasetSidecar", "silicon");
+      ExpectG4Exception("BBR025", [&] { Parse(with("")); }, "BBRDatasetSidecar", "provenance.material");
+      ExpectG4Exception("BBR024", [&] { Parse(with(3)); }, "BBRDatasetSidecar", "provenance.material");
+      ExpectG4Exception("BBR024", [&] { Parse(with(true)); }, "BBRDatasetSidecar", "provenance.material");
+      ExpectG4Exception("BBR024", [&] { Parse(with(json::array({"vacuum"}))); }, "BBRDatasetSidecar", "provenance.material");
+    }},
+    {"material_null_schema1", [] {
+      // The legacy 500 GHz sidecars carry "material": null; null and an absent key stay accepted under 1.x.
+      json j = json::parse(Valid());
+      j["provenance"]["material"] = nullptr;
+      Parse(j.dump(2));
+      j["provenance"].erase("material");
+      Parse(j.dump(2));
+      j.erase("provenance");                            // no provenance object at all
+      Parse(j.dump(2));
+    }},
     {"f12_equality", [] {
       // OR-020: the solid must equal the declared section, so a larger one fails as well as a smaller one.
       const auto box = Parse(Valid());                  // section 4.5 mm x 25 um
