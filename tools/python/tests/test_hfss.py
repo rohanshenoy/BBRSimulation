@@ -502,3 +502,195 @@ def test_reflected_direction():
 def test_binned_expectation_conserves_weight():
     out = hfss.binned_expectation(np.array([-5.0, 0.5, 1.5, 99.0]), np.ones(4), np.array([0.0, 1.0, 2.0]))
     assert out.tolist() == [2.0, 2.0]
+
+
+# --- schema 2.x (Task 6): the mirror of BBRHFSSData's 2.x branch ---------------------------------------
+# Fixture: schema2_fixture.write_nine_key_grid2, the Python twin of the C++ NineKeyGrid2.
+import sys   # noqa: E402
+
+sys.path.insert(0, os.path.dirname(__file__))
+import schema2_fixture as fx   # noqa: E402
+
+from bbrsim import sidecar   # noqa: E402
+
+NODE_W = (0.5, 1.0, 0.5)   # the trapezoid factor of a 3-node axis, by grid index
+
+
+def s2_load(tmp_path, tflux=None, edit=None):
+    """Write the nine-key dataset and its 2.0 sidecar under tmp_path; return its AngleDataset map."""
+    base = str(tmp_path)
+    stem = fx.write_nine_key_grid2(base)
+    if edit:
+        edit(base, stem)
+    sidecar.write(base, stem, fx.sidecar2(tflux=tflux))
+    return hfss.load_dataset(stem, base)
+
+
+def s2_fields(e, i):
+    """(Ex, Ey, Ez) complex of exit point i (row-major over y then z), polarization e, as the fixture writes
+    them: six values (i+1+f) * 1e-3 (Ephi=0) or (i+6-f) * 1e-3 (Ephi=1) in the 2.0 order Re/Im pairs."""
+    v = [(i + 1 + f if e == 0 else i + 6 - f) * 1e-3 for f in range(6)]
+    return np.array([v[0] + 1j * v[1], v[2] + 1j * v[3], v[4] + 1j * v[5]])
+
+
+def s2_w(i):
+    return NODE_W[i // 3] * NODE_W[i % 3]
+
+
+def test_s2_positions(tmp_path):
+    ds = s2_load(tmp_path)
+    d = ds[(45.0, 135.0)]
+    assert d.schema == 2 and not d.dark0 and not d.dark1
+    assert np.array_equal(d.w, [s2_w(i) for i in range(9)])
+    # E_theta only: weight_i = w_i (v9^2 + v10^2 + v11^2 + v12^2), the four values after X, Y, Z that the 2.0
+    # map names Ex_real, Ex_imag, Ey_real, Ey_imag (the field-list positions 9 to 12).
+    want = np.array([s2_w(i) * sum(((i + 1 + f) * 1e-3) ** 2 for f in range(4)) for i in range(9)])
+    got = hfss.exit_position_weights(d, 1.0, 0.0)
+    assert got == pytest.approx(want / want.sum(), rel=1e-12, abs=0)
+    # the 1.0 map on the same columns (Ex_re, Ey_re, Ez_re, Ex_im, Ey_im, Ez_im at 9..14, uniform weights, all
+    # three components) gives a different distribution
+    old = np.array([sum(((i + 1 + f) * 1e-3) ** 2 for f in range(6)) for i in range(9)])
+    assert not np.allclose(got, old / old.sum(), rtol=1e-3, atol=0)
+    # a mixed polarization: w_i |cT Et0 + cP Et1|^2 over (Ex, Ey)
+    mix = np.array([s2_w(i) * np.sum(np.abs(R2 * s2_fields(0, i)[:2] + R2 * s2_fields(1, i)[:2]) ** 2) for i in range(9)])
+    assert hfss.exit_position_weights(d, R2, R2) == pytest.approx(mix / mix.sum(), rel=1e-12, abs=0)
+    # Ez is not read: the exit sampler never sees the third component
+    assert np.allclose(d.E0[:, 2], [s2_fields(0, i)[2] for i in range(9)])
+
+
+def test_s2_transmittance_and_cap(tmp_path):
+    ds = s2_load(tmp_path)
+    ck90 = sidecar.cell_90([90.0, 135.0, 180.0])
+    d = ds[(0.0, 90.0)]
+    # T_p = OutgoingPower / (IngoingPower * InterceptFactor) from the key's first row, kept above 1
+    assert d.T0 == pytest.approx(0.6 / ck90, rel=1e-12) and d.T0 > 1
+    assert d.T1 == pytest.approx(0.3 / ck90, rel=1e-12) and d.T1 > 1
+    assert hfss.transmittance(d, 1.0, 0.0) == 1.0          # the per-photon cap is the clamp
+    assert hfss.transmittance(d, 0.0, 1.0) == 1.0
+    d135 = ds[(0.0, 135.0)]
+    assert d135.T0 == pytest.approx(0.6 / np.cos(np.pi / 4), rel=1e-12)
+    assert hfss.transmittance(d135, 1.0, 0.0) == pytest.approx(min(1.0, d135.T0), rel=1e-12)
+    d180 = ds[(45.0, 180.0)]
+    assert (d180.T0, d180.T1) == pytest.approx((0.6, 0.3), rel=1e-12)
+
+
+def test_s2_no_rescale(tmp_path):
+    ds = s2_load(tmp_path)
+    for (phi, theta), d in ds.items():
+        ck = sidecar.intercept_factor(theta, [90.0, 135.0, 180.0])
+        assert d.T0 == pytest.approx(0.6 / ck, rel=1e-12), (phi, theta)
+        if (phi, theta) != (0.0, 180.0):
+            assert d.T1 == pytest.approx(0.3 / ck, rel=1e-12), (phi, theta)
+        # no 1.x rescale: lam_max of a 1.x load would be <= 1; here the 90 deg keys keep T0 = 7.2
+    d = ds[(90.0, 90.0)]
+    assert lam_max(d.T0, d.T1, d.rho) > 1 + 1e-6
+
+
+def test_s2_dark_masking(tmp_path):
+    ds = s2_load(tmp_path)
+    d = ds[(0.0, 180.0)]
+    assert d.dark1 and not d.dark0 and d.T1 == 0.0 and d.rho == 0j
+    assert not any((e.dark0 or e.dark1) for k, e in ds.items() if k != (0.0, 180.0))
+    assert hfss.transmittance(d, 0.0, 1.0) == 0.0
+    assert hfss.transmittance(d, R2, R2) == pytest.approx(0.5 * d.T0, rel=1e-12)   # no cross term
+    # the dark basis enters neither sampler: (R2, R2) draws exactly as the bright basis alone
+    assert hfss.direction_weights(d, R2, R2) == pytest.approx(hfss.direction_weights(d, 1.0, 0.0), rel=1e-12, abs=0)
+    assert hfss.exit_position_weights(d, R2, R2) == pytest.approx(hfss.exit_position_weights(d, 1.0, 0.0), rel=1e-12, abs=0)
+    # a tiny bright share still samples the bright basis only, with no BBR027
+    assert hfss.direction_weights(d, 1e-9, 1.0) is not None
+    assert hfss.exit_position_weights(d, 1e-9, 1.0) == pytest.approx(hfss.exit_position_weights(d, 1.0, 0.0), rel=1e-12, abs=0)
+    # the dark basis alone has nothing to sample (the C++ never draws it: T = 0)
+    with pytest.raises(ValueError, match="BBR027"):
+        hfss.direction_weights(d, 0.0, 1.0)
+    with pytest.raises(ValueError, match="BBR027"):
+        hfss.exit_position_weights(d, 0.0, 1.0)
+
+
+def edit_powers_at(key, out0, out1):
+    """A CSV edit setting OutgoingPower of every row of one key, per polarization."""
+    def edit(base, stem):
+        for e, val in ((0, out0), (1, out1)):
+            path = os.path.join(base, f"{stem}_Ephi={e}", "waveguide.csv")
+            lines = open(path).read().splitlines()
+            for i, line in enumerate(lines[1:], start=1):
+                v = line.split(",")
+                if float(v[2]) == key[0] and float(v[3]) == key[1]:
+                    v[4] = repr(val)
+                    lines[i] = ",".join(v)
+            open(path, "w").write("\n".join(lines) + "\n")
+    return edit
+
+
+def test_s2_rho_weighted(tmp_path):
+    # the lower-power variant at (45, 135): the cap is inactive, so rho is visible in the mixed T
+    tflux = [[0.6, 0.0 if (ph, t) == (0, 180) else 0.3, 0, 1 if (ph, t) == (0, 180) else 0]
+             for ph in (0, 45, 90) for t in (90, 135, 180)]
+    tflux[4] = [0.3, 0.15, 0, 0]
+    ds = s2_load(tmp_path, tflux=tflux, edit=edit_powers_at((45.0, 135.0), 0.3e-9, 0.15e-9))
+    d = ds[(45.0, 135.0)]
+    c = np.cos(np.pi / 4)
+    T0, T1 = 0.3 / c, 0.15 / c
+    assert (d.T0, d.T1) == pytest.approx((T0, T1), rel=1e-12)
+    # rho, independently, from the fixture rows: sum_i w_i E_t0,i . conj(E_t1,i) over (Ex, Ey)
+    num, p0, p1 = 0j, 0.0, 0.0
+    for i in range(9):
+        a, b = s2_fields(0, i)[:2], s2_fields(1, i)[:2]
+        num += s2_w(i) * np.sum(a * np.conj(b))
+        p0 += s2_w(i) * np.sum(np.abs(a) ** 2)
+        p1 += s2_w(i) * np.sum(np.abs(b) ** 2)
+    rho_w = (num / np.sqrt(p0 * p1)).real
+    assert d.rho.real == pytest.approx(rho_w, rel=1e-12, abs=0)
+    # the unweighted overlap over (Ex, Ey, Ez), the 1.x rule, is a different number
+    n3 = sum(np.sum(s2_fields(0, i) * np.conj(s2_fields(1, i))) for i in range(9))
+    q0 = sum(np.sum(np.abs(s2_fields(0, i)) ** 2) for i in range(9))
+    q1 = sum(np.sum(np.abs(s2_fields(1, i)) ** 2) for i in range(9))
+    rho_u = (n3 / np.sqrt(q0 * q1)).real
+    assert abs(rho_w - rho_u) > 1e-4
+    mixed = 0.5 * T0 + 0.5 * T1 + np.sqrt(T0 * T1) * rho_w
+    assert 0.0 < mixed < 1.0                                    # the cap is inactive
+    got = hfss.transmittance(d, R2, R2)
+    assert got == pytest.approx(mixed, abs=1e-12)
+    assert abs(got - (0.5 * T0 + 0.5 * T1 + np.sqrt(T0 * T1) * rho_u)) > 1e-5
+    assert got == pytest.approx(0.6050564495, abs=1e-9)         # the number the C++ test sees
+
+
+def test_s2_mixture_clamped(tmp_path):
+    ds = s2_load(tmp_path)
+    d = ds[(0.0, 90.0)]
+    psi = (np.arange(360) + 0.5) / 360 * 2 * np.pi
+    raw = np.cos(psi) ** 2 * d.T0 + np.sin(psi) ** 2 * d.T1 + 2 * np.cos(psi) * np.sin(psi) * np.sqrt(d.T0 * d.T1) * d.rho.real
+    clamped = np.clip(raw, 0.0, 1.0)
+    mean, w = hfss.random_polarization_mixture(d)
+    assert mean == pytest.approx(clamped.mean(), abs=1e-12)
+    assert mean < (d.T0 + d.T1) / 2 and mean <= 1.0
+    assert w.sum() == pytest.approx(1.0)
+
+
+def test_schema2_header_without_sidecar_refused(tmp_path):
+    base = str(tmp_path)
+    stem = fx.write_nine_key_grid2(base)       # 16-column waveguide.csv, no sidecar
+    with pytest.raises(ValueError, match="^BBR024"):
+        hfss.load_dataset(stem, base)
+
+
+def test_schema2_sidecar_with_1x_header_refused(tmp_path):
+    base = str(tmp_path / "s1")
+    write_dataset(tmp_path / "s1", "c_500GHz")  # a 1.0-header dataset
+    sc = fx.sidecar2(stem="c_500GHz")
+    sidecar.write(base, "c_500GHz", sc)
+    with pytest.raises(ValueError, match="BBR013"):
+        hfss.load_dataset("c_500GHz", base)
+
+
+def test_s1_mirror_unchanged():
+    base = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "waveguides")
+    pinned = {"InfParallelPlate_crack1Rohan_500GHz": (0.5143466820199462, 0.4858421150130238,
+                                                        0.9996221702766228 + 0.001069073061348357j),
+              "InfParallelPlate_crack2_500GHz": (0.5015062206178313, 0.4985601485973919,
+                                                   0.9998672692267748 - 6.399260932677592e-05j)}
+    for stem, (T0, T1, rho) in pinned.items():
+        ds = hfss.load_dataset(stem, base)
+        d = ds[(45.0, 180.0)]
+        assert d.T0 == pytest.approx(T0, abs=1e-15, rel=0) and d.T1 == pytest.approx(T1, abs=1e-15, rel=0)
+        assert abs(d.rho - rho) <= 1e-15
+        assert d.schema == 1 and not d.dark0 and not d.dark1 and np.all(d.w == 1.0)
