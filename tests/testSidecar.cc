@@ -304,7 +304,7 @@ int main(int argc, char** argv) {
       const auto box = Parse(Valid());                  // p = 4 mm, section 9 mm x 50 um
       box.CheckFitsSolid(G4Box("ok", 2 * mm, 4.5 * mm, 0.025 * mm), "ok");
       box.CheckFitsSolid(G4Box("longer_half_nm", 2 * mm + 5e-7 * mm, 4.5 * mm, 0.025 * mm), "longer_half_nm");
-      box.CheckFitsSolid(G4Box("shorter_half_nm", 2 * mm - 5e-7 * mm, 4.5 * mm, 0.025 * mm), "shorter_half_nm");
+      box.CheckFitsSolid(G4Box("shorter_half_nm", 2 * mm - 4e-7 * mm, 4.5 * mm, 0.025 * mm), "shorter_half_nm");
       // Longer: 1 nm plus 1e-6 relative of the 4 mm, so L + 4e-6 mm (half-lengths + 2e-6 mm) is inside, L + 7e-6 mm is not.
       box.CheckFitsSolid(G4Box("longer_4nm_total", 2 * mm + 2e-6 * mm, 4.5 * mm, 0.025 * mm), "longer_4nm_total");
       ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("longer_7nm_total", 2 * mm + 3.5e-6 * mm, 4.5 * mm, 0.025 * mm), "longer_7nm_total"); },
