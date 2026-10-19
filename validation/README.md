@@ -255,7 +255,8 @@ exit-grid ranges 1e-9 relative to the largest declared |value|.
 
 After C5, with a sidecar, `BBRHFSSData` clamps every exit point closer than 1 nm to
 the declared section's boundary, or past it (within C5's tolerance), to 1 nm inside
-it (OR-020; a clamp, not a shift: points already further inside do not move). Each
+it (OR-020; a clamp, not a shift: points already further inside do not move), per axis
+for a rectangle (a corner moves on both axes), along the radius for a disc. Each
 point's weight and the pairing of the two Ephi rows are unchanged, and the count is
 logged once per loaded frequency:
 `[BBR] HFSS <id>_<freq>GHz: N exit point(s) clamped 1 nm inside the declared

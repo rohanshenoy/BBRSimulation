@@ -590,7 +590,7 @@ int main(int argc, char** argv) {
       // OR-020 (C2, C3): an exit point on a wall of the declared section, or within C5's tolerance
       // outside it, is moved to 1 nm inside, per axis; every other point is exactly unchanged.
       const double yw = 4.5e-3, zw = 2.5e-5, d = 1e-9;
-      CHECK(BBRCrossSection::kClampInset_m == d);           // the 1 nm of the log line and of the spec
+      CHECK(BBRCrossSection::kClampInset_m == d);           // the 1 nm of the log line (OR-020)
       std::vector<YZ> pts;                                   // Y outer, Z inner: row = 3 iy + iz
       for (const double y : {-4.5e-3, -2.25e-3, 0., 2.25e-3, 4.5e-3})
         for (const double z : {-2.5e-5, 0., 2.5e-5}) pts.push_back({y, z});
@@ -654,6 +654,32 @@ int main(int argc, char** argv) {
       const auto end2 = DrawRow(h2, eng, 13, M);            // (+4.5 mm, 0)
       CHECK_NEAR(end2.y(), (yw2 - d) * CLHEP::m, 1e-11);
       CHECK(end2.z() == 0.);
+
+      // The band (half - 1 nm, half): a point 0.5 nm inside a wall moves out to half - 1 nm, a point exactly
+      // 1 nm inside stays, and so do the columns between. Complete lattice, 5 Y columns by 3 Z columns, from
+      // 1 nm inside the low wall to 0.5 nm inside the high one, on both axes; the sidecar declares yw and zw.
+      const double yLo = -(yw - d), yHi = yw - 0.5e-9, zLo = -(zw - d), zHi = zw - 0.5e-9;
+      const auto node = [](double lo, double hi, int i, int n) { return i == n - 1 ? hi : lo + i * (hi - lo) / (n - 1); };
+      std::vector<YZ> band;
+      for (int iy = 0; iy < 5; ++iy)
+        for (int iz = 0; iz < 3; ++iz) band.push_back({node(yLo, yHi, iy, 5), node(zLo, zHi, iz, 3)});
+      const std::size_t Mb = band.size();
+      const Dataset dsb = UniformLattice(band);
+      auto pb = hfssfix::SidecarFrom("c_500GHz", dsb);
+      pb.yHalf = yw; pb.zHalf = zw;
+      Capture cap3;
+      G4iosSetDestination(&cap3);
+      TempDir dir3; auto h3 = LoadChecked(dir3, dsb, &pb);
+      G4iosSetDestination(nullptr);
+      CHECK(cap3.out.find(ClampLine("c_500GHz", 7)) != std::string::npos);   // Y = high column (3) + Z = high column (5) - the corner
+      for (std::size_t j = 0; j < Mb; ++j) {
+        const auto r = DrawRow(h3, eng, j, Mb);
+        const int iy = int(j) / 3, iz = int(j) % 3;
+        if (iy == 4) CHECK_NEAR(r.y(), (yw - d) * CLHEP::m, 1e-11);   // 0.5 nm inside: out to 1 nm inside
+        else         CHECK(r.y() == band[j].first * CLHEP::m);        // iy = 0 is exactly 1 nm inside: unchanged
+        if (iz == 2) CHECK_NEAR(r.z(), (zw - d) * CLHEP::m, 1e-11);
+        else         CHECK(r.z() == band[j].second * CLHEP::m);
+      }
       CHECK(eng.Remaining() == 0);
     }},
     {"exit_clamp_disc", [] {
@@ -699,6 +725,65 @@ int main(int argc, char** argv) {
       const auto mid = DrawRow(h2, eng, 2, M);              // (0, 0)
       CHECK(mid.y() == 0.);
       CHECK(mid.z() == 0.);
+      CHECK(eng.Remaining() == 0);
+    }},
+    {"exit_clamp_disc_off_axis", [] {
+      // The clamp of a disc runs along the radius: a rim point off the axes, (30, 40) um, moves to
+      // r = R - 1 nm on its own ray, where a per-axis clamp would leave it (each coordinate is far from R - 1 nm).
+      // Lattice: 10 um steps from -50 to 50 um in Y and Z, the 81 nodes inside R = 50 um, 12 of them on the rim.
+      const double R = 5e-5, d = 1e-9, step = 1e-5;
+      std::vector<YZ> pts;
+      std::vector<std::pair<int, int>> ij;
+      std::size_t onRim = 0;
+      for (int iy = -5; iy <= 5; ++iy)
+        for (int iz = -5; iz <= 5; ++iz)
+          if (iy * iy + iz * iz <= 25) {
+            pts.push_back({iy * step, iz * step});
+            ij.push_back({iy, iz});
+            if (iy * iy + iz * iz == 25) ++onRim;
+          }
+      const std::size_t M = pts.size();
+      CHECK(M == 81);
+      CHECK(onRim == 12);
+      const auto row = [&](int iy, int iz) {
+        for (std::size_t j = 0; j < M; ++j) if (ij[j] == std::make_pair(iy, iz)) return j;
+        throw std::runtime_error("no such lattice node");
+      };
+      const Dataset ds = UniformLattice(pts);
+      ScriptedEngine eng;
+      G4Random::setTheEngine(&eng);
+
+      auto p = hfssfix::SidecarFrom("c_500GHz", ds);        // 11 x 11 lattice, 81 retained points
+      p.disc = true; p.radius = R; p.outsidePoints = "omitted";
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir dir; auto h = LoadChecked(dir, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(Count(cap.out, "clamped") == 1);
+      CHECK(cap.out.find(ClampLine("c_500GHz", 12)) != std::string::npos);
+
+      const double tol = 1e-15 * CLHEP::m;
+      std::vector<G4ThreeVector> got;
+      for (std::size_t j = 0; j < M; ++j) got.push_back(DrawRow(h, eng, j, M));
+      for (std::size_t j = 0; j < M; ++j) {
+        const double y = pts[j].first, z = pts[j].second;
+        if (ij[j].first * ij[j].first + ij[j].second * ij[j].second == 25) {   // on the rim: along its radius to R - 1 nm
+          CHECK_NEAR(got[j].y(), y * (R - d) / R * CLHEP::m, tol);
+          CHECK_NEAR(got[j].z(), z * (R - d) / R * CLHEP::m, tol);
+          CHECK_NEAR(std::hypot(got[j].y(), got[j].z()), (R - d) * CLHEP::m, tol);
+        } else {                                                                // inside: exactly unchanged
+          CHECK(got[j].y() == y * CLHEP::m);
+          CHECK(got[j].z() == z * CLHEP::m);
+        }
+      }
+      const auto& off = got[row(3, 4)];                      // (30, 40) um
+      CHECK_NEAR(off.y(), 3e-5 * (R - d) / R * CLHEP::m, tol);
+      CHECK_NEAR(off.z(), 4e-5 * (R - d) / R * CLHEP::m, tol);
+      CHECK_NEAR(std::hypot(off.y(), off.z()), (R - d) * CLHEP::m, tol);
+      CHECK(off.y() < 3e-5 * CLHEP::m);                      // it moved, and not onto an axis value
+      const auto& mid = got[row(1, 2)];                      // (10, 20) um
+      CHECK(mid.y() == pts[row(1, 2)].first * CLHEP::m);
+      CHECK(mid.z() == pts[row(1, 2)].second * CLHEP::m);
       CHECK(eng.Remaining() == 0);
     }},
     {"exit_clamp_needs_sidecar", [] {
