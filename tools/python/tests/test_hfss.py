@@ -506,9 +506,6 @@ def test_binned_expectation_conserves_weight():
 
 # --- schema 2.x (Task 6): the mirror of BBRHFSSData's 2.x branch ---------------------------------------
 # Fixture: schema2_fixture.write_nine_key_grid2, the Python twin of the C++ NineKeyGrid2.
-import sys   # noqa: E402
-
-sys.path.insert(0, os.path.dirname(__file__))
 import schema2_fixture as fx   # noqa: E402
 
 from bbrsim import sidecar   # noqa: E402
