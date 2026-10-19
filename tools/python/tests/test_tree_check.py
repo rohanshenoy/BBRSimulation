@@ -377,13 +377,13 @@ def copy_run(run, dst):
     return dst
 
 
-def rewrite_crossings(path, change):
-    """Rewrite the ROOT file at path with change(crossings arrays) applied in place."""
+def rewrite_crossings(path, change, ntuple="crossings"):
+    """Rewrite the ROOT file at path with change(arrays of ntuple) applied in place."""
     import uproot
     with uproot.open(path) as f:
         trees = {name: {k: np.array(v) for k, v in f[name].arrays(library="np").items()}
                  for name in ("crossings", "abspoints")}                 # writable copies
-    change(trees["crossings"])
+    change(trees[ntuple])
     with uproot.recreate(path) as f:
         for name, arrs in trees.items():
             tree = f.mktree(name, {k: v.dtype for k, v in arrs.items()})
@@ -399,6 +399,8 @@ def test_e2e_passes(checker, e2e, e2e_tables):
     assert {"tree unchanged", "sentinel", "selection", f"coverage {CRACK1}", f"coverage {CRACK2}",
             f"log startup {CRACK1}", f"log grid {CRACK2}", "log hygiene",
             f"log BBR008 {CRACK1} low", f"log BBR026 {CRACK2} below"} <= names
+    passing = {n for s, n, _ in rows if s == "PASS"}
+    assert any(n.endswith(" event_id") for n in passing)
 
 
 def test_e2e_cli(repo_root, e2e):
@@ -419,6 +421,34 @@ def test_e2e_wrong_frequency(checker, e2e, e2e_tables, tmp_path):
     rewrite_crossings(run / "output/tree_r000.root", change)
     ok, rows = rows_of(checker, run, e2e_tables)
     assert not ok and "selection" in failing(rows)
+
+
+def test_e2e_event_id_out_of_range(checker, e2e, e2e_tables, tmp_path):
+    run, man = e2e
+    run = copy_run(run, tmp_path / "run")
+    events = man["runs"][0]["events"]
+
+    def change(cr):
+        cr["event_id"][0] = events          # the first valid id is 0, the last events - 1
+
+    rewrite_crossings(run / "output/tree_r000.root", change)
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and "run 000 event_id" in failing(rows)
+    detail = failing(rows)["run 000 event_id"]
+    assert "tree_r000.root" in detail and "crossings" in detail and str(events) in detail
+    assert not any(n.endswith(" event_id") for n in failing(rows) if n != "run 000 event_id")
+
+
+def test_e2e_event_id_negative_in_abspoints(checker, e2e, e2e_tables, tmp_path):
+    run = copy_run(e2e[0], tmp_path / "run")
+
+    def change(ab):
+        assert len(ab["event_id"]), "run 0 has no abspoints rows to corrupt"
+        ab["event_id"][-1] = -1
+
+    rewrite_crossings(run / "output/tree_r000.root", change, ntuple="abspoints")
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and "abspoints" in failing(rows).get("run 000 event_id", "")
 
 
 def test_e2e_metadata_other_tree(checker, e2e, e2e_tables, tmp_path):

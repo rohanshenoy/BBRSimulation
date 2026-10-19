@@ -14,9 +14,10 @@ data themselves.
 Exact rows: the tree is unchanged since generation; every output names the data
 root and the placed cracks with the tree's frequencies; hfss_freq_GHz is -1 on
 every row that is not a decided crack entry; every decided entry carries the grid
-frequency the selection rule gives for its recorded energy; per gun run, one entry
-per event on the aimed crack, with the configured direction and energy and the
-expected grid frequency; per Planck run, at most one entry per event; reflections
+frequency the selection rule gives for its recorded energy; every event_id of a run's
+crossings and abspoints lies in [0, events) (one output once carried a corrupted
+column); per gun run, one entry per event on the aimed crack, with the configured
+direction and energy and the expected grid frequency; per Planck run, at most one entry per event; reflections
 are specular; every grid frequency is served by a gun run. With --log: BBR008 and
 BBR026 exactly as the output implies, a clean log, and one startup line per placed
 crack and dataset.
@@ -161,18 +162,38 @@ def parse_log(text):
 
 
 def load_runs(run_dir, man):
-    """[(run, crossings or None, metadata or None, problem or None)] in manifest order."""
+    """[(run, crossings or None, abspoints or None, metadata or None, problem or None)] in
+    manifest order."""
     out = []
     for r in man["runs"]:
         path = os.path.join(run_dir, r["file"])
         if not os.path.exists(path):
-            out.append((r, None, None, f"{path} is missing"))
+            out.append((r, None, None, None, f"{path} is missing"))
             continue
         try:
-            out.append((r, io.load_crossings(path), io.load_metadata(path), None))
+            cr, ab = io.load(path)
+            out.append((r, cr, ab, io.load_metadata(path), None))
         except Exception as err:      # an unreadable output is a FAIL row, not a traceback
-            out.append((r, None, None, f"{path}: {type(err).__name__}: {err}"))
+            out.append((r, None, None, None, f"{path}: {type(err).__name__}: {err}"))
     return out
+
+
+def check_event_ids(rep, name, path, events, **ntuples):
+    """Every event_id of the given ntuples (name=frame) lies in [0, events). One bad value is
+    enough to fail the row, which names the file, the ntuple and the first offender."""
+    for label, frame in ntuples.items():
+        if "event_id" not in frame.columns:
+            rep.check(name, False, f"{path}: the {label} ntuple has no event_id column")
+            return
+        ids = frame["event_id"].to_numpy()
+        bad = (ids < 0) | (ids >= events)
+        if bad.any():
+            first = int(np.flatnonzero(bad)[0])
+            rep.check(name, False, f"{path}: {label} row {first} has event_id {int(ids[first])}, outside "
+                                   f"[0, {events}); {int(bad.sum())} of {len(ids)} {label} rows lie outside")
+            return
+    rep.check(name, True, ", ".join(f"{len(f)} {label}" for label, f in ntuples.items())
+              + f" rows, every event_id in [0, {events})")
 
 
 def run_tag(r):
@@ -420,7 +441,7 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
 
     entries, served, placed = [], {d: set() for d in aimed}, None
     n_dec = n_bad_sel = n_bad_sentinel = 0
-    for r, df, meta, problem in load_runs(run_dir, man):
+    for r, df, ab, meta, problem in load_runs(run_dir, man):
         tag = run_tag(r)
         if problem:
             rep.check(f"{tag} output", False, problem)
@@ -439,6 +460,8 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
                   f"data root {data.get('directory')}" + ("" if same_root else f", not {root}")
                   + ("" if labels_ok else "; placed cracks or frequency labels differ from the tree")
                   + ("" if events_ok else f"; {meta.get('events')} events, the manifest asks {r['events']}"))
+        check_event_ids(rep, f"run {r['run']:03d} event_id", os.path.join(run_dir, r["file"]), r["events"],
+                        crossings=df, abspoints=ab)
         if placed is None:
             placed = {v: h["dataset_id"] for v, h in hd.items()}
         if "hfss_freq_GHz" not in df.columns:
