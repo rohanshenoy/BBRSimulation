@@ -131,6 +131,31 @@ def test_check_rejects(tmp_path, edit, code):
     with pytest.raises(ValueError, match=f"^{code}"):
         sidecar.check(bad, "c", stem, 500.0)
 
+@pytest.mark.parametrize("key,factor,ok", [
+    ("l", 1 + 2.5e-3, False), ("l", 1 + 2e-6, False), ("l", 1 + 5e-7, True), ("l", 1 - 5e-7, True),
+    ("g", 1 + 2e-6, False), ("g", 1 - 2e-6, False), ("g", 1 + 5e-7, True),
+], ids=["l-big", "l-2e-6", "l-5e-7", "l-minus-5e-7", "g-2e-6", "g-minus-2e-6", "g-5e-7"])
+def test_extent_section(tmp_path, key, factor, ok):
+    """CDX-028: a rectangle's extent_mm.l and g equal its declared section's full widths to 1e-6 relative."""
+    base = str(tmp_path)
+    stem = write_tiny(base)
+    bad = copy.deepcopy(tiny_sidecar(base, stem))
+    bad["geometry"]["extent_mm"][key] *= factor
+    if ok:
+        sidecar.check(bad, "c", stem, 500.0)
+        return
+    with pytest.raises(ValueError, match=rf"^BBR024: geometry\.extent_mm\.{key} .*exit_field\.cross_section"):
+        sidecar.check(bad, "c", stem, 500.0)
+
+
+def test_extent_section_disc_not_compared(tmp_path):
+    """A disc's extent_mm is the HFSS bounding box; it is not compared with 2R here."""
+    base = str(tmp_path)
+    stem = write_disc(base)
+    sc = copy.deepcopy(disc_sidecar(base, stem, "omitted"))
+    sc["geometry"]["extent_mm"].update(l=0.0123, g=0.0123)
+    sidecar.check(sc, "c", stem, 500.0)
+
 
 def test_check_accepts_unknown_fields(tmp_path):
     base = str(tmp_path)

@@ -32,6 +32,12 @@ std::string Edit(std::string text, const std::string& from, const std::string& t
   if (p == std::string::npos) throw std::runtime_error("Edit: '" + from + "' not in the sidecar text");
   return text.replace(p, from.size(), to);
 }
+// Valid() with geometry.extent_mm.p set to `p_mm` (p is compared with the solid in F12, not at parse).
+std::string WithP(double p_mm, std::string text = Valid()) {
+  json j = json::parse(text);
+  j["geometry"]["extent_mm"]["p"] = p_mm;
+  return j.dump(2);
+}
 G4VSolid* Tube(double radius) {   // a G4Tubs turned so its axis is local x, as the wrapper needs
   G4RotationMatrix ry;
   ry.rotateY(90. * deg);
@@ -181,17 +187,18 @@ int main(int argc, char** argv) {
       const auto sym = Parse(Edit(Valid(), "\"rotational\": false", "\"rotational\": true"));
       CHECK(a.InvariantDiff(sym) == V{"symmetry"} && !a.SameInvariant(sym));
       // boundaries can no longer differ between sidecars that parse: F10 accepts one model (CDX-003).
-      const auto geo = Parse(Edit(Valid(), "\"g\": 0.052", "\"g\": 0.06"));
+      const auto geo = Parse(WithP(5.));
       CHECK(a.InvariantDiff(geo) == V{"geometry"});
-      const auto both = Parse(Edit(Edit(Valid(), "\"g\": 0.052", "\"g\": 0.06"), "\"rotational\": false", "\"rotational\": true"));
+      const auto both = Parse(Edit(WithP(5.), "\"rotational\": false", "\"rotational\": true"));
       CHECK(both.InvariantDiff(a) == (V{"symmetry", "geometry"}));
-      const auto near = Parse(Edit(Valid(), "\"g\": 0.052", "\"g\": 0.0520000000001"));   // 2e-12 relative
+      const auto near = Parse(WithP(4. * (1 + 2e-12)));   // 2e-12 relative
       CHECK(a.InvariantDiff(near).empty());
-      // Another exit section moves the modes it determines too (TE10 follows the long side).
+      // Another exit section moves the modes it determines too (TE10 follows the long side), and the
+      // extent_mm l that the parse ties to it.
       auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
       p.yHalf = 4.0e-3;
       const auto sec = Parse(hfssfix::SidecarJson(p));
-      CHECK(a.InvariantDiff(sec) == (V{"modes", "cross_section"}) && sec.InvariantDiff(a) == a.InvariantDiff(sec));
+      CHECK(a.InvariantDiff(sec) == (V{"geometry", "modes", "cross_section"}) && sec.InvariantDiff(a) == a.InvariantDiff(sec));
       // A sidecar not produced by Parse has no invariant: no blocks named, and SameInvariant stays false.
       const BBRDatasetSidecar blank;
       CHECK(blank.InvariantDiff(a).empty() && a.InvariantDiff(blank).empty() && !a.SameInvariant(blank));
@@ -284,12 +291,60 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(off, "off"); }, "BBRDatasetSidecar",
                         "the local origin of crack volume off is not inside its solid");
       auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
-      p.disc = true; p.radius = 5e-5;
+      p.disc = true; p.radius = 5e-5; p.lengthMm = 0.4;   // Tube() is 0.4 mm long
       const auto disc = Parse(hfssfix::SidecarJson(p));
       disc.CheckFitsSolid(*Tube(0.050 * mm), "tube50");
       // A plain G4Tubs keeps its axis on local z, so local x is radial: rejected at startup.
       ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(G4Tubs("bare", 0., 0.050 * mm, 0.2 * mm, 0., CLHEP::twopi), "bare"); }, "BBRDatasetSidecar",
                         "the declared exit cross-section does not equal crack volume bare");
+    }},
+    {"f12_length", [] {
+      // CDX-028, OR-020: the crack volume's length (DistanceToOut along +x and -x from the origin) must
+      // equal geometry.extent_mm.p within 1 nm, or 1 nm plus 1e-6 relative where longer.
+      const auto box = Parse(Valid());                  // p = 4 mm, section 9 mm x 50 um
+      box.CheckFitsSolid(G4Box("ok", 2 * mm, 4.5 * mm, 0.025 * mm), "ok");
+      box.CheckFitsSolid(G4Box("longer_half_nm", 2 * mm + 5e-7 * mm, 4.5 * mm, 0.025 * mm), "longer_half_nm");
+      box.CheckFitsSolid(G4Box("shorter_half_nm", 2 * mm - 5e-7 * mm, 4.5 * mm, 0.025 * mm), "shorter_half_nm");
+      // Longer: 1 nm plus 1e-6 relative of the 4 mm, so L + 4e-6 mm (half-lengths + 2e-6 mm) is inside, L + 7e-6 mm is not.
+      box.CheckFitsSolid(G4Box("longer_4nm_total", 2 * mm + 2e-6 * mm, 4.5 * mm, 0.025 * mm), "longer_4nm_total");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("longer_7nm_total", 2 * mm + 3.5e-6 * mm, 4.5 * mm, 0.025 * mm), "longer_7nm_total"); },
+                        "BBRDatasetSidecar", "length");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("shorter_2nm", 2 * mm - 2e-6 * mm, 4.5 * mm, 0.025 * mm), "shorter_2nm"); },
+                        "BBRDatasetSidecar", "length");
+      // The message names both lengths and OR-020.
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("slab", 2.5 * mm, 4.5 * mm, 0.025 * mm), "slab"); },
+                        "BBRDatasetSidecar", "crack volume's length 5 mm differs from the HFSS model's 4 mm (OR-020)");
+      // A disc: a 0.4 mm declared length against the 0.4 mm tube passes, a 0.5 mm tube does not.
+      auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
+      p.disc = true; p.radius = 5e-5; p.lengthMm = 0.4;
+      const auto disc = Parse(hfssfix::SidecarJson(p));
+      disc.CheckFitsSolid(*Tube(0.050 * mm), "tube50");
+      G4RotationMatrix ry;
+      ry.rotateY(90. * deg);
+      G4DisplacedSolid longTube("long_tube", new G4Tubs("t", 0., 0.050 * mm, 0.25 * mm, 0., CLHEP::twopi),
+                                G4Transform3D(ry, G4ThreeVector()));
+      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(longTube, "long_tube"); }, "BBRDatasetSidecar", "length");
+    }},
+    {"f11_extent_section", [] {
+      // CDX-028: a rectangle's extent_mm.l and g must equal the full widths of its own declared section.
+      auto with = [](const std::string& key, double v) {
+        json j = json::parse(Valid());
+        j["geometry"]["extent_mm"][key] = v;
+        return j.dump(2);
+      };
+      Parse(Valid());                                   // l = 9 mm, g = 0.05 mm: consistent
+      ExpectG4Exception("BBR024", [&] { Parse(with("l", 9.00001)); }, "BBRDatasetSidecar", "geometry.extent_mm.l");
+      ExpectG4Exception("BBR024", [&] { Parse(with("l", 9.00001)); }, "BBRDatasetSidecar", "exit_field.cross_section");
+      ExpectG4Exception("BBR024", [&] { Parse(with("g", 0.05 * (1 + 2e-6))); }, "BBRDatasetSidecar", "geometry.extent_mm.g");
+      Parse(with("g", 0.05 * (1 + 5e-7)));              // inside 1e-6 relative
+      Parse(with("l", 9. * (1 - 5e-7)));
+      // A disc's extent is not compared with its radius here; the round gap's extent_mm is the HFSS bounding box.
+      json j = json::parse(Valid());
+      auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
+      p.disc = true; p.radius = 5e-5; p.lengthMm = 0.4;
+      json d = json::parse(hfssfix::SidecarJson(p));
+      d["geometry"]["extent_mm"]["l"] = 0.1234;
+      Parse(d.dump(2));
     }},
     {"f12_equality", [] {
       // OR-020: the solid must equal the declared section, so a larger one fails as well as a smaller one.
@@ -307,7 +362,7 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("smaller_2nm", 2 * mm, 4.5 * mm, 0.025 * mm - 2e-6 * mm), "smaller_2nm"); },
                         "BBRDatasetSidecar", "smaller than");
       auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
-      p.disc = true; p.radius = 5e-5;
+      p.disc = true; p.radius = 5e-5; p.lengthMm = 0.4;
       const auto disc = Parse(hfssfix::SidecarJson(p));
       ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(*Tube(0.051 * mm), "tube51"); }, "BBRDatasetSidecar", "larger than");
       ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(*Tube(0.049 * mm), "tube49"); }, "BBRDatasetSidecar", "smaller than");

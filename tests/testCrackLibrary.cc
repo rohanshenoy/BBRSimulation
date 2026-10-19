@@ -147,9 +147,9 @@ int main(int argc, char** argv) {
       p.yHalf = 4.0e-3;   // another exit section at one frequency
       bbrtest::WriteFile(d.path() / "waveguides" / "mix_500GHz.dataset.json", hfssfix::SidecarJson(p));
       BBRConfigManager::SetDataDir(d.path().string());
-      // The exit section, and the modes it determines, are named as the differing blocks.
+      // The exit section, the modes and the extent_mm l it determines are named as the differing blocks.
       ExpectG4Exception("BBR024", [] { Pick("mix", 50); }, "BBRCrackLibrary::Discover",
-                        "disagree on their frequency-independent physics, in block(s) modes, cross_section: ");
+                        "disagree on their frequency-independent physics, in block(s) geometry, modes, cross_section: ");
     }},
     {"validate_placed_cracks", [] {
       // Two placements of one id ("gap:1", "gap:2") with different solids: each is checked.
@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
       auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
       new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
       auto* a = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapA");
-      auto* b = new G4LogicalVolume(new G4Box("gapB", 2.5 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      auto* b = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapB");
       new G4PVPlacement(nullptr, {0, 0, -10 * mm}, a, "gap:1", wlv, false, 0);
       new G4PVPlacement(nullptr, {0, 0, 10 * mm}, b, "gap:2", wlv, false, 0);
       CHECK(BBRCrackLibrary::Instance().PlacedCracksJson() == "[]");   // not validated yet
@@ -198,14 +198,17 @@ int main(int argc, char** argv) {
       CHECK(arr.is_array() && arr.size() == 2);
       if (!arr.is_array() || arr.size() != 2) return;
       const std::vector<std::pair<std::string, std::vector<double>>> want = {
-          {"gap:1", {4., 9., 0.05}}, {"gap:2", {5., 9., 0.05}}};
+          {"gap:1", {4., 9., 0.05}}, {"gap:2", {4., 9., 0.05}}};   // told apart by name and placement
       for (std::size_t i = 0; i < 2; ++i) {
         const auto& c = arr[i];
         CHECK(c.at("volume") == want[i].first);
         CHECK(c.at("dataset_id") == "gap");
         CHECK(c.at("geant4_extent_mm").is_array() && c.at("geant4_extent_mm").size() == 3);
         for (std::size_t k = 0; k < 3; ++k) CHECK_NEAR(c.at("geant4_extent_mm").at(k).get<double>(), want[i].second[k], 1e-9);
-        CHECK(c.at("hfss_extent_mm") == nlohmann::json::parse("{\"p\": 4, \"l\": 10, \"g\": 0.052}"));
+        const auto& hx = c.at("hfss_extent_mm");
+        CHECK_NEAR(hx.at("p").get<double>(), 4., 1e-12);
+        CHECK_NEAR(hx.at("l").get<double>(), 9., 1e-12);
+        CHECK_NEAR(hx.at("g").get<double>(), 0.05, 1e-12);
         const auto& fs = c.at("frequencies");
         CHECK(fs.is_array() && fs.size() == 2);
         if (!fs.is_array() || fs.size() != 2) continue;

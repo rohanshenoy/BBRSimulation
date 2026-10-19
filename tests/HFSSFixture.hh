@@ -216,6 +216,7 @@ struct SidecarParams {
   double zMin = 0., zMax = 0.; int zCount = 1; int exitPerKey = 1;
   bool disc = false;
   double yHalf = 4.5e-3, zHalf = 2.5e-5, radius = 0.;
+  double lengthMm = 4.0;   // geometry.extent_mm.p; l and g follow from the section
   std::string outsidePoints = "none";
 };
 
@@ -307,6 +308,10 @@ inline std::string SidecarJson(const SidecarParams& p) {
     return s + "]";
   };
   using detail::Fmt;
+  // extent_mm: p the crack length, l and g the section's full widths (a disc: its diameter), in mm,
+  // as the producer writes them; the parse checks a rectangle's l and g against its section.
+  const double extL = p.disc ? 2e3 * p.radius : 2e3 * p.yHalf, extG = p.disc ? 2e3 * p.radius : 2e3 * p.zHalf;
+  const std::string extent = "{\"p\": " + Fmt(p.lengthMm) + ", \"l\": " + Fmt(extL) + ", \"g\": " + Fmt(extG) + "}";
   const std::string section = p.disc
     ? "{\"shape\": \"disc\", \"radius_m\": " + Fmt(p.radius) + "}"
     : "{\"shape\": \"rectangle\", \"y_e_half_m\": " + Fmt(p.yHalf) + ", \"z_e_half_m\": " + Fmt(p.zHalf) + "}";
@@ -342,7 +347,7 @@ inline std::string SidecarJson(const SidecarParams& p) {
     << "  \"transmittance\": {\"definition\": \"outgoing_power_w / incoming_power_w, first row per key\", \"incoming_includes_cos_theta\": false},\n"
     << "  \"symmetry\": {\"mirror_l\": true, \"mirror_g\": true, \"end_to_end\": true, \"rotational\": " << (p.disc ? "true" : "false") << "},\n"
     << "  \"boundaries\": {\"entrance\": \"radiation\", \"exit\": \"radiation\", \"walls\": \"PEC\"},\n"
-    << "  \"geometry\": {\"shape\": \"" << (p.disc ? "cylinder" : "box") << "\", \"extent_mm\": {\"p\": 4, \"l\": 10, \"g\": 0.052},\n"
+    << "  \"geometry\": {\"shape\": \"" << (p.disc ? "cylinder" : "box") << "\", \"extent_mm\": " << extent << ",\n"
     << "    \"bounding_box_mm\": [-0.026, -5, 0, 0.026, 5, 4]},\n"
     << "  \"modes\": {\"cutoff_ghz\": " << Fmt(cut) << ", \"mode\": \"" << mode << "\", \"polarization_filter_limit_ghz\": "
     << Fmt(filter) << ", \"propagating_count\": 0}\n"

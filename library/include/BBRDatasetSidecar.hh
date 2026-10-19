@@ -12,8 +12,10 @@ class G4VSolid;
 // The HFSS dataset sidecar <waveguides>/<dirStem>.dataset.json, schema 1.x,
 // agreed with Blackbody-Simulations on 2026-10-05 and described in
 // validation/README.md, Dataset sidecars (field table, checks F1-F13 and
-// C1-C5). Parse() reads it and runs the geometry-free checks F1-F11 and F13;
-// CheckFitsSolid() is F12, run by BBRCrackLibrary::ValidatePlacedCracks; the CSV
+// C1-C5). Parse() reads it and runs the geometry-free checks F1-F11 and F13
+// (F11 includes a rectangle's extent_mm l and g against its declared section);
+// CheckFitsSolid() is F12, run by BBRCrackLibrary::ValidatePlacedCracks: the
+// declared section and extent_mm.p against the placed solid; the CSV
 // checks C1-C5 run in BBRHFSSData. The Python twin is bbrsim.sidecar.
 //
 // Frames: canonical (p, l, g) = (propagation, long, gap) = crack-local (x, y, z).

@@ -576,6 +576,14 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
     for k in "plg":
         if not _req(ext, k, "geometry.extent_mm.", "num") > 0:
             raise ValueError(f"BBR024: geometry.extent_mm.{k} must be > 0")
+    # a rectangle's l and g are the full widths of its declared section (CDX-028); a disc's are not
+    # compared with its diameter (the round gap's extent_mm is the HFSS bounding box); p is F12's, C++ only
+    if cs["shape"] == "rectangle":
+        for k, half in (("l", "y_e_half_m"), ("g", "z_e_half_m")):
+            width = 2e3 * cs[half]
+            if abs(ext[k] - width) > 1e-6 * width:
+                raise ValueError(f"BBR024: geometry.extent_mm.{k} = {ext[k]!r} mm differs from the full width "
+                                 f"{width!r} mm of exit_field.cross_section (2 x {half}) by more than 1e-6 relative")
 
     md = _req(sc, "modes", "", "dict")                                             # F13
     got = (_req(md, "mode", "modes.", "str"), _req(md, "cutoff_ghz", "modes.", "num"),

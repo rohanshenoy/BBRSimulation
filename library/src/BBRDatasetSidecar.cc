@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 
@@ -322,13 +323,27 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
   r.Expect(r.Str(boundaries, "exit", "boundaries."), "radiation", "boundaries.exit");
   r.Expect(r.Str(boundaries, "walls", "boundaries."), "PEC", "boundaries.walls");
 
-  // F11: geometry (compared with the placed solid by BBRCrackLibrary; info only).
+  // F11: geometry. p is compared with the placed solid's length in F12 (CheckFitsSolid); for a rectangle
+  // l and g must equal the full widths of the declared exit section (CDX-028). A disc's l and g are not
+  // compared with its diameter here: the round gap's extent_mm is the HFSS bounding box.
   const json& geo = r.At(j, "geometry", "");
   const json& ext = r.At(geo, "extent_mm", "geometry.");
   sc.extentP_mm = r.Num(ext, "p", "geometry.extent_mm.");
   sc.extentL_mm = r.Num(ext, "l", "geometry.extent_mm.");
   sc.extentG_mm = r.Num(ext, "g", "geometry.extent_mm.");
   if (!(sc.extentP_mm > 0.) || !(sc.extentL_mm > 0.) || !(sc.extentG_mm > 0.)) Fail("BBR024", path, "geometry.extent_mm must be > 0");
+  if (sc.crossSection.shape == BBRCrossSection::kRectangle) {
+    const struct { const char* name; double extent_mm; const char* half; double width_mm; } axes[] = {
+      {"l", sc.extentL_mm, "y_e_half_m", 2e3 * sc.crossSection.yHalf_m},
+      {"g", sc.extentG_mm, "z_e_half_m", 2e3 * sc.crossSection.zHalf_m}};
+    for (const auto& a : axes)
+      if (std::abs(a.extent_mm - a.width_mm) > 1e-6 * a.width_mm) {
+        std::ostringstream ed;
+        ed << std::setprecision(17) << "geometry.extent_mm." << a.name << " = " << a.extent_mm << " mm differs from the full width "
+           << a.width_mm << " mm of exit_field.cross_section (2 x " << a.half << ") by more than 1e-6 relative";
+        Fail("BBR024", path, ed.str());
+      }
+  }
 
   // F13: the lowest mode and the polarization-filter limit, re-derived from the section.
   const json& md = r.At(j, "modes", "");
@@ -461,6 +476,18 @@ void BBRDatasetSidecar::CheckFitsSolid(const G4VSolid& solid, const std::string&
                           : small ? "smaller than the HFSS section" : "larger than the HFSS section")
        << "; it must equal it (OR-020) within 1 nm, or 1 nm plus 1e-6 relative where larger, with local x "
        << "the propagation axis (a bare G4Tubs has it on z).";
+    Fail("BBR025", path, ed.str());
+  }
+  // Length (CDX-028, OR-020): the solid's extent along local x from the origin equals extent_mm.p within 1 nm,
+  // or 1 nm plus 1e-6 relative where longer.
+  const double length_mm = (solid.DistanceToOut(G4ThreeVector(), G4ThreeVector(1., 0., 0.)) +
+                            solid.DistanceToOut(G4ThreeVector(), G4ThreeVector(-1., 0., 0.))) / mm;
+  const double nm_mm = 1e-6;
+  if (length_mm < extentP_mm - nm_mm || length_mm > extentP_mm * (1. + 1e-6) + nm_mm) {
+    std::ostringstream ed;
+    ed << std::setprecision(17) << "the crack volume's length " << length_mm << " mm differs from the HFSS model's "
+       << extentP_mm << " mm (OR-020) for crack volume " << volumeName << ": the solid's length along local x must "
+       << "equal geometry.extent_mm.p within 1 nm, or 1 nm plus 1e-6 relative where longer";
     Fail("BBR025", path, ed.str());
   }
 }
