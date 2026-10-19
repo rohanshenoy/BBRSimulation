@@ -78,6 +78,8 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         sidecar_c3_far_field
         sidecar_c4_exit_rows sidecar_c3_c4_per_key sidecar_c5_outside_section sidecar_c5_zero_outside sidecar_real_data
         exit_clamp_rectangle exit_clamp_disc exit_clamp_disc_off_axis exit_clamp_needs_sidecar
+        s2_positions s2_transmittance s2_cap_no_rescale s2_intercept_column s2_two_t_sources s2_dark_outgoing
+        s2_dark_masking s2_rho_weighted s2_weights_before_clamp s2_load_bbr027_density
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 bbrsim_add_test_program(testSidecar LABEL unit
   CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f10_boundaries f13_modes
