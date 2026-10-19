@@ -6,6 +6,7 @@
 #include "G4String.hh"
 
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,10 +48,13 @@ class BBRCrackLibrary
   // nearest edge and triggers one BBR008 warning per (dataset, side); a grid
   // with a single frequency never warns, since there is nothing to choose.
   // A photon whose frequency and the chosen grid frequency lie on opposite
-  // sides of the dataset's lowest-mode cutoff (modes.cutoff_ghz) triggers one
-  // BBR026 warning per (dataset, direction). The table is used unchanged; a
-  // one-point grid warns too, because one point cannot cover both sides of a
-  // cutoff.
+  // sides of any of the dataset's regime cutoffs (schema 2: modes.regime_cutoffs_ghz;
+  // schema 1: the lowest mode, modes.cutoff_ghz) triggers one BBR026 warning per
+  // (dataset, mode, direction), for each cutoff crossed. The table is used
+  // unchanged; a one-point grid warns too, because one point cannot cover both
+  // sides of a cutoff. A schema-2 table at or above its cross-term validity limit
+  // (cross_term.valid_below_ghz) serving a photon triggers one BBR028 warning per
+  // dataset; the table is used unchanged.
   // Fatal, from the discovery the first call for an id runs: BBR011 if the
   // data directory is unreadable, holds no <id>_<freq>GHz_Ephi=0 directory for
   // this id, a legacy <id>_Ephi=0 directory or two directories with the same
@@ -92,8 +96,8 @@ class BBRCrackLibrary
     std::vector<FrequencyEntry> entries;  // ascending in freq_GHz
     G4bool warnedLow = false;
     G4bool warnedHigh = false;
-    G4bool warnedBelowCutoff = false;   // BBR026: photon below the lowest-mode cutoff, grid point above
-    G4bool warnedAboveCutoff = false;   // BBR026: photon above it, grid point below
+    std::set<std::pair<std::string, G4bool>> warnedCutoff;   // BBR026 sent: (mode, photon below the cutoff)
+    G4bool warnedRho = false;                                  // BBR028 sent
   };
 
   // Scans the waveguide directory for this id. The caller must hold the lock.

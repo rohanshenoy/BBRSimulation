@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <sstream>
 #include <set>
 #include <thread>
 #include <vector>
@@ -31,6 +32,50 @@ void Grid(const std::filesystem::path& root, const std::string& id, std::initial
     };
     ds.ff0 = fix(ds.ff0); ds.ff1 = fix(ds.ff1); ds.wg0 = fix(ds.wg0); ds.wg1 = fix(ds.wg1);
     hfssfix::WriteDataset(root, id + "_" + f, ds);
+  }
+}
+// A dataset on NineKeyGrid2 (schema 2) or NineKeyGrid (schema 1) at one frequency: a crack2-like
+// rectangle (a = 10 mm, b = 100 um) or, for `disc`, a 50 um disc whose exit lattice is scaled into it.
+void GridModes(const std::filesystem::path& root, const std::string& id, int freq, bool disc, bool schema1 = false) {
+  auto d = schema1 ? hfssfix::NineKeyGrid() : hfssfix::NineKeyGrid2();
+  const std::string f = std::to_string(freq) + "GHz";
+  auto fix = [&](const std::string& csv, bool scaleY) {
+    std::istringstream in(csv);
+    std::string line, out;
+    bool header = true;
+    while (std::getline(in, line)) {
+      if (!header) {
+        for (std::size_t p = 0; (p = line.find("500GHz,", p)) != std::string::npos; p += f.size()) line.replace(p, 6, f);
+        if (scaleY) {
+          std::vector<std::string> v;
+          std::stringstream ss(line);
+          std::string t;
+          while (std::getline(ss, t, ',')) v.push_back(t);
+          if (v.size() > 8) {   // a waveguide row; far-field rows have 10 fields and are left alone
+            v[7] = hfssfix::detail::Fmt(std::strtod(v[7].c_str(), nullptr) * 2e-2);
+            line.clear();
+            for (std::size_t i = 0; i < v.size(); ++i) line += (i ? "," : "") + v[i];
+          }
+        }
+      }
+      header = false;
+      out += line + "\n";
+    }
+    return out;
+  };
+  d.ff0 = fix(d.ff0, false); d.ff1 = fix(d.ff1, false);
+  d.wg0 = fix(d.wg0, disc); d.wg1 = fix(d.wg1, disc);
+  const std::string stem = id + "_" + f;
+  hfssfix::Schema2Params p = hfssfix::Schema2From(stem, d);
+  p.tflux.assign(p.base.phis.size() * p.base.thetas.size(), std::array<double, 4>{0.6, 0.3, 0., 0.});
+  p.tflux[2] = {0.6, 0., 0., 1.};
+  if (disc) { p.base.disc = true; p.base.radius = 5e-5; }
+  else { p.base.yHalf = 5e-3; p.base.zHalf = 5e-5; }
+  if (schema1) {
+    const auto wg = hfssfix::WriteDataset(root, stem, d, false);
+    bbrtest::WriteFile(wg / (stem + ".dataset.json"), hfssfix::SidecarJson(p.base));
+  } else {
+    hfssfix::WriteDataset2(root, stem, d, p);
   }
 }
 double Pick(const char* id, double nu) { double chosen = -1; BBRCrackLibrary::Instance().Lookup(id, nu, chosen); return chosen; }
@@ -234,6 +279,39 @@ int main(int argc, char** argv) {
       CHECK_NEAR(Pick("low", 20), 10, 0);     // photon above, served by the 10 GHz point below: warns
       CHECK(Handler().CountWarnings("BBR026") == 2);
       CHECK(Handler().CountWarnings("BBR008") == 0);   // in-grid selections never clamp
+      CHECK(Handler().CountWarnings("BBR026", "direction=below mode=TE10 ") == 1);
+      CHECK(Handler().CountWarnings("BBR026", "direction=above mode=TE10 ") == 1);
+    }},
+    {"cutoff_warning_regime", [] {
+      TempDir d; GridModes(d.path(), "c2", 500, false);
+      BBRConfigManager::SetDataDir(d.path().string());
+      CHECK_NEAR(Pick("c2", 1600), 500, 0);   // above TE01 (1498.96), table below it; TE10 lies below both
+      CHECK(Handler().CountWarnings("BBR026") == 1);
+      CHECK(Handler().CountWarnings("BBR026", "dataset=c2 direction=above mode=TE01 ") == 1);
+      CHECK_NEAR(Pick("c2", 1700), 500, 0);   // the same (mode, direction): silent
+      CHECK(Handler().CountWarnings("BBR026") == 1);
+      CHECK_NEAR(Pick("c2", 10), 500, 0);     // below TE10 (14.99), table above it; TE01 lies above both
+      CHECK(Handler().CountWarnings("BBR026") == 2);
+      CHECK(Handler().CountWarnings("BBR026", "dataset=c2 direction=below mode=TE10 ") == 1);
+      CHECK_NEAR(Pick("c2", 10), 500, 0);
+      CHECK(Handler().CountWarnings("BBR026") == 2);
+    }},
+    {"rho_limit_warning", [] {
+      TempDir d;
+      GridModes(d.path(), "disc2000", 2000, true);
+      GridModes(d.path(), "disc1500", 1500, true);
+      GridModes(d.path(), "disc1x", 2000, true, true);
+      BBRConfigManager::SetDataDir(d.path().string());
+      CHECK(Handler().CountWarnings("BBR028") == 0);
+      CHECK_NEAR(Pick("disc1500", 1500), 1500, 0);   // below the 1756.98 limit
+      CHECK_NEAR(Pick("disc1x", 2000), 2000, 0);     // schema 1: never
+      CHECK(Handler().CountWarnings("BBR028") == 0);
+      CHECK_NEAR(Pick("disc2000", 2000), 2000, 0);
+      CHECK(Handler().CountWarnings("BBR028") == 1);
+      CHECK(Handler().CountWarnings("BBR028", "BBR028 dataset=disc2000 grid_GHz=2000 valid_below_GHz=1756.98") == 1);
+      CHECK_NEAR(Pick("disc2000", 2000), 2000, 0);
+      CHECK(Handler().CountWarnings("BBR028") == 1);   // once per dataset
+      CHECK(Handler().CountWarnings("BBR026") == 0);   // no regime cutoff lies between photon and table
     }},
   });
 }

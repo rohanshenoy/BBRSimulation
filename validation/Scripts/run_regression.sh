@@ -37,7 +37,7 @@
 #    GeomNav / G4Exception / BBR0xx / LP002 messages, checks that the
 #    frequency case's BBR008 clamp warning fires once per side, and that the
 #    BBR026 cutoff warning tolerated in the Planck cases fires at most once per
-#    dataset and direction.
+#    dataset, direction and mode.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
 #    one PASS/FAIL line per check (with BBR_PIN=1 also the row fixed-seed
 #    numbers: the three fixed-seed numbers against Scripts/numbers.baseline).
@@ -386,7 +386,7 @@ for side in low high; do
   if [ "$n" -eq 1 ]; then line PASS "clamp warning $side" "[frequency] BBR008 once"; pass=$((pass+1))
   else line FAIL "clamp warning $side" "[frequency] BBR008 count $n, expected 1"; fail=$((fail+1)); fi
 done
-# BBR026 may fire in the Planck cases, at most once per dataset and direction.
+# BBR026 may fire in the Planck cases, at most once per dataset, direction and mode.
 # Counted per case: each case is its own process with its own one-shot flags.
 # Fails closed: every BBR026 banner (the line scan_log subtracts) must have a
 # parsed description line, so a changed message format cannot pass unseen.
@@ -394,12 +394,12 @@ c26=""
 for d in planck config_mt transmit frequency; do
   [ -f "$REG/$d/run.log" ] || { c26="$c26 [$d] no run.log;"; continue; }
   n_ban=$(grep -c "G4Exception : BBR026" "$REG/$d/run.log" || true)
-  n_desc=$(grep -cE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) " "$REG/$d/run.log" || true)
+  n_desc=$(grep -cE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) mode=[A-Za-z0-9_.,-]+ " "$REG/$d/run.log" || true)
   [ "$n_ban" -ne "$n_desc" ] && c26="$c26 [$d] $n_ban BBR026 banners, $n_desc parsed descriptions;"
-  c=$(grep -oE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) " "$REG/$d/run.log" | sort | uniq -c | awk '$1 > 1')
+  c=$(grep -oE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) mode=[A-Za-z0-9_.,-]+ " "$REG/$d/run.log" | sort | uniq -c | awk '$1 > 1')
   [ -n "$c" ] && c26="$c26 [$d] $c"
 done
-if [ -z "$c26" ]; then line PASS "cutoff warning once" "BBR026 at most once per dataset and direction per case"; pass=$((pass+1))
+if [ -z "$c26" ]; then line PASS "cutoff warning once" "BBR026 at most once per dataset, direction and mode per case"; pass=$((pass+1))
 else line FAIL "cutoff warning once" "$c26"; fail=$((fail+1)); fi
 
 echo "=== 3. validators ==="
