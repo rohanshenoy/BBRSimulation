@@ -472,6 +472,10 @@ inline std::string SidecarJson2(const Schema2Params& p) {
       regime.push_back({{"mode", n < 10 ? "TE0" + std::to_string(n) : "TE0," + std::to_string(n)},
                         {"cutoff_ghz", n * c / (2 * bb) / 1e9}});
   }
+  // Ascending by cutoff, as the producer's ordered list (differs from "TE10 first" only if a < b).
+  std::stable_sort(regime.begin(), regime.end(), [](const json& x, const json& y) {
+    return x.at("cutoff_ghz").get<double>() < y.at("cutoff_ghz").get<double>();
+  });
   md["regime_cutoffs_ghz"] = regime;
 
   j["cross_term"] = {{"density", "e_t_quadrature"},

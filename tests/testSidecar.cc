@@ -518,6 +518,139 @@ int main(int argc, char** argv) {
       // The 1.x grid has no step and does not need one.
       CHECK(Parse(Valid()).exitY.step == 0.);
     }},
+    {"s2_regime_cutoffs", [] {
+      using RC = std::vector<std::pair<std::string, double>>;
+      BBRCrossSection slot1;   // 10 mm x 50 um: crack1
+      slot1.shape = BBRCrossSection::kRectangle; slot1.yHalf_m = 5e-3; slot1.zHalf_m = 25e-6;
+      const RC r1 = BBRDatasetSidecar::RegimeCutoffs(slot1);
+      CHECK(r1.size() == 7);
+      if (r1.size() == 7) {
+        CHECK(r1[0].first == "TE10" && r1[1].first == "TE01" && r1[6].first == "TE06");
+        CHECK_REL(r1[0].second, 14.9896229, 1e-6);
+        CHECK_REL(r1[1].second, 2997.92458, 1e-6);
+        CHECK_REL(r1[6].second, 17987.5475, 1e-6);
+      }
+      BBRCrossSection slot2 = slot1;   // 10 mm x 100 um: crack2
+      slot2.zHalf_m = 50e-6;
+      const RC r2 = BBRDatasetSidecar::RegimeCutoffs(slot2);
+      CHECK(r2.size() == 14);
+      if (r2.size() == 14) {
+        CHECK(r2[0].first == "TE10" && r2[9].first == "TE09" && r2[10].first == "TE0,10" && r2[13].first == "TE0,13");
+        CHECK_REL(r2[13].second, 19486.5098, 1e-6);
+      }
+      BBRCrossSection disc;
+      disc.shape = BBRCrossSection::kDisc; disc.radius_m = 50e-6;
+      const RC rd = BBRDatasetSidecar::RegimeCutoffs(disc);
+      CHECK(rd.size() == 3);
+      if (rd.size() == 3) {
+        CHECK(rd[0].first == "TE11" && rd[1].first == "TM01" && rd[2].first == "TE21");
+        CHECK_REL(rd[0].second, 1756.98, 1e-5);
+        CHECK_REL(rd[1].second, 2294.85, 1e-5);
+        CHECK_REL(rd[2].second, 2914.56, 1e-5);
+      }
+      // The fixture's own list (rectangle and disc) is accepted and parsed; 1.x gives the lowest mode only.
+      const auto sc = Parse(Valid2());
+      CHECK(sc.regimeCutoffs.size() == 7 && sc.regimeCutoffs[0].first == "TE10");
+      CHECK_REL(sc.regimeCutoffs[0].second, sc.cutoffGHz, 1e-12);
+      auto pd = hfssfix::NineKeyParams2(kStem);
+      pd.base.disc = true; pd.base.radius = 5e-5;
+      CHECK(Parse(hfssfix::SidecarJson2(pd)).regimeCutoffs.size() == 3);
+      const auto s1 = Parse(Valid());
+      CHECK(s1.regimeCutoffs.size() == 1 && s1.regimeCutoffs[0].first == s1.lowestMode &&
+            s1.regimeCutoffs[0].second == s1.cutoffGHz && s1.rhoValidBelowGHz == -1.);
+      // An entry off by 2e-6 relative is refused (BBR025), one off by 5e-7 parses.
+      const double c1 = sc.regimeCutoffs[1].second;
+      ExpectG4Exception("BBR025", [&] { Parse(Mut2([&](json& j) { j["modes"]["regime_cutoffs_ghz"][1]["cutoff_ghz"] = c1 * (1. + 2e-6); })); },
+                        "BBRDatasetSidecar", "regime_cutoffs_ghz");
+      ExpectG4Exception("BBR025", [&] { Parse(Mut2([&](json& j) { j["modes"]["regime_cutoffs_ghz"][1]["cutoff_ghz"] = c1 * (1. + 2e-6); })); },
+                        "BBRDatasetSidecar", "TE01");
+      Parse(Mut2([&](json& j) { j["modes"]["regime_cutoffs_ghz"][1]["cutoff_ghz"] = c1 * (1. + 5e-7); }));
+      // A missing, an extra and a relabelled entry are refused.
+      ExpectG4Exception("BBR025", [] { Parse(Mut2([](json& j) { j["modes"]["regime_cutoffs_ghz"].erase(6); })); },
+                        "BBRDatasetSidecar", "regime_cutoffs_ghz");
+      ExpectG4Exception("BBR025", [] { Parse(Mut2([](json& j) { j["modes"]["regime_cutoffs_ghz"].push_back({{"mode", "TE07"}, {"cutoff_ghz", 20983.}}); })); },
+                        "BBRDatasetSidecar", "regime_cutoffs_ghz");
+      ExpectG4Exception("BBR025", [] { Parse(Mut2([](json& j) { j["modes"]["regime_cutoffs_ghz"][2]["mode"] = "TE0,2"; })); },
+                        "BBRDatasetSidecar", "TE0,2");
+      // Mistyped or absent: BBR024.
+      ExpectG4Exception("BBR024", [] { Parse(Mut2([](json& j) { j["modes"].erase("regime_cutoffs_ghz"); })); },
+                        "BBRDatasetSidecar", "missing field modes.regime_cutoffs_ghz");
+      ExpectG4Exception("BBR024", [] { Parse(Mut2([](json& j) { j["modes"]["regime_cutoffs_ghz"] = "TE10"; })); },
+                        "BBRDatasetSidecar", "modes.regime_cutoffs_ghz must be an array");
+      ExpectG4Exception("BBR024", [] { Parse(Mut2([](json& j) { j["modes"]["regime_cutoffs_ghz"][0].erase("mode"); })); },
+                        "BBRDatasetSidecar", "mode");
+      // A section taller along g than l: TE01 is the lowest, so the ascending list starts with it.
+      auto pt = hfssfix::NineKeyParams2(kStem);
+      pt.base.yHalf = 1e-5; pt.base.zHalf = 2e-5;
+      const auto tall = Parse(hfssfix::SidecarJson2(pt));
+      CHECK(!tall.regimeCutoffs.empty() && tall.regimeCutoffs[0].first == "TE01");
+      for (std::size_t i = 1; i < tall.regimeCutoffs.size(); ++i) CHECK(tall.regimeCutoffs[i].second >= tall.regimeCutoffs[i - 1].second);
+    }},
+    {"s2_dropped_modes_fields", [] {
+      // Schema 2 drops the lists, counts, list_limit_ghz and basis (OR-031): a block without them parses.
+      const auto plain = Parse(Mut2([](json& j) {
+        for (const char* k : {"propagating_count", "basis", "list_limit_ghz", "gap_family_onsets", "mode_count_below_limit", "cutoffs"})
+          j["modes"].erase(k);
+      }));
+      CHECK(plain.schemaMajor == 2 && plain.regimeCutoffs.size() == 7);
+      // One that still carries the 1.x lists parses too: unknown fields are ignored, never compared.
+      const auto legacy = Parse(Mut2([](json& j) {
+        j["modes"]["propagating_count"] = 33;
+        j["modes"]["basis"] = "closed PEC a=0.009 b=5e-05";
+        j["modes"]["list_limit_ghz"] = 20000.;
+        j["modes"]["gap_family_onsets"] = json::array({{{"n", 1}, {"mode", "TE01"}, {"cutoff_ghz", 1.}}});
+        j["modes"]["mode_count_below_limit"] = 9999;
+        j["modes"]["cutoffs"] = json::array({{{"mode", "TE11"}, {"cutoff_ghz", 1.}, {"degeneracy", 2}}});
+      }));
+      CHECK(legacy.regimeCutoffs.size() == 7 && legacy.SameInvariant(plain));
+    }},
+    {"s2_cross_term", [] {
+      const auto sc = Parse(Valid2());
+      CHECK_REL(sc.rhoValidBelowGHz, sc.polarizationFilterLimitGHz, 1e-12);
+      CHECK_REL(sc.rhoValidBelowGHz, 2997.92458, 1e-6);   // c/(2b), b = 50 um
+      const double lim = sc.polarizationFilterLimitGHz;
+      ExpectG4Exception("BBR025", [&] { Parse(Mut2([&](json& j) { j["cross_term"]["valid_below_ghz"] = lim * (1. + 2e-6); })); },
+                        "BBRDatasetSidecar", "cross_term.valid_below_ghz");
+      ExpectG4Exception("BBR025", [&] { Parse(Mut2([&](json& j) { j["cross_term"]["valid_below_ghz"] = lim * (1. - 2e-6); })); },
+                        "BBRDatasetSidecar", "polarization_filter_limit_ghz");
+      const auto near = Parse(Mut2([&](json& j) { j["cross_term"]["valid_below_ghz"] = lim * (1. + 5e-7); }));
+      CHECK_REL(near.rhoValidBelowGHz, lim * (1. + 5e-7), 1e-12);
+      ExpectG4Exception("BBR024", [] { Parse(Mut2([](json& j) { j["cross_term"].erase("valid_below_ghz"); })); },
+                        "BBRDatasetSidecar", "cross_term.valid_below_ghz");
+    }},
+    {"invariant_schema_and_grid", [] {
+      using V = std::vector<std::string>;
+      // Choice 1: one ID must not mix schema majors or incidence grids across frequencies.
+      const auto one = Parse(Valid());
+      const auto two = Parse(Valid2());
+      const V d = one.InvariantDiff(two);
+      CHECK(!d.empty() && d[0] == "schema" && !one.SameInvariant(two) && !two.SameInvariant(one));
+      CHECK(two.InvariantDiff(one) == one.InvariantDiff(two));
+      // A 15-key style and a 35-key style grid of one geometry differ in "excitation" only.
+      auto p15 = hfssfix::NineKeyParams2(kStem);
+      auto p35 = hfssfix::NineKeyParams2(kStem);
+      p35.base.thetas = {90., 105., 120., 135., 150., 165., 180.};
+      p35.base.phis = {0., 22.5, 45., 67.5, 90.};
+      p35.tflux.clear();
+      const auto a = Parse(hfssfix::SidecarJson2(p15)), b = Parse(hfssfix::SidecarJson2(p35));
+      CHECK(a.InvariantDiff(b) == V{"excitation"} && b.InvariantDiff(a) == V{"excitation"} && !a.SameInvariant(b));
+      // The same grid at another frequency agrees (2.x), and so do two 1.x sidecars of one grid (R3).
+      const auto a2 = Parse(hfssfix::SidecarJson2(p15));
+      CHECK(a.InvariantDiff(a2).empty() && a.SameInvariant(a2));
+      const std::string stem300 = "crack_300GHz";
+      const auto s300 = Parse(hfssfix::SidecarJson(hfssfix::SidecarFrom(stem300, hfssfix::Mini500())), stem300, 300.);
+      CHECK(one.InvariantDiff(s300).empty() && one.SameInvariant(s300) && s300.SameInvariant(one));
+      // A changed phi list alone is also a different grid.
+      auto pphi = hfssfix::NineKeyParams2(kStem);
+      pphi.base.phis = {0., 90.};
+      pphi.tflux.clear();
+      CHECK(a.InvariantDiff(Parse(hfssfix::SidecarJson2(pphi))) == V{"excitation"});
+      // Names come in order: schema first, then the existing blocks.
+      auto pm = hfssfix::NineKeyParams2(kStem);
+      pm.base.yHalf = 4.0e-3;
+      const auto sec = Parse(hfssfix::SidecarJson2(pm));
+      CHECK(one.InvariantDiff(sec).front() == "schema");
+    }},
     {"f12_fits_solid", [] {
       const auto box = Parse(Valid());                  // section 4.5 mm x 25 um
       box.CheckFitsSolid(G4Box("ok", 2 * mm, 4.5 * mm, 0.025 * mm), "ok");

@@ -32,6 +32,9 @@ using Vec = std::array<double, 3>;
 
 constexpr double kC = 299792458.0;           // m/s, exact
 constexpr double kX11Prime = 1.8411837813;   // first zero of J1': TE11 of a round guide
+constexpr double kX01 = 2.4048255577;        // first zero of J0: TM01 of a round guide
+constexpr double kX21Prime = 3.0542369282;   // first zero of J2': TE21 of a round guide
+constexpr double kListLimitGHz = 20000.;     // the regime list runs to 20 THz, inclusive
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kAxisTol = 1e-9;
 constexpr double kModeRelTol = 1e-6;
@@ -338,12 +341,32 @@ void ParseSchema2(const Reader& r, const json& j, BBRDatasetSidecar& sc) {
   const json& ct = r.At(j, "cross_term", "");
   r.Expect(r.Str(ct, "density", "cross_term."), "e_t_quadrature", "cross_term.density");
   r.Str(ct, "definition", "cross_term.");
-  r.Num(ct, "valid_below_ghz", "cross_term.");
+  sc.rhoValidBelowGHz = r.Num(ct, "valid_below_ghz", "cross_term.");
   r.Expect(r.Str(ct, "above_limit", "cross_term."), "warn_once", "cross_term.above_limit");
   r.Expect(r.Str(r.At(j, "far_field", ""), "normalization", "far_field."), "pattern_only", "far_field.normalization");
 }
 
 }  // namespace
+
+std::vector<std::pair<std::string, G4double>> BBRDatasetSidecar::RegimeCutoffs(const BBRCrossSection& s) {
+  std::vector<std::pair<std::string, G4double>> out;
+  if (s.shape == BBRCrossSection::kDisc) {
+    // Closed-PEC round guide: f = x c / (2 pi R) with the zeros x'11 (TE11), x01 (TM01) and x'21 (TE21).
+    const double k = kC / (2 * kPi * s.radius_m) / 1e9;
+    out.emplace_back("TE11", kX11Prime * k);
+    out.emplace_back("TM01", kX01 * k);
+    out.emplace_back("TE21", kX21Prime * k);
+    return out;
+  }
+  // Closed-PEC rectangle, a = 2 y_e_half along l, b = 2 z_e_half along g: TE10 at c/(2a) and the
+  // gap family TE0n at n c/(2b) up to the list limit, inclusive.
+  const double a = 2 * s.yHalf_m, b = 2 * s.zHalf_m;
+  out.emplace_back("TE10", kC / (2 * a) / 1e9);
+  for (int n = 1; n * kC / (2 * b) / 1e9 <= kListLimitGHz + 1e-9; ++n)
+    out.emplace_back(n < 10 ? "TE0" + std::to_string(n) : "TE0," + std::to_string(n), n * kC / (2 * b) / 1e9);
+  std::stable_sort(out.begin(), out.end(), [](const auto& x, const auto& y) { return x.second < y.second; });
+  return out;
+}
 
 G4double BBRDatasetSidecar::Cell90(const std::vector<G4double>& thetaDeg) {
   const double delta = Delta(thetaDeg);
@@ -604,7 +627,39 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
     Fail("BBR025", path, "modes (" + sc.lowestMode + ", " + Fmt(sc.cutoffGHz) + ", " + Fmt(sc.polarizationFilterLimitGHz) +
                          " GHz) disagree with the cross-section (" + wantMode + ", " + Fmt(wantCut) + ", " + Fmt(wantFilter) + " GHz)");
 
+  // OR-031: the cutoffs a photon can cross to reach a table. Under 2.x the declared list, re-derived
+  // entry by entry; under 1.x only the lowest mode, so the schema-1 guard is unchanged.
+  if (sc.schemaMajor == 1) {
+    sc.regimeCutoffs = {{sc.lowestMode, sc.cutoffGHz}};
+  } else {
+    const json& list = r.At(md, "regime_cutoffs_ghz", "modes.");
+    if (!list.is_array()) Fail("BBR024", path, "modes.regime_cutoffs_ghz must be an array of {mode, cutoff_ghz}");
+    const auto want = RegimeCutoffs(sc.crossSection);
+    for (const auto& e : list) {
+      if (!e.is_object()) Fail("BBR024", path, "modes.regime_cutoffs_ghz entries must be objects {mode, cutoff_ghz}");
+      sc.regimeCutoffs.emplace_back(r.Str(e, "mode", "modes.regime_cutoffs_ghz[]."), r.Num(e, "cutoff_ghz", "modes.regime_cutoffs_ghz[]."));
+    }
+    const std::size_t n = std::max(sc.regimeCutoffs.size(), want.size());
+    for (std::size_t i = 0; i < n; ++i) {
+      const std::string at = "modes.regime_cutoffs_ghz[" + std::to_string(i) + "]";
+      if (i >= sc.regimeCutoffs.size())
+        Fail("BBR025", path, at + " is missing: the section gives " + want[i].first + " at " + Fmt(want[i].second) + " GHz (" +
+                             std::to_string(want.size()) + " entries, the sidecar declares " + std::to_string(sc.regimeCutoffs.size()) + ")");
+      if (i >= want.size())
+        Fail("BBR025", path, at + " is " + sc.regimeCutoffs[i].first + " at " + Fmt(sc.regimeCutoffs[i].second) + " GHz, but the section gives only " +
+                             std::to_string(want.size()) + " entries");
+      if (sc.regimeCutoffs[i].first != want[i].first || !RelNear(sc.regimeCutoffs[i].second, want[i].second, kModeRelTol))
+        Fail("BBR025", path, at + " is " + sc.regimeCutoffs[i].first + " at " + Fmt(sc.regimeCutoffs[i].second) + " GHz, but the section gives " +
+                             want[i].first + " at " + Fmt(want[i].second) + " GHz (1e-6 relative)");
+    }
+    if (!RelNear(sc.rhoValidBelowGHz, sc.polarizationFilterLimitGHz, kModeRelTol))
+      Fail("BBR025", path, "cross_term.valid_below_ghz is " + Fmt(sc.rhoValidBelowGHz) + ", but modes.polarization_filter_limit_ghz is " +
+                           Fmt(sc.polarizationFilterLimitGHz) + " GHz; the cross term is valid below that limit (1e-6 relative)");
+  }
+
   json inv;
+  inv["schema"] = sc.schemaMajor;
+  inv["excitation"] = {{"incident_phi_deg", exc.at("incident_phi_deg")}, {"incident_theta_deg", exc.at("incident_theta_deg")}};
   inv["frames"] = {{"hfss_global_axes_in_canonical", ax}, {"exit_cs_axes_in_canonical", ecc}};
   inv["symmetry"] = sym;
   inv["boundaries"] = boundaries;
@@ -666,7 +721,7 @@ std::vector<std::string> BBRDatasetSidecar::InvariantDiff(const BBRDatasetSideca
   std::vector<std::string> differ;
   if (invariant.empty() || other.invariant.empty()) return differ;   // not produced by Parse
   const json a = json::parse(invariant), b = json::parse(other.invariant);
-  for (const char* k : {"frames", "symmetry", "boundaries", "geometry", "modes", "cross_section"})
+  for (const char* k : {"schema", "excitation", "frames", "symmetry", "boundaries", "geometry", "modes", "cross_section"})
     if (a.contains(k) && b.contains(k) && !Close(a.at(k), b.at(k))) differ.emplace_back(k);
   return differ;
 }
