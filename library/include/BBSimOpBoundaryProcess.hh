@@ -4,6 +4,9 @@
 #include "G4OpBoundaryProcess.hh"
 #include "G4ParticleChange.hh"
 #include "G4WrapperProcess.hh"
+#include "globals.hh"
+#include <atomic>
+#include <utility>
 
 // Wrapper around G4OpBoundaryProcess. PostStepDoIt intercepts photons that
 // cross into a volume filled with material "vacuum_wg" and routes them through
@@ -57,6 +60,12 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   // "[BBR] diffraction events=" line.
   G4int GetExitStartFallbackCount() const { return fNExitFallback; }
 
+  // Process-wide totals over every thread since the last reset: HFSS transmissions and, of those,
+  // exit-start fallbacks. The run action of the master resets them at the start of a run and
+  // prints them at its end (BBRAnalysis), so the count is one number per run, not one per worker.
+  static void ResetRunTotals();
+  static std::pair<G4long, G4long> RunTotals();   // {transmissions, fallbacks}
+
   G4OpBoundaryProcessStatus GetStatus() const;
   // Forward SetInvokeSD to the wrapped G4OpBoundaryProcess (no getter in G4 API).
   void SetInvokeSD(G4bool flag);
@@ -94,6 +103,9 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4int fNReflectance         = 0;
   G4int fNReflectanceAbsorb   = 0;
   G4int fNExitFallback        = 0;
+
+  static std::atomic<G4long> sRunTransmissions;
+  static std::atomic<G4long> sRunExitFallbacks;
 };
 
 #endif

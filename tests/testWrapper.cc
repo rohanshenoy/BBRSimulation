@@ -313,6 +313,25 @@ int main(int argc, char** argv) {
       CHECK(w.Process().GetExitStartFallbackCount() == 100);
       CHECK(cap.out.find("[BBR] diffraction events=100 T_obs=1 exit_start_fallback=99\n") != std::string::npos);
     }},
+    {"run_totals", [] {
+      // Process-wide totals over all threads: HFSS transmissions and exit-start fallbacks, reset by the run.
+      const double n = 1e-3, a = std::sqrt(1. - n * n) / std::sqrt(2.);
+      const double T = Deg(std::acos(a)), P = Deg(std::atan2(-a, n));
+      TempDir d; UseGrid(d, {{"500", hfssfix::OnePointOneDirection(4.5e-3, 2.5e-5, P, T)}});
+      World w(kExact); ScriptedEngine eng;
+      BBSimOpBoundaryProcess::ResetRunTotals();
+      CHECK(BBSimOpBoundaryProcess::RunTotals() == (std::pair<G4long, G4long>(0, 0)));
+      Script(eng, {0.0, 0.5, 0.5});
+      CHECK(w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng).status == S::kBBRDiffractionTransmit);   // corner fallback
+      CHECK(BBSimOpBoundaryProcess::RunTotals() == (std::pair<G4long, G4long>(1, 1)));
+      TempDir d2; UseData(d2, hfssfix::WrapKeys());   // a normal transmission, no fallback
+      World w2; ScriptedEngine eng2;
+      Script(eng2, {0.0, 0.5, 0.5});
+      CHECK(w2.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng2).status == S::kBBRDiffractionTransmit);
+      CHECK(BBSimOpBoundaryProcess::RunTotals() == (std::pair<G4long, G4long>(2, 1)));
+      BBSimOpBoundaryProcess::ResetRunTotals();
+      CHECK(BBSimOpBoundaryProcess::RunTotals() == (std::pair<G4long, G4long>(0, 0)));
+    }},
     {"exit_start_summary_zero", [] {
       // The fallback count is printed when it is 0 too.
       TempDir d; UseData(d, hfssfix::WrapKeys());

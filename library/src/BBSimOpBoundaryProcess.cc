@@ -166,7 +166,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
 
   const G4bool transmitted = (G4UniformRand() < T);
   ++fNDiffraction;
-  if (transmitted) ++fNDiffractionTransmit;
+  if (transmitted) { ++fNDiffractionTransmit; ++sRunTransmissions; }
   if (fNDiffraction % 100 == 0)
     G4cout << "[BBR] diffraction events=" << fNDiffraction
            << " T_obs=" << G4double(fNDiffractionTransmit)/fNDiffraction
@@ -229,7 +229,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     G4bool fellBack = false;
     const G4ThreeVector pos_inside =
         ExitStart(*touch, xf, pos_out, dir_out, normal_hat, inset, fellBack);
-    if (fellBack) ++fNExitFallback;
+    if (fellBack) { ++fNExitFallback; ++sRunExitFallbacks; }
     const G4ThreeVector local_inside = xf.TransformPoint(pos_inside);
     if (touch->GetSolid()->Inside(local_inside) != kInside) {
       G4Exception("BBSimOpBoundaryProcess::HandleDiffractionBoundary",
@@ -382,6 +382,18 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
 }
 
 // ---------------------------------------------------------------------------
+
+std::atomic<G4long> BBSimOpBoundaryProcess::sRunTransmissions{0};
+std::atomic<G4long> BBSimOpBoundaryProcess::sRunExitFallbacks{0};
+
+void BBSimOpBoundaryProcess::ResetRunTotals() {
+  sRunTransmissions = 0;
+  sRunExitFallbacks = 0;
+}
+
+std::pair<G4long, G4long> BBSimOpBoundaryProcess::RunTotals() {
+  return {sRunTransmissions.load(), sRunExitFallbacks.load()};
+}
 
 G4String BBSimOpBoundaryProcess::GetLastBBRStatusString() const
 {

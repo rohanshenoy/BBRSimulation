@@ -2,6 +2,7 @@
 
 #include "BBRConfigManager.hh"
 #include "BBRCrackLibrary.hh"
+#include "BBSimOpBoundaryProcess.hh"
 #include "G4AnalysisManager.hh"
 #include "G4Material.hh"
 #include "G4LogicalVolume.hh"
@@ -247,6 +248,7 @@ void BBRAnalysis::BeginRun(const G4Run* run, G4bool master) {
   if (!root.parent_path().empty()) std::filesystem::create_directories(root.parent_path(), ec);
   if (ec) G4Exception("BBRAnalysis::BeginRun", "BBR022", FatalException, ec.message().c_str());
   if (master) {
+    BBSimOpBoundaryProcess::ResetRunTotals();
     auto metadata = root; metadata.replace_extension(".metadata.json");
     std::filesystem::remove(metadata, ec);
     if (ec) G4Exception("BBRAnalysis::BeginRun", "BBR022", FatalException, ec.message().c_str());
@@ -342,6 +344,10 @@ void BBRAnalysis::EndRun(const G4Run* run, G4bool master) {
   if (!written || !closed)
     G4Exception("BBRAnalysis::EndRun", "BBR022", FatalException, "Cannot write/close ROOT output");
   if (master) {
+    // The workers have finished: the totals cover every thread of this run.
+    const auto totals = BBSimOpBoundaryProcess::RunTotals();
+    G4cout << "[BBR] run " << run->GetRunID() << " hfss_transmissions=" << totals.first
+           << " exit_start_fallback=" << totals.second << G4endl;
     WriteMetadata(run);
     G4cout << "=== BBR Run " << run->GetRunID() << " end: " << fRootPath << " written ===" << G4endl;
   }
