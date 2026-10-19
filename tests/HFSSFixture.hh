@@ -15,7 +15,10 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace hfssfix {
 
@@ -142,6 +145,57 @@ inline Dataset NineKeyGrid() {
     d.wg1 += "500GHz,1," + k + "0.3,1,0,0.001,5e-06,0,0,0,0,0,0\n";
     d.wg1 += "500GHz,1," + k + "0.3,1,0,-0.002,1e-05,0,0,0,0,0,0\n";
   }
+  return d;
+}
+
+namespace detail {
+inline std::string Num17(double v) { std::ostringstream s; s << std::setprecision(17) << v; return s.str(); }
+
+// One key (0,180), T0 = 1, T1 = 0, over the given exit lattice (Y, Z in m) with field only at the
+// node (y_m, z_m) (y for Ephi=0, z for Ephi=1, as WrapKeys); a far field of one node (P_deg, T_deg)
+// carrying all the intensity, so the direction and position draws are deterministic.
+inline Dataset OnePoint(const std::vector<std::pair<double, double>>& lattice, double y_m, double z_m,
+                        double P_deg, double T_deg) {
+  if (std::find(lattice.begin(), lattice.end(), std::make_pair(y_m, z_m)) == lattice.end())
+    throw std::invalid_argument("OnePoint: (" + Num17(y_m) + ", " + Num17(z_m) + ") is not a lattice node");
+  const std::string key = "500GHz,", pt = Num17(P_deg) + "," + Num17(T_deg);
+  Dataset d{FF_HDR, WG_HDR, FF_HDR, WG_HDR};
+  d.ff0 += key + "0,0,180," + pt + ",0,0,1,0\n";
+  d.ff1 += key + "1,0,180," + pt + ",1,0,0,0\n";
+  for (const auto& [y, z] : lattice) {
+    const bool lit = y == y_m && z == z_m;
+    const std::string yz = Num17(y) + "," + Num17(z);
+    d.wg0 += key + "0,0,180,1,1,0," + yz + (lit ? ",0,1,0,0,0,0\n" : ",0,0,0,0,0,0\n");
+    d.wg1 += key + "1,0,180,0,1,0," + yz + (lit ? ",0,0,1,0,0,0\n" : ",0,0,0,0,0,0\n");
+  }
+  return d;
+}
+}  // namespace detail
+
+// One exit point and one exit direction, for the wrapper's exit-start tests. The exit lattice is
+// Y {-4.5, 0, 4.5} mm x Z {-25, 0, 25} um, the default declared section's walls and centre lines,
+// so the section is unchanged and C2-C5 pass; (y_m, z_m) must be one of its nine nodes (a wall node
+// is clamped 1 nm inside at load, OR-020). The far field is the single node (P_deg, T_deg). The
+// frequency token is 500GHz; rename it with Relabel for another grid point.
+inline Dataset OnePointOneDirection(double y_m, double z_m, double P_deg, double T_deg) {
+  std::vector<std::pair<double, double>> lattice;
+  for (double y : {-4.5e-3, 0., 4.5e-3})
+    for (double z : {-2.5e-5, 0., 2.5e-5}) lattice.push_back({y, z});
+  return detail::OnePoint(lattice, y_m, z_m, P_deg, T_deg);
+}
+
+// The same for a disc of radius R_m: the lattice {-R, 0, R}^2 inside the disc (5 nodes; the
+// sidecar must declare the disc with outside_points "omitted").
+inline Dataset OnePointOneDirectionDisc(double R_m, double y_m, double z_m, double P_deg, double T_deg) {
+  const std::vector<std::pair<double, double>> lattice = {{-R_m, 0.}, {0., -R_m}, {0., 0.}, {0., R_m}, {R_m, 0.}};
+  return detail::OnePoint(lattice, y_m, z_m, P_deg, T_deg);
+}
+
+// The dataset with its "500GHz," frequency tokens replaced by "<freq>GHz,".
+inline Dataset Relabel(Dataset d, const std::string& freq) {
+  for (std::string* s : {&d.ff0, &d.wg0, &d.ff1, &d.wg1})
+    for (std::size_t p = 0; (p = s->find("500GHz,", p)) != std::string::npos; p += freq.size() + 4)
+      s->replace(p, 7, freq + "GHz,");
   return d;
 }
 

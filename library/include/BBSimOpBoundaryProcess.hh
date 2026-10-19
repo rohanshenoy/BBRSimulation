@@ -51,6 +51,12 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   // an example's stepping action for the crossings column hfss_freq_GHz.
   G4double GetLastHFSSFrequencyGHz() const { return fLastHFSSFreqGHz; }
 
+  // Transmissions whose start on the ray through the sampled exit point was not valid and
+  // whose start at the normal inset was not valid either, so the photon started at the
+  // normal inset anyway (see ExitStart). Also printed as exit_start_fallback= on the
+  // "[BBR] diffraction events=" line.
+  G4int GetExitStartFallbackCount() const { return fNExitFallback; }
+
   G4OpBoundaryProcessStatus GetStatus() const;
   // Forward SetInvokeSD to the wrapped G4OpBoundaryProcess (no getter in G4 API).
   void SetInvokeSD(G4bool flag);
@@ -64,6 +70,19 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4VParticleChange* HandleReflectanceBoundary(const G4Track& aTrack,
                                                const G4Step& aStep);
 
+  // Where a transmitted photon starts inside the crack, at normal distance inset from the exit
+  // plane. xf is the touchable's global-to-local transform, pos_out the sampled exit point on the
+  // exit plane, dir_out the sampled direction and normal_hat the exit face's outward axis. First
+  // choice: on the ray through pos_out, pos_out - (inset/n) dir_out with n = dir_out.normal_hat, so
+  // the photon crosses the exit plane at its sampled point. Fallback: the normal inset
+  // pos_out - inset normal_hat. A start is valid if it is inside the solid and its ray reaches the
+  // exit plane before leaving the solid (DistanceToOut, to the surface tolerance). If neither is
+  // valid the normal inset is returned with fellBack = true.
+  G4ThreeVector ExitStart(const G4VTouchable& touch, const G4AffineTransform& xf,
+                          const G4ThreeVector& pos_out, const G4ThreeVector& dir_out,
+                          const G4ThreeVector& normal_hat, G4double inset,
+                          G4bool& fellBack) const;
+
   G4ParticleChange fParticleChange;
 
   BBRBoundaryStatus fLastBBRStatus = kBBRNone;
@@ -74,6 +93,7 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4int fNDiffractionTransmit = 0;
   G4int fNReflectance         = 0;
   G4int fNReflectanceAbsorb   = 0;
+  G4int fNExitFallback        = 0;
 };
 
 #endif

@@ -169,7 +169,8 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   if (transmitted) ++fNDiffractionTransmit;
   if (fNDiffraction % 100 == 0)
     G4cout << "[BBR] diffraction events=" << fNDiffraction
-           << " T_obs=" << G4double(fNDiffractionTransmit)/fNDiffraction << G4endl;
+           << " T_obs=" << G4double(fNDiffractionTransmit)/fNDiffraction
+           << " exit_start_fallback=" << fNExitFallback << G4endl;
 
   if (transmitted) {
     fLastBBRStatus = kBBRDiffractionTransmit;
@@ -204,10 +205,18 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     // transportation step will then cross crack -> World normally and update
     // the track touchable/material state. Placing the track directly outside
     // would leave the ordinary G4ParticleChange touchable inconsistent.
-    // The inset is 20 times the surface tolerance: Geant4 11.1's
-    // G4OpBoundaryProcess warns OpBoun06 for a step of at most 10 times the
-    // tolerance, and a photon leaving straight along the crack axis takes
-    // exactly this inset as its first step into the World.
+    // The start lies at normal distance `inset` from the exit plane, 20 times
+    // the surface tolerance: Geant4 11.1's G4OpBoundaryProcess warns OpBoun06
+    // for a step of at most 10 times the tolerance, and a photon leaving
+    // straight along the crack axis takes exactly this inset as its first step
+    // into the World. It is taken on the ray through the sampled exit point,
+    // so the photon crosses the exit plane where HFSS put it: a start moved
+    // along the normal only would send a grazing photon from a wall row (1 nm
+    // inside the wall since the load-time clamp) into that wall before the
+    // exit plane. When that ray start is not valid (a grazing photon heading
+    // away from the wall it starts beside), the normal inset is used; when
+    // neither is (a rectangle corner, or a near-tangential photon at a disc
+    // rim), the normal inset is kept and counted (exit_start_fallback).
     const G4double surfaceTolerance =
         G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
     const G4double inset = 20. * surfaceTolerance;
@@ -217,7 +226,10 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
                   "Crack half-length is too small for the navigation inset.");
     }
 
-    const G4ThreeVector pos_inside = pos_out - inset * normal_hat;
+    G4bool fellBack = false;
+    const G4ThreeVector pos_inside =
+        ExitStart(*touch, xf, pos_out, dir_out, normal_hat, inset, fellBack);
+    if (fellBack) ++fNExitFallback;
     const G4ThreeVector local_inside = xf.TransformPoint(pos_inside);
     if (touch->GetSolid()->Inside(local_inside) != kInside) {
       G4Exception("BBSimOpBoundaryProcess::HandleDiffractionBoundary",
@@ -248,6 +260,40 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   }
 
   return &fParticleChange;
+}
+
+G4ThreeVector BBSimOpBoundaryProcess::ExitStart(const G4VTouchable& touch,
+                                                const G4AffineTransform& xf,
+                                                const G4ThreeVector& pos_out,
+                                                const G4ThreeVector& dir_out,
+                                                const G4ThreeVector& normal_hat,
+                                                G4double inset,
+                                                G4bool& fellBack) const
+{
+  const G4VSolid* solid = touch.GetSolid();
+  const G4double tolerance =
+      G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
+  const G4double n = dir_out.dot(normal_hat);   // >= 1e-6 by the samplers' outward guard
+  const G4ThreeVector localDir = xf.TransformAxis(dir_out);
+
+  // Inside the solid, and the ray along dir_out reaches the exit plane before
+  // it leaves the solid. Solid-agnostic: only Inside and DistanceToOut.
+  auto valid = [&](const G4ThreeVector& start) {
+    const G4ThreeVector local = xf.TransformPoint(start);
+    if (solid->Inside(local) != kInside) return false;
+    const G4double path = (pos_out - start).dot(normal_hat) / n;
+    return solid->DistanceToOut(local, localDir) >= path - tolerance;
+  };
+
+  fellBack = false;
+  const G4ThreeVector normalInset = pos_out - inset * normal_hat;
+  if (n > 0.) {
+    const G4ThreeVector onRay = pos_out - (inset / n) * dir_out;
+    if (valid(onRay)) return onRay;
+    if (valid(normalInset)) return normalInset;
+  }
+  fellBack = true;
+  return normalInset;
 }
 
 // ---------------------------------------------------------------------------
