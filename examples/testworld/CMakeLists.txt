@@ -1,5 +1,5 @@
 #----------------------------------------------------------------------------
-# bbrsimTestWorld — BBRsim test world (Cu slab, two HFSS crack volumes, Planck
+# bbrsimTestWorld — BBRsim test world (two Cu plates with HFSS crack volumes, Planck
 # emitter or fixed gun). Builds against the parent source-tree target or, as a
 # standalone project, an installed BBRsim package.
 cmake_minimum_required(VERSION 3.16...3.27)

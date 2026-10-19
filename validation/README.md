@@ -106,10 +106,10 @@ not installed is skipped) and exits with its FAIL count.
 - `check_angle_distribution.py` — first-hit Cu incidence angles below 15° match uniform-in-θ emission (KS p > 0.01). The test is N-sensitive: it is meant for the 10k-event `planck` case (`planck.mac`).
 - `check_crack_wall_reflection.py` — every crack→Cu reflection flips p_z and keeps p_x, p_y to 1e-9.
 - `check_crack_transmittance.py` — T_obs within 3 σ (binomial) of 0.50 and no tangential exits.
-- `check_crack_ratio.py` — the crack2/crack1 entry ratio is within 3 σ (Poisson) of the aperture ratio A2/A1 = 1.962.
+- `check_crack_ratio.py` — the crack2/crack1 entry ratio is within 3 σ (Poisson) of the aperture ratio A2/A1 = 2.000 (the crack volumes equal the HFSS models: 10 mm × 100 µm over 10 mm × 50 µm).
 - `check_crack_oblique.py`, `check_crack_frequency.py` — all 138 and 89 checks respectively.
 - `check_tree_run.py` — on each tree case, every exact row, every statistical row within its family-wise limit and every physics row of [Real-tree check](#real-tree-check).
-- `check_round_gap.py` — all 49 checks over the nine runs of `Validation_RoundGap.mac` (2000 GHz, against the mock `RoundGap_r50um` table): one gap entry per event along the gun direction; T_obs within 3 σ (binomial) of the `bbrsim.hfss` prediction; every exit on the exit face and within the 50 µm HFSS radius, although the Geant4 hole is 51 µm; for the three fixed polarizations, the share of exits inside R/2 within 4 σ of the table's prediction, which tells the Ephi=0 and Ephi=1 radial profiles apart; and the mean exit direction within 4 standard errors of the prediction in each component. The last run, at the diagonal key (45°, 135°) with a fixed polarization of equal θ̂ and φ̂ components, makes the polarization cross term 2 E_θ E_φ √(T₀T₁) Re ρ large (Re ρ = 0.288 in the mock): T = 0.511 against 0.289 with the term's sign flipped, 28 σ apart, so it pins that sign end to end; the random-polarization diagonal run averages the term out. With `--log` (as the runner calls it) one more check: the run log holds exactly one `[BBR] crack RoundGap_r50um:` line reporting its sidecar fit, the startup check of the placed solid against the sidecar; without it, 48 checks.
+- `check_round_gap.py` — all 49 checks over the nine runs of `Validation_RoundGap.mac` (2000 GHz, against the mock `RoundGap_r50um` table): one gap entry per event along the gun direction; T_obs within 3 σ (binomial) of the `bbrsim.hfss` prediction; every exit on the exit face and within the 50 µm HFSS radius, which is also the Geant4 hole's radius; for the three fixed polarizations, the share of exits inside R/2 within 4 σ of the table's prediction, which tells the Ephi=0 and Ephi=1 radial profiles apart; and the mean exit direction within 4 standard errors of the prediction in each component. The last run, at the diagonal key (45°, 135°) with a fixed polarization of equal θ̂ and φ̂ components, makes the polarization cross term 2 E_θ E_φ √(T₀T₁) Re ρ large (Re ρ = 0.288 in the mock): T = 0.511 against 0.289 with the term's sign flipped, 28 σ apart, so it pins that sign end to end; the random-polarization diagonal run averages the term out. With `--log` (as the runner calls it) one more check: the run log holds exactly one `[BBR] crack RoundGap_r50um:` line reporting its sidecar fit, the startup check of the placed solid against the sidecar; without it, 48 checks.
 - `check_invariants.py` — both invariants, each printed in its own section: no photons in metal (no crossing starts inside a `Cu_RRR*` or `BBR_Perfect*` material, and the file holds at least one crossing; `--allow-no-crossings` waives only the latter, for the world-exit fixture), and termination labels (the file holds at least one `abspoints` row, no `unknown` label, every world exit is `WorldExit`, every absorption has a volume, and the `BBRAbsorb` counts agree between the two ntuples). A code with no legend entry fails the section that reads that column (`legend lacks code(s) …`), so a legend gap cannot make a check pass vacuously.
 - `check_cu_serov.py` — full-Drude loss for the `OF_Cu` (RRR 3) and `HP_Cu` (RRR 6) aliases within ±10 % of Serov et al. (2016). **XFAIL:** `HP_Cu` comes out 13 % low at 230 GHz, because RRR 6 was derived with Hagen-Rubens. Whether to move `HP_Cu` to RRR 5 or accept a wider tolerance is an open decision; the runner reports the check as XFAIL, and as XPASS (a failure) if it starts passing.
 - `cutoff warning once` (runner row, no ROOT input) — `BBR026` is tolerated in the planck, config_mt, transmit and frequency cases, and fires at most once per dataset and direction in each case's log (each case is its own process, with its own one-shot flags). The row fails closed: every `G4Exception : BBR026` banner must have a description line that parses as `BBR026 dataset=<id> direction=below|above`, so a changed message format fails rather than passing unseen. See [Dataset sidecars](#dataset-sidecars).
@@ -231,7 +231,7 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 - F9 `transmittance`: the supported `definition` string and `incoming_includes_cos_theta` false (`BBR025`).
 - F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`). `boundaries`: `entrance` and `exit` `"radiation"`, `walls` `"PEC"`, the model the transport implements: a non-transmission is specular reflection with no wall loss, and the mode formulas assume a closed PEC guide (`BBR025`; a missing or mistyped field is `BBR024`).
 - F11 `geometry.extent_mm`: p, l, g > 0 (`BBR024`); compared with the placed solid's bounding limits along local x, y, z, printed as one `[BBR]` info line and stored as `hfss_extent_mm` and `geant4_extent_mm` in `data.hfss_datasets` of each `<stem>.metadata.json` (info only, not a warning).
-- F12 `exit_field.cross_section` against the placed solid, at the first run initialization, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset, is strictly inside the solid. With `rim_points` `"included"`, the recorded Geant4 margin is what makes this pass (`BBR025`).
+- F12 `exit_field.cross_section` against the placed solid, at the first run initialization, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset (20 times the surface tolerance, 2e-8 mm), must equal the solid (OR-020): boundary samples (a rectangle's corners and edge midpoints, 360 points round a disc) 1 nm inside the declared section must lie inside the solid, and samples 1 nm beyond the section inflated by the 1e-6 containment tolerance must not. The solid may therefore be smaller than the declared section by at most 1 nm and larger by at most 1 nm plus 1e-6 relative; a Geant4 section with a margin, in either direction, is `BBR025`. The exit points that HFSS placed on a wall are clamped 1 nm inside the section at load (below), so they lie inside a solid of exactly that section.
 - F13 `modes.mode`, `.cutoff_ghz`, `.polarization_filter_limit_ghz`: re-derived from `cross_section` to 1e-6 relative with closed forms (rectangle f_mn = (c/2)·√((m/a)² + (n/b)²), c = 299792458 m/s; disc TE11 with x′₁₁ = 1.8411837813). The full lists are re-derived only by the Python validator, with scipy (`BBR025`).
 
 At the CSV load, per frequency, in `BBRHFSSData`:
@@ -248,9 +248,20 @@ Ephi=0 CSVs (`BBR012`; `BBRHFSSData` also pairs the rows by position). A CSV
 row with the wrong number of fields, or an empty field, is `BBR013`.
 
 The containment tolerance is 1e-6 relative (the HFSS runner's own; never use a
-stricter one). Incidence keys are rounded to 0.01° before the C2 comparison,
+stricter one). C5 accepts a point up to that far outside the section; the clamp
+below moves it inside. Incidence keys are rounded to 0.01° before the C2 comparison,
 as `BBRHFSSData` rounds them. The far-field ranges use 1e-9 degrees and the
 exit-grid ranges 1e-9 relative to the largest declared |value|.
+
+After C5, with a sidecar, `BBRHFSSData` clamps every exit point closer than 1 nm to
+the declared section's boundary, or past it (within C5's tolerance), to 1 nm inside
+it (OR-020; a clamp, not a shift: points already further inside do not move). Each
+point's weight and the pairing of the two Ephi rows are unchanged, and the count is
+logged once per loaded frequency:
+`[BBR] HFSS <id>_<freq>GHz: N exit point(s) clamped 1 nm inside the declared
+cross-section`. At 500 GHz and 15 keys, N is 4500 for crack1 (300 per key) and
+6000 for crack2 (400 per key); the mock round gap gives 300 (its 20 rim points
+per key). The line is information, not a warning.
 
 After C1-C5, at every load with or without a sidecar, a basis polarization
 with T > 0 must have outward far-field intensity (directions in the exit-face
@@ -333,13 +344,13 @@ The fixture header gives the by-hand recipe.
 ## Mock round-gap tree
 
 `Validation_RoundGap.mac` turns on the opt-in straight round gap
-(`/bbr/testworld/roundGap true`: `RoundGap_r50um`, a 51 µm-radius `vacuum_wg`
+(`/bbr/testworld/roundGap true`: `RoundGap_r50um`, a 50 µm-radius `vacuum_wg`
 hole along x through a 0.4 mm Cu plate at z = −80 mm) and feeds it the mock
 dataset `RoundGap_r50um_2000GHz` that `Scripts/make_mock_round_gap.py` writes:
 a 50 µm disc in sidecar schema 1.0 with synthetic tables whose transmittance
 and radial exit profile differ between the two polarizations and whose
 far-field lobe moves with the incidence key, so each mapping is visible to
-`check_round_gap.py`. The test world places both slab cracks as well and
+`check_round_gap.py`. The test world places both cracks as well and
 BBRsim checks every placed crack before the first event, so the tree also links the real crack datasets of
 `data/waveguides`, with copies of their sidecars. The script refuses to write
 inside the data tree it links. The runner builds the tree (a few MB) in
@@ -388,7 +399,11 @@ of the thread count (Geant4 warns, Run10035, otherwise).
 - Exact rows: the tree is unchanged since generation (the grids, and each
   sidecar's sha256, which the manifest records and which covers the CSV
   checksums); every output names the data root and the tree's frequencies and
-  ran the planned number of events; every Planck run reached its crack; every decided crack entry carries the
+  ran the planned number of events; every `crossings` and `abspoints` event_id of
+  a run lies in [0, events) (row `run NNN event_id`, which fails on the first
+  value outside the range, naming the file, the ntuple and the row; G4-027,
+  G4-026: one output once carried a corrupted event_id column); every Planck run
+  reached its crack; every decided crack entry carries the
   grid frequency the selection rule gives for its recorded energy, and every
   other row −1 (the mirror computes the frequency in CLHEP's own arithmetic, so
   the comparison is exact); one entry per event on the aimed crack with the

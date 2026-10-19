@@ -16,7 +16,7 @@ The tables are synthetic, chosen so the validator can see each mapping:
     at the diagonal keys and the cross term is active there;
   * a 2 um exit lattice (1961 points per key at the default R) keeping the twenty lattice
     points on r = R, the solutions of a^2 + b^2 = 25^2 such as (30, 40) um
-    (rim_points included), so the Geant4 radius needs its 1 um margin; the lattice
+    (rim_points included), which BBRsim clamps 1 nm inside the disc at load; the lattice
     spans +-R, so --radius must be a multiple of 2 um (exit 2 otherwise);
   * a far-field Gaussian lobe (sigma 25 deg) around (Theta, Phi) = (90, Phi0), with
     Phi0 = -30 deg at IWaveTheta = 135 and 0 elsewhere.

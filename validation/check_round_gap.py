@@ -2,8 +2,8 @@
 check_round_gap.py
 Validate the straight round gap on the output of Validation_RoundGap.mac.
 
-Setup: a vacuum_wg G4DisplacedSolid tube (radius 51 um, axis along x) in a
-0.4 mm Cu plate at z = -80 mm, fed by the mock HFSS dataset
+Setup: a vacuum_wg G4DisplacedSolid tube (radius 50 um, equal to the HFSS radius,
+axis along x) in a 0.4 mm Cu plate at z = -80 mm, fed by the mock HFSS dataset
 RoundGap_r50um_2000GHz (validation/Scripts/make_mock_round_gap.py). Nine
 fixed-gun runs at 2000 GHz write output/bbr_round_r00.root ... r08: normal
 incidence with E across g, E along l and random polarization; the four 45 deg
@@ -18,7 +18,8 @@ Per run:
   * one RoundGap_r50um entry per event, along the configured direction;
   * T_obs within 3 sigma of the bbrsim.hfss prediction (fixed or random polarization);
   * every exit on the exit face (x = 0.4 mm) and within the HFSS radius 50 um of
-    the axis: positions come from the table, not from the 51 um solid;
+    the axis (the solid has that radius too; the table's rim points are clamped 1 nm
+    inside it at load);
   * fixed polarization only: the share of exits with r < R/2 is within 4 sigma
     of the table's prediction. The Ephi=0 profile (1 - (r/R)^2)^2 and the Ephi=1
     profile (r/R)^4 differ, so this sees the polarization mapping;

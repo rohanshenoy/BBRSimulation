@@ -256,7 +256,7 @@ def test_expected_warnings(checker):
 
 
 LOG = """[BBR] HFSS dataset InfParallelPlate_crack1Rohan: 1 frequency grid point(s): 500 GHz (from /t/waveguides)
-[BBR] crack InfParallelPlate_crack1Rohan: HFSS (p, l, g) = (1, 10, 0.05) mm, Geant4 (x, y, z) = (4, 10.2, 0.052) mm; 1 sidecar(s) fit
+[BBR] crack InfParallelPlate_crack1Rohan: HFSS (p, l, g) = (1, 10, 0.05) mm, Geant4 (x, y, z) = (1, 10, 0.05) mm; 1 sidecar(s) fit
 G4WT1 > 
 -------- WWWW ------- G4Exception-START -------- WWWW -------
 *** G4Exception : BBR026

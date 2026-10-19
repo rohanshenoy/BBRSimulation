@@ -16,9 +16,11 @@ there, and output goes to `output/` under the directory you run from.
 ./bbrsimTestWorld <macro.mac>     # batch
 ```
 
-The geometry: a 50 cm vacuum world, a 4 mm Cu slab with its front face at
-x = 0, and two `vacuum_wg` crack volumes in the slab (crack1: 52 µm gap at
-z = 0; crack2: 102 µm gap at z = 3 mm).
+The geometry: a 50 cm vacuum world and two touching Cu plates with their front
+faces at x = 0, each as thick as its crack, holding two `vacuum_wg` crack
+volumes that equal the HFSS models (crack1: 1.0 mm long, 10 mm wide, 50 µm gap
+at z = 0, in a 1.0 mm plate; crack2: 1.5 mm long, 10 mm wide, 100 µm gap at
+z = 3 mm, in a 1.5 mm plate).
 
 In the commands below, `./bbrsimTestWorld` runs in `examples/testworld/build/`
 and the `conda run` commands run from the repository root. The light-pipe
@@ -29,7 +31,7 @@ example has its own [README](examples/lightpipe/README.md).
 ### 1. Planck thermal emitter
 
 The default mode. A 1×20×20 mm box at x = −50 mm emits photons with energies
-drawn from the Planck photon-number spectrum (10 GHz–20 THz) toward the slab
+drawn from the Planck photon-number spectrum (10 GHz–20 THz) toward the plates
 and the cracks.
 
 ```bash
@@ -66,8 +68,8 @@ an axial entry. At 500 GHz and normal incidence:
 
 | Crack | Gap | Observed T (40 000 photons) |
 |---|---|---|
-| crack1 | 52 µm | 50.0 ± 0.25 % |
-| crack2 | 102 µm | 50.3 ± 0.25 % |
+| crack1 | 50 µm | 50.0 ± 0.25 % |
+| crack2 | 100 µm | 50.3 ± 0.25 % |
 
 The expected value is exactly 50 %. A parallel-plate gap narrower than λ/2 is
 a perfect polarization filter: only the TEM mode, which has no cutoff,
@@ -77,6 +79,17 @@ the tables load, an incidence key whose largest transmittance over linear
 polarizations exceeds 1 has both polarizations' transmittances divided by it,
 so the maximum is 1 and their ratio is kept; a `[BBR] HFSS ... normalized to 1`
 line reports each such key.
+
+The crack volumes equal the HFSS models, so HFSS exit points that lie on a wall
+sit on the Geant4 wall too. When a frequency's tables load, every exit point
+closer than 1 nm to the declared cross-section's boundary, or past it by at most
+the 1e-6 relative tolerance, is moved to 1 nm inside it, with its weight and
+its Ephi pairing unchanged, and one line reports the count:
+`[BBR] HFSS <id>_<freq>GHz: N exit point(s) clamped 1 nm inside the declared
+cross-section` (4500 for crack1 and 6000 for crack2 at 500 GHz, 15 keys each).
+After an HFSS transmission the photon is placed 2e-8 mm (20 times Geant4's
+surface tolerance) inside the crack's exit face, so Geant4 11.1's boundary
+process does not warn `OpBoun06` on its first step into the world.
 
 To aim the fixed gun at a crack:
 
@@ -104,7 +117,7 @@ sidecars). There is no interpolation between frequencies; a photon beyond the
 grid uses the nearest edge, with one `BBR008` warning per crack and side.
 When a photon's frequency and the dataset serving it lie on opposite sides of
 the guide's lowest-mode cutoff (`modes.cutoff_ghz` in the sidecar: TE10 at
-14.99 GHz for the slab cracks, TE11 at 1757 GHz for the 50 µm round gap),
+14.99 GHz for the slot cracks, TE11 at 1757 GHz for the 50 µm round gap),
 BBRsim warns once with `BBR026`. The 2000 GHz round-gap data are therefore for
 fixed-energy gun runs only until a dataset below cutoff exists.
 
@@ -341,11 +354,11 @@ sidecars](validation/README.md#dataset-sidecars).
 implement. The message names the field (a frame, incidence, far-field or
 polarization definition, the boundary model, or the modes block) and the one
 convention the sampler implements; or, at `/run/initialize`, it names the crack volume whose
-solid the declared exit cross-section does not fit strictly inside (make the
-Geant4 section larger than the HFSS one by a recorded margin, as the 52/102 µm
-test-world gaps are, and check that local x is the propagation axis: a bare
-`G4Tubs` has it on z); or, at the first CSV load of a frequency, it counts the
-exit points outside the declared cross-section. A dataset produced outside the
+solid does not equal the declared exit cross-section (the Geant4 section must
+equal the HFSS one to within 1 nm, or 1 nm plus 1e-6 relative where larger, as
+the test-world cracks do since OR-020; check also that local x is the
+propagation axis: a bare `G4Tubs` has it on z); or, at the first CSV load of a
+frequency, it counts the exit points outside the declared cross-section. A dataset produced outside the
 canonical pose is rejected, not remapped. See [Dataset
 sidecars](validation/README.md#dataset-sidecars).
 

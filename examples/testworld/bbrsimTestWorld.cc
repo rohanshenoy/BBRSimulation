@@ -1,5 +1,5 @@
 /// \file bbrsimTestWorld.cc
-/// \brief Main program for the BBRsim test world (Cu slab with two HFSS crack volumes).
+/// \brief Main program for the BBRsim test world (two Cu plates with HFSS crack volumes).
 
 #include "TestWorldDetectorConstruction.hh"
 #include "TestWorldActionInitialization.hh"

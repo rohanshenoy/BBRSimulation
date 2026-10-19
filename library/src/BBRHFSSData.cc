@@ -146,7 +146,7 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
   //
   // Load-time normalization: the largest transmittance over linear polarizations is
   // the top eigenvalue of [[T0, c], [c, T1]], c = sqrt(T0 T1) Re rho. HFSS port
-  // normalization can put it above 1 (raw T0 = 1.0545 at (0,180) of the 52 um gap;
+  // normalization can put it above 1 (raw T0 = 1.0545 at (0,180) of crack1;
   // T0 + T1 = 1.025 in phase at (45,180)). Such a key has T0 and T1 divided by it, so
   // its maximum is 1 and T1/T0 is kept; a key at or below 1 is left as it is.
   for (auto& [key, ds] : fData) {

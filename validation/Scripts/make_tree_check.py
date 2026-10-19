@@ -105,7 +105,7 @@ def read_tree(root):
     missing = [i for i in ALWAYS_PLACED if i not in grids]
     if missing:
         raise Refusal(f"{wg} has no dataset for {', '.join(missing)}: the test world always places "
-                      "both slab cracks and checks every placed crack at /run/initialize")
+                      "both cracks and checks every placed crack at /run/initialize")
     datasets = {}
     for did, grid in grids.items():
         entry = {"aimed": did in AIM, "grid": [[f, stem] for f, stem in grid],

@@ -24,7 +24,7 @@ event-by-event footing.
 **Working and validated**
 
 - HFSS crack diffraction at normal incidence and at 45° off normal. Observed
-  transmittance at 500 GHz is 50.0 % / 50.3 % (52 µm / 102 µm gaps), against
+  transmittance at 500 GHz is 50.0 % / 50.3 % (50 µm / 100 µm gaps), against
   the 50 % ideal for unpolarized light on a sub-cutoff gap.
 - Frequency-keyed HFSS lookup: each photon gets the dataset nearest its
   frequency (validated on a mock five-frequency tree).
@@ -53,7 +53,7 @@ are indicative, not quantitative. Oblique incidence is validated only on the
 | Directory | Contents |
 |---|---|
 | `library/` | `libBBRsim` (CMake target `BBRsim::BBRsim`): the boundary-process wrapper, HFSS crack lookup, materials, run configuration and thermal emitter |
-| `examples/testworld/` | `bbrsimTestWorld`: Cu slab with two HFSS crack volumes, Planck emitter or fixed gun |
+| `examples/testworld/` | `bbrsimTestWorld`: two Cu plates holding the HFSS crack volumes at their exact size, Planck emitter or fixed gun |
 | `examples/lightpipe/` | `bbrsimLightPipe`: 4 K → mixing-chamber light pipe, parametric or imported from `.STL` |
 | `validation/` | regression fixtures, PASS/FAIL validators and the regression runner |
 | `tools/` | the `bbrsim` Python package and plot scripts |
@@ -216,9 +216,9 @@ minimal working example.
 
 ## Examples
 
-- **[testworld](examples/testworld/README.md)**, `bbrsimTestWorld`: a 4 mm Cu
-  slab with two HFSS crack volumes in a 50 cm vacuum world, lit by the Planck
-  emitter or a fixed photon gun.
+- **[testworld](examples/testworld/README.md)**, `bbrsimTestWorld`: two Cu
+  plates, each as thick as its HFSS crack volume, in a 50 cm vacuum world, lit
+  by the Planck emitter or a fixed photon gun.
 - **[lightpipe](examples/lightpipe/README.md)**, `bbrsimLightPipe`: a 4 K →
   mixing-chamber light pipe, generated from parameters or imported from an
   ASCII `.STL`.
