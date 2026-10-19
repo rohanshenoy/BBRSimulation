@@ -426,7 +426,7 @@ void BBRDatasetSidecar::CheckFitsSolid(const G4VSolid& solid, const std::string&
   if (solid.Inside(G4ThreeVector()) != kInside)
     Fail("BBR025", path, "the local origin of crack volume " + volumeName + " is not inside its solid; the wrapper "
                          "finds the exit face from the origin along local x (BBSimOpBoundaryProcess.cc)");
-  const double inset = 10. * G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
+  const double inset = 20. * G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
   int bad = 0;
   G4ThreeVector worst;
   for (const double dir : {1., -1.}) {

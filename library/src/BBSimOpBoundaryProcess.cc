@@ -204,9 +204,13 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     // transportation step will then cross crack -> World normally and update
     // the track touchable/material state. Placing the track directly outside
     // would leave the ordinary G4ParticleChange touchable inconsistent.
+    // The inset is 20 times the surface tolerance: Geant4 11.1's
+    // G4OpBoundaryProcess warns OpBoun06 for a step of at most 10 times the
+    // tolerance, and a photon leaving straight along the crack axis takes
+    // exactly this inset as its first step into the World.
     const G4double surfaceTolerance =
         G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
-    const G4double inset = 10. * surfaceTolerance;
+    const G4double inset = 20. * surfaceTolerance;
     if (halfLen <= inset) {
       G4Exception("BBSimOpBoundaryProcess::HandleDiffractionBoundary",
                   "BBR004", FatalException,

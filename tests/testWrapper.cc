@@ -27,7 +27,7 @@ const double c45 = std::cos(45 * deg), s45 = std::sin(45 * deg);
 const G4ThreeVector kHitMinusX(-2 * mm, 0, 0);   // centre of the crack's -x face
 const double E500 = EnergyEV(500.);
 
-double Inset() { return 10. * G4GeometryTolerance::GetInstance()->GetSurfaceTolerance(); }
+double Inset() { return 20. * G4GeometryTolerance::GetInstance()->GetSurfaceTolerance(); }
 
 // Writes the dataset as <root>/waveguides/crack_<freq>GHz and points the library at root.
 void UseData(TempDir& d, const hfssfix::Dataset& ds, const std::string& freq = "500") {
@@ -179,7 +179,7 @@ int main(int argc, char** argv) {
         ExpectG4Exception("BBR005", [&] { w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng); }, "BBSimOpBoundaryProcess");
       }
       {
-        World thin({5e-9 * mm, 5 * mm, 0.026 * mm});   // half-length 5e-9 mm <= inset 1e-8 mm
+        World thin({1.5e-8 * mm, 5 * mm, 0.026 * mm});   // half-length 1.5e-8 mm <= inset 2e-8 mm (it passed at 10x)
         Script(eng, {0.0, 0.5, 0.5});
         ExpectG4Exception("BBR004", [&] { thin.Shoot({-1 * mm, 0, 0}, X, Z, E500, eng); }, "BBSimOpBoundaryProcess");
       }
