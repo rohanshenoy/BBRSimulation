@@ -1,15 +1,25 @@
-"""bbrsim.sidecar - the HFSS dataset sidecar <stem>.dataset.json (schema 1.x).
+"""bbrsim.sidecar - the HFSS dataset sidecar <stem>.dataset.json (schema 1.x and 2.x).
 
 Python twin of library/src/BBRDatasetSidecar.cc (checks F1-F11 and F13, codes
 BBR024 and BBR025) and of the sidecar checks in BBRHFSSData (C1-C5, on both
-polarizations), plus what the C++ does not do: the full mode lists (Bessel zeros
-through scipy), the CSV checksums, the far-field step, the agreement of the two
-polarizations, and the builders the mock generators and the legacy-sidecar
-script use. The schema (agreed with Blackbody-Simulations on 2026-10-05) is described
-in validation/README.md, Dataset sidecars. Errors are ValueError whose message
-starts with the C++ code. invariant() and same_invariant() hold what every
-frequency of one ID must share: physics only, numbers to 1e-9 relative, over the
+polarizations), plus what the C++ does not do: the full mode lists of schema 1
+(Bessel zeros through scipy), the CSV checksums, the far-field step, the agreement
+of the two polarizations, and the builders the mock generators and the
+legacy-sidecar script use. The schema (agreed with Blackbody-Simulations on
+2026-10-05) is described in validation/README.md, Dataset sidecars. Errors are
+ValueError whose message starts with the C++ code. invariant() and
+same_invariant() hold what every frequency of one ID must share: the schema
+major, the incidence grid and the physics, numbers to 1e-9 relative, over the
 fields both sidecars carry; invariant_diff() names the blocks that differ.
+
+Schema 2.x (OR-028, OR-031, OR-034, OR-036, OR-038, HF-040, HF-047, HF-049): the
+checks run in the C++ order so the first error carries the same code. The 2.0
+sidecar declares T = OutgoingPower / (IngoingPower * InterceptFactor), the per-key
+divisor c_k from the declared incidence grid (cell_90 at theta = 90 deg), the
+per-key t_flux, scale and far-field records, the quadrature and sampler, the
+cross-term limit and the regime cutoffs; the waveguide table has 16 columns read by
+position. check_csvs() adds the row checks of BBRHFSSData::LoadWaveguide (BBR012).
+build_schema2_from_csvs() writes a 2.0 sidecar from finalized 2.0 tables.
 
 Frames: canonical (p, l, g) = (propagation, long, gap), p x l = g, equal to the
 Geant4 crack-local (x, y, z). The sampler implements one frame: the HFSS global
@@ -38,6 +48,37 @@ FF_COLUMNS = ["Freq", "Ephi", "IWavePhi", "IWaveTheta", "Phi", "Theta",
               "rEphi_real", "rEphi_imag", "rEtheta_real", "rEtheta_imag"]
 WG_COLUMNS = ["Freq", "Ephi", "IWavePhi", "IWaveTheta", "OutgoingPower", "IngoingPower",
               "X", "Y", "Z", "Ex_real", "Ey_real", "Ez_real", "Ex_imag", "Ey_imag", "Ez_imag"]
+# The 2.0 list: headers in the stored (interleaved) order, InterceptFactor last. Read by position:
+# Ex = (9, 10), Ey = (11, 12), Ez = (13, 14), InterceptFactor = 15 (BBRHFSSData's 2.x branch).
+WG_COLUMNS_2 = ["Freq", "Ephi", "IWavePhi", "IWaveTheta", "OutgoingPower", "IngoingPower",
+                "X", "Y", "Z", "Ex_real", "Ex_imag", "Ey_real", "Ey_imag", "Ez_real", "Ez_imag", "InterceptFactor"]
+# The fixed 2.0 strings (a differing value is BBR025), copied from the field list.
+SCHEMA2_STRINGS = {
+    "model.kind": "screen_free_abc",
+    "transmittance.definition": "OutgoingPower / (IngoingPower * InterceptFactor)",
+    "transmittance.numerator": "exit_flux_re_s_dot_n",
+    "transmittance.incoming": "area_times_intensity_undivided",
+    "transmittance.above_one": "per_photon_cap",
+    "exit_field.sampler": "abs_e_t_squared_times_quadrature",
+    "exit_field.scale.rule": "sum_i w_i abs(E_t,i)^2 h_y h_z / (2 eta0) = outgoing_power_w",
+    "exit_field.column_order_check.rule": "reference_exporter_interleaved_v1",
+    "cross_term.density": "e_t_quadrature",
+    "cross_term.above_limit": "warn_once",
+    "far_field.normalization": "pattern_only",
+}
+SCHEMA2_QUADRATURE = {"rectangle": "trapezoid", "disc": "uniform_disc"}
+SCHEMA2_TANGENTIAL = ["Ex", "Ey"]
+SCHEMA2_PLANE_TOL_M = 1e-12
+SCHEMA2_CROSS_TERM = ("Re rho = sum_i w_i Re(E_t0,i . conj E_t1,i) / sqrt(sum_i w_i abs(E_t0,i)^2 * "
+                      "sum_i w_i abs(E_t1,i)^2)")
+KEY_TOL = 1e-9                  # per-key records match the declared keys (degrees)
+DIVISOR_REL = 1e-6              # c_k, cell_90 against the closed form; the two T sources
+STEP_REL = 1e-6
+COS_FLOOR = 0.01
+DARK_REL = 1e-12                # the producer's threshold: |flux| <= DARK_REL * (A.I) is a numerical zero
+X01 = 2.4048255577              # first zero of J0: TM01 of a round guide
+X21_PRIME = 3.0542369282        # first zero of J2': TE21 of a round guide
+ETA0 = 1.25663706127e-6 * C     # ohm; the HFSS side's constants (recorded values only)
 HFSS_AXES = {"x": [0, 0, -1], "y": [0, 1, 0], "z": [1, 0, 0]}        # in canonical components
 EXIT_CS_GLOBAL = {"x": [0, 0, 1], "y": [0, 1, 0], "z": [-1, 0, 0]}   # in HFSS global components
 IDENTITY = {"x": [1, 0, 0], "y": [0, 1, 0], "z": [0, 0, 1]}
@@ -189,6 +230,72 @@ def lowest_mode(section):
     raise ValueError(f"BBR025: cross_section shape {section['shape']!r} has no mode model")
 
 
+# --- schema 2: the divisor, the regime cutoffs --------------------------------
+
+def schema_major(sc):
+    """1 for schema_version "1" or "1.x", 2 for "2" or "2.x"; anything else is BBR024 (the version gate)."""
+    v = _req(sc, "schema_version", "", "str")
+    if v == "1" or v.startswith("1."):
+        return 1
+    if v == "2" or v.startswith("2."):
+        return 2
+    raise ValueError(f"BBR024: schema_version {v}: BBRsim reads 1.x and 2.x")
+
+
+def _delta(theta_list):
+    """(smallest declared theta above 90 deg) - 90, or -1 without a 90 deg entry or anything above it."""
+    has90, above = False, None
+    for t in theta_list:
+        if abs(t - 90.0) <= KEY_TOL:
+            has90 = True
+        elif t > 90.0:
+            above = t if above is None else min(above, t)
+    return above - 90.0 if has90 and above is not None else -1.0
+
+
+def cell_90(theta_list):
+    """HF-049 / OR-036: 1 / <1 / max(cos a, 0.01)> with a uniform on [90 - D/2, 90] deg, D = (smallest
+    declared theta above 90) - 90. None for a declared list without 90 deg or without anything above it."""
+    delta = _delta(theta_list)
+    if delta < 0.0:
+        return None
+    a0 = math.pi / 2 - delta / 2 * math.pi / 180.0
+    af = math.acos(COS_FLOOR)
+    length = math.pi / 2 - a0
+
+    def prim(a):                                  # integral of sec
+        return math.log(1.0 / math.cos(a) + math.tan(a))
+
+    inv = (prim(af) - prim(a0)) + (math.pi / 2 - af) / COS_FLOOR if af > a0 else (math.pi / 2 - a0) / COS_FLOOR
+    return length / inv
+
+
+def intercept_factor(theta_deg, theta_list):
+    """c_k: |cos theta|, or cell_90 at theta = 90 deg (None if the list gives no cell)."""
+    if abs(theta_deg - 90.0) <= KEY_TOL:
+        return cell_90(theta_list)
+    return abs(math.cos(theta_deg * math.pi / 180.0))
+
+
+def regime_cutoffs(section):
+    """The cutoffs a photon can cross to reach a table (OR-031), ascending: a rectangle's TE10 and gap
+    family TE0n up to 20 THz inclusive; a disc's TE11, TM01 and TE21 (closed-form zeros, no scipy).
+    A list of {"mode", "cutoff_ghz"}."""
+    if section["shape"] == "disc":
+        k = C / (2 * math.pi * section["radius_m"]) / 1e9
+        return [{"mode": "TE11", "cutoff_ghz": X11_PRIME * k}, {"mode": "TM01", "cutoff_ghz": X01 * k},
+                {"mode": "TE21", "cutoff_ghz": X21_PRIME * k}]
+    if section["shape"] != "rectangle":
+        raise ValueError(f"BBR025: cross_section shape {section['shape']!r} has no mode model")
+    a, b = 2 * section["y_e_half_m"], 2 * section["z_e_half_m"]
+    out = [{"mode": "TE10", "cutoff_ghz": C / (2 * a) / 1e9}]
+    n = 1
+    while n * C / (2 * b) / 1e9 <= LIST_LIMIT_GHZ + 1e-9:
+        out.append({"mode": f"TE0{n}" if n < 10 else f"TE0,{n}", "cutoff_ghz": n * C / (2 * b) / 1e9})
+        n += 1
+    return sorted(out, key=lambda e: e["cutoff_ghz"])          # stable, as std::stable_sort
+
+
 # --- CSV description, checksums, builder --------------------------------------
 
 def _range(values):
@@ -245,10 +352,12 @@ def _rows_by_key(df, cols):
     return out
 
 
-def _describe_one(base, stem, ephi):
-    """What the two CSVs of one polarization contain: header, incidence keys, grids, per-key counts."""
+def _describe_one(base, stem, ephi, v2=False):
+    """What the two CSVs of one polarization contain: header, incidence keys, grids, per-key counts.
+    v2: the waveguide table is the 2.0 one (16 columns); the row arrays the 2.x row checks need are kept."""
     ff = _read_csv(base, stem, ephi, "far_field.csv", FF_COLUMNS)
-    wg = _read_csv(base, stem, ephi, "waveguide.csv", WG_COLUMNS)
+    wg = _read_csv(base, stem, ephi, "waveguide.csv", WG_COLUMNS_2 if v2 else WG_COLUMNS)
+    field_cols = WG_COLUMNS_2[9:15] if v2 else FIELD_COLUMNS
 
     def per_key(df, what):
         n = df.groupby(["IWavePhi", "IWaveTheta"]).size().unique()
@@ -275,7 +384,7 @@ def _describe_one(base, stem, ephi):
         "yz_m": yz,
         # (key, Y, Z) of every exit row whose six field components are exactly zero
         "zero_points": {(k, float(y), float(z)) for k, (y, z), zero in
-                        zip(rows_key, yz, (wg[FIELD_COLUMNS].to_numpy(float) == 0).all(axis=1)) if zero},
+                        zip(rows_key, yz, (wg[field_cols].to_numpy(float) == 0).all(axis=1)) if zero},
         "rows_key": rows_key,
         "keys": set(rows_key),
         "ff_keys": {(round(float(p), 2), round(float(t), 2)) for p, t in
@@ -284,13 +393,17 @@ def _describe_one(base, stem, ephi):
                         "waveguide.csv": sorted(wg.Freq.astype(str).unique())},
         "ff_rows": _rows_by_key(ff, ("Phi", "Theta")),
         "exit_rows": _rows_by_key(wg, ("X", "Y", "Z")),
+        # 2.x, in file order: the raw (IWavePhi, IWaveTheta) of each row, OutgoingPower, IngoingPower and
+        # InterceptFactor, for the row checks of BBRHFSSData::LoadWaveguide
+        "rows2": ((wg[["IWavePhi", "IWaveTheta"]].to_numpy(float), wg.OutgoingPower.to_numpy(float),
+                   wg.IngoingPower.to_numpy(float), wg.InterceptFactor.to_numpy(float)) if v2 else None),
     }
 
 
-def describe_csvs(base, stem):
+def describe_csvs(base, stem, v2=False):
     """What the CSVs of <stem> contain. The top-level fields describe Ephi=0 (what the builder
-    records); "polarizations" holds the description of each of Ephi=0 and Ephi=1."""
-    d0, d1 = _describe_one(base, stem, 0), _describe_one(base, stem, 1)
+    records); "polarizations" holds the description of each of Ephi=0 and Ephi=1. v2: 2.0 tables."""
+    d0, d1 = _describe_one(base, stem, 0, v2), _describe_one(base, stem, 1, v2)
     return {**d0, "polarizations": (d0, d1)}
 
 
@@ -371,19 +484,28 @@ def invariant(sc):
     """The frequency-independent physics of a sidecar (BBRDatasetSidecar::invariant).
 
     Every frequency of one dataset must share it, whichever writer or pose produced
-    each file: the frame mapping, symmetry, boundaries, geometry shape and extents,
-    the modes block without basis (recorded only) and propagating_count (per
+    each file: the schema major and the incidence grid (a tree holds one of each per
+    dataset ID, G4-032), the frame mapping, symmetry, boundaries, geometry shape and
+    extents, the modes block without basis (recorded only) and propagating_count (per
     frequency), and the exit cross-section. Descriptive and pose-dependent fields
     (canonical text, pose_rule, face selectors, origins, bounding box) are left out.
+    A block the sidecar lacks is left out of the comparison, as _close() compares the keys both carry.
     """
     fr, geo = sc["frames"], sc["geometry"]
-    return {
+    inv = {}
+    if "schema_version" in sc:
+        inv["schema"] = schema_major(sc)
+    if "excitation" in sc:
+        inv["excitation"] = {k: sc["excitation"][k] for k in ("incident_phi_deg", "incident_theta_deg")
+                             if k in sc["excitation"]}
+    inv.update({
         "frames": {k: fr[k] for k in ("hfss_global_axes_in_canonical", "exit_cs_axes_in_canonical")},
         "symmetry": sc["symmetry"], "boundaries": sc["boundaries"],
         "geometry": {k: geo[k] for k in ("shape", "extent_mm") if k in geo},
         "modes": {k: v for k, v in sc["modes"].items() if k not in ("propagating_count", "basis")},
         "cross_section": sc["exit_field"]["cross_section"],
-    }
+    })
+    return inv
 
 
 def _close(x, y):
@@ -407,7 +529,7 @@ def invariant_diff(a, b):
     """The top-level invariant() blocks on which two sidecars differ, in invariant() order;
     empty exactly when same_invariant(a, b) holds."""
     ia, ib = invariant(a), invariant(b)
-    return [k for k in ia if not _close(ia[k], ib[k])]
+    return [k for k in ia if k in ib and not _close(ia[k], ib[k])]
 
 
 # --- checks --------------------------------------------------------------------
@@ -450,13 +572,239 @@ def _axis_range(d, key, where):
     return lo, hi, n
 
 
+def _rep(v):
+    """A number as BBRsim's messages print it: the shortest text that reads back, no trailing .0."""
+    v = float(v)
+    return str(int(v)) if v == int(v) and abs(v) < 1e15 else repr(v)
+
+
+def _g12(v):
+    return f"{float(v):.12g}"
+
+
+def _ks(phi, theta):
+    return f"(phi {_g12(phi)}, theta {_g12(theta)})"
+
+
+def _relnear(a, b, rel):
+    return abs(a - b) <= rel * abs(b)
+
+
+def _nums(d, key, where):
+    v = _req(d, key, where, "list")
+    if not v or not all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in v):
+        raise ValueError(f"BBR024: {where}{key} must be a non-empty array of numbers")
+    return [float(x) for x in v]
+
+
+def _match_keys(parent, key, where, phis, thetas):
+    """The records of one per-key list, phi-major then theta, each matched to a declared key within
+    KEY_TOL; a duplicate, an unmatched record or a gap is BBR024 (MatchKeys)."""
+    lst = _req(parent, key, where)
+    w = where + key
+    if not isinstance(lst, list):
+        raise ValueError(f"BBR024: {w} must be a list of per-key records")
+    out = [None] * (len(phis) * len(thetas))
+    for i, rec in enumerate(lst):
+        wi = f"{w}[{i}]."
+        if not isinstance(rec, dict):
+            raise ValueError(f"BBR024: {w}[{i}] must be an object")
+        phi, theta = _req(rec, "phi_deg", wi, "num"), _req(rec, "theta_deg", wi, "num")
+        ip = next((a for a, x in enumerate(phis) if abs(phi - x) <= KEY_TOL), None)
+        it = next((b for b, x in enumerate(thetas) if abs(theta - x) <= KEY_TOL), None)
+        if ip is None or it is None:
+            raise ValueError(f"BBR024: {wi}key {_ks(phi, theta)} does not match a declared key of "
+                             "excitation.incident_phi_deg x incident_theta_deg")
+        slot = ip * len(thetas) + it
+        if out[slot] is not None:
+            raise ValueError(f"BBR024: {w}: duplicate record for key {_ks(phis[ip], thetas[it])}")
+        out[slot] = rec
+    for ip, phi in enumerate(phis):
+        for it, theta in enumerate(thetas):
+            if out[ip * len(thetas) + it] is None:
+                raise ValueError(f"BBR024: {w} has no record for declared key {_ks(phi, theta)}")
+    return out
+
+
+def _pols(rec, where):
+    """The two polarizations of a per-key record: exactly "0" and "1" (Polarizations)."""
+    pols = _req(rec, "polarizations", where)
+    if not isinstance(pols, dict) or len(pols) != 2:
+        raise ValueError(f'BBR024: {where}polarizations must be an object with exactly "0" and "1"')
+    return _req(pols, "0", where + "polarizations."), _req(pols, "1", where + "polarizations.")
+
+
+def _schema2_keys(sc, phis, thetas):
+    """The per-key records of a 2.x sidecar (BBRKeyRecord), in declared order, after every per-key
+    check of ParseSchema2: c_key against the closed form (BBR025) and per_key (BBR024), the scale
+    weights, the dark flags against t_flux (OR-038), the far-field ratios."""
+    tr = _req(sc, "transmittance", "", "dict")
+    c_recs = _match_keys(tr, "c_key", "transmittance.", phis, thetas)
+    k_recs = _match_keys(tr, "per_key", "transmittance.", phis, thetas)
+    s_recs = _match_keys(_req(_req(sc, "exit_field", "", "dict"), "scale", "exit_field.", "dict"), "per_key",
+                         "exit_field.scale.", phis, thetas)
+    f_recs = _match_keys(_req(sc, "far_field", "", "dict"), "ff_over_flux", "far_field.", phis, thetas)
+    out = []
+    for ip, phi in enumerate(phis):
+        for it, theta in enumerate(thetas):
+            k = ip * len(thetas) + it
+            ks = _ks(phi, theta)
+            ck = _req(c_recs[k], "c_k", f"transmittance.c_key {ks} ", "num")
+            want = intercept_factor(theta, thetas)
+            if not _relnear(ck, want, DIVISOR_REL):
+                raise ValueError(f"BBR025: transmittance.c_key {ks} c_k is {_rep(ck)}, but the declared grid gives "
+                                 f"{_rep(want)} (|cos theta|, or cell_90 at 90 deg; 1e-6 relative)")
+            pk = k_recs[k]
+            wp = f"transmittance.per_key {ks} "
+            pk_c = _req(pk, "c_k", wp, "num")
+            if not _relnear(pk_c, ck, DIVISOR_REL):
+                raise ValueError(f"BBR024: {wp}c_k {_rep(pk_c)} disagrees with transmittance.c_key {_rep(ck)}")
+            sk = s_recs[k]
+            ws = f"exit_field.scale.per_key {ks} "
+            w0, w1 = _req(sk, "w0", ws, "num"), _req(sk, "w1", ws, "num")
+            if not (w0 > 0.0 and w1 > 0.0):
+                raise ValueError(f"BBR024: {ws}w0 and w1 must be > 0 (w0 {_rep(w0)}, w1 {_rep(w1)})")
+            dark = (_req(sk, "dark0", ws, "bool"), _req(sk, "dark1", ws, "bool"))
+            tf = []
+            for p, pol in enumerate(_pols(pk, wp)):
+                wpp = f"{wp}polarizations.{p}."
+                t = _req(pol, "t_flux", wpp, "num")
+                _req(pol, "outgoing_power_abs_re_s_w", wpp, "num")
+                if dark[p] and t != 0.0:
+                    raise ValueError(f"BBR024: key {ks} polarization {p} is dark (exit_field.scale.per_key dark{p}), "
+                                     f"but transmittance.per_key t_flux is {_g12(t)}; a dark basis needs t_flux "
+                                     "exactly 0 (OR-038)")
+                tf.append(t)
+            for p, v in enumerate(_pols(f_recs[k], f"far_field.ff_over_flux {ks} ")):
+                wf = f"far_field.ff_over_flux {ks} polarizations.{p}"
+                if v is None:
+                    if not dark[p]:
+                        raise ValueError(f"BBR024: {wf} is null, but polarization {p} of key {ks} is not dark")
+                elif isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                    raise ValueError(f"BBR024: {wf} must be a finite number, or null for a dark basis")
+            out.append({"phi": phi, "theta": theta, "c_k": ck, "w0": w0, "w1": w1, "dark0": dark[0], "dark1": dark[1],
+                        "t_flux0": tf[0], "t_flux1": tf[1]})
+    return out
+
+
+def key_records(sc):
+    """The 2.x per-key records of a sidecar that has passed check(): a dict per declared key in declared
+    order (phi-major, then theta) with phi, theta, c_k, w0, w1, dark0, dark1, t_flux0, t_flux1."""
+    exc = sc["excitation"]
+    return _schema2_keys(sc, [float(x) for x in exc["incident_phi_deg"]], [float(x) for x in exc["incident_theta_deg"]])
+
+
+def _schema2(sc, section):
+    """ParseSchema2: what a 2.x sidecar declares in place of the 1.x transmittance block."""
+    exc = sc["excitation"]
+    phis, thetas = [float(x) for x in exc["incident_phi_deg"]], [float(x) for x in exc["incident_theta_deg"]]
+    S = SCHEMA2_STRINGS
+    _expect(_req(_req(sc, "model", "", "dict"), "kind", "model.", "str"), S["model.kind"], "model.kind")
+    _req(sc, "conventions", "", "dict")
+
+    tr = _req(sc, "transmittance", "", "dict")                                  # OR-034, HF-049
+    want90 = cell_90(thetas)
+    if want90 is None:
+        raise ValueError("BBR025: excitation.incident_theta_deg has no theta = 90 deg entry with a declared theta "
+                         "above it, so transmittance.cell_90 cannot be derived from the declared grid (HF-049); "
+                         "BBRsim refuses it")
+    delta = _delta(thetas)
+    for key in ("definition", "numerator", "incoming", "above_one"):
+        _expect(_req(tr, key, "transmittance.", "str"), S[f"transmittance.{key}"], f"transmittance.{key}")
+    cell = _req(tr, "cell_90", "transmittance.", "num")
+    if not _relnear(cell, want90, DIVISOR_REL):
+        raise ValueError(f"BBR025: transmittance.cell_90 is {_rep(cell)}, but the declared grid's outermost band "
+                         f"gives {_rep(want90)} (1e-6 relative; HF-049)")
+    wa = "transmittance.cell_90_assumes."
+    assumes = _req(tr, "cell_90_assumes", "transmittance.", "dict")
+    _expect(_req(assumes, "emitter", wa, "str"), "uniform_theta", wa + "emitter")   # BBRsim's one emitter
+    floor = _req(assumes, "cos_floor", wa, "num")
+    if not _relnear(floor, COS_FLOOR, 1e-9):
+        raise ValueError(f"BBR025: {wa}cos_floor is {_rep(floor)}; BBRsim implements only {_rep(COS_FLOOR)}")
+    band = _nums(assumes, "band_deg", wa)
+    if len(band) != 2:
+        raise ValueError(f"BBR024: {wa}band_deg must be [lo, 90]")
+    if abs(band[0] - (90.0 - delta / 2)) > KEY_TOL or abs(band[1] - 90.0) > KEY_TOL:
+        raise ValueError(f"BBR025: {wa}band_deg is [{_rep(band[0])}, {_rep(band[1])}]; the declared grid gives "
+                         f"[{_rep(90.0 - delta / 2)}, 90]")
+
+    _schema2_keys(sc, phis, thetas)
+
+    xf = sc["exit_field"]                                                       # sampler, quadrature, fitted lattice
+    rectangle = section["shape"] == "rectangle"
+    _expect(_req(xf, "quadrature", "exit_field.", "str"), SCHEMA2_QUADRATURE[section["shape"]], "exit_field.quadrature")
+    _expect(_req(xf, "sampler", "exit_field.", "str"), S["exit_field.sampler"], "exit_field.sampler")
+    if _req(xf, "tangential_components", "exit_field.", "list") != SCHEMA2_TANGENTIAL:
+        raise ValueError('BBR025: exit_field.tangential_components must be ["Ex", "Ey"]; the sampler reads the '
+                         "exit-face tangentials only")
+    _expect(_req(_req(xf, "scale", "exit_field.", "dict"), "rule", "exit_field.scale.", "str"),
+            S["exit_field.scale.rule"], "exit_field.scale.rule")
+    co = _req(xf, "column_order_check", "exit_field.", "dict")
+    wc = "exit_field.column_order_check."
+    _expect(_req(co, "rule", wc, "str"), S["exit_field.column_order_check.rule"], wc + "rule")
+    _req(co, "method", wc, "str")
+    if not _req(_req(co, "reference", wc, "dict"), "passed", wc + "reference.", "bool"):
+        raise ValueError(f"BBR025: {wc}reference.passed is false: the exporter's column order was not validated")
+    tol = _req(xf, "plane_tolerance_m", "exit_field.", "num")
+    if not _relnear(tol, SCHEMA2_PLANE_TOL_M, 1e-9):
+        raise ValueError(f"BBR025: exit_field.plane_tolerance_m is {_rep(tol)}; BBRsim implements only 1e-12")
+    for axis in ("y_e", "z_e"):
+        wg = f"exit_field.grid.{axis}"
+        ga = xf["grid"][axis]
+        lo, hi, n = ga["min"], ga["max"], ga["count"]
+        if rectangle and n < 2:
+            raise ValueError(f"BBR024: {wg} needs count >= 2 on a rectangle: neither the lattice step nor the "
+                             "trapezoid weights are defined on one node")
+        step = _req(ga, "step", wg + ".", "num")
+        if not step > 0.0:
+            raise ValueError(f"BBR024: {wg}.step must be > 0")
+        if n >= 2 and not _relnear(step, (hi - lo) / (n - 1), STEP_REL):
+            raise ValueError(f"BBR024: {wg}.step is {_rep(step)}, but (max - min)/(count - 1) is {_rep((hi - lo) / (n - 1))}")
+
+    ct = _req(sc, "cross_term", "", "dict")                                     # cross term and far field
+    _expect(_req(ct, "density", "cross_term.", "str"), S["cross_term.density"], "cross_term.density")
+    _req(ct, "definition", "cross_term.", "str")
+    _req(ct, "valid_below_ghz", "cross_term.", "num")
+    _expect(_req(ct, "above_limit", "cross_term.", "str"), S["cross_term.above_limit"], "cross_term.above_limit")
+    _expect(_req(sc["far_field"], "normalization", "far_field.", "str"), S["far_field.normalization"],
+            "far_field.normalization")
+
+
+def _check_regime_cutoffs(sc, md, section, filter_limit_ghz):
+    """modes.regime_cutoffs_ghz re-derived entry by entry (BBR025, 1e-6 relative), then cross_term's limit
+    against modes.polarization_filter_limit_ghz."""
+    lst = _req(md, "regime_cutoffs_ghz", "modes.")
+    if not isinstance(lst, list):
+        raise ValueError("BBR024: modes.regime_cutoffs_ghz must be an array of {mode, cutoff_ghz}")
+    got = []
+    for e in lst:
+        if not isinstance(e, dict):
+            raise ValueError("BBR024: modes.regime_cutoffs_ghz entries must be objects {mode, cutoff_ghz}")
+        got.append((_req(e, "mode", "modes.regime_cutoffs_ghz[].", "str"),
+                    _req(e, "cutoff_ghz", "modes.regime_cutoffs_ghz[].", "num")))
+    want = [(e["mode"], e["cutoff_ghz"]) for e in regime_cutoffs(section)]
+    for i in range(max(len(got), len(want))):
+        at = f"modes.regime_cutoffs_ghz[{i}]"
+        if i >= len(got):
+            raise ValueError(f"BBR025: {at} is missing: the section gives {want[i][0]} at {_rep(want[i][1])} GHz "
+                             f"({len(want)} entries, the sidecar declares {len(got)})")
+        if i >= len(want):
+            raise ValueError(f"BBR025: {at} is {got[i][0]} at {_rep(got[i][1])} GHz, but the section gives only "
+                             f"{len(want)} entries")
+        if got[i][0] != want[i][0] or not _relnear(got[i][1], want[i][1], MODE_REL):
+            raise ValueError(f"BBR025: {at} is {got[i][0]} at {_rep(got[i][1])} GHz, but the section gives "
+                             f"{want[i][0]} at {_rep(want[i][1])} GHz (1e-6 relative)")
+    valid = sc["cross_term"]["valid_below_ghz"]
+    if not _relnear(valid, filter_limit_ghz, MODE_REL):
+        raise ValueError(f"BBR025: cross_term.valid_below_ghz is {_rep(valid)}, but modes.polarization_filter_limit_ghz "
+                         f"is {_rep(filter_limit_ghz)} GHz; the cross term is valid below that limit (1e-6 relative)")
+
+
 def check(sc, dataset_id, stem, dir_freq_ghz):
     """F1-F11 and F13, as BBRDatasetSidecar::Parse runs them."""
     if not isinstance(sc, dict):
         raise ValueError("BBR024: the top level must be a JSON object")
-    schema = _req(sc, "schema_version", "", "str")                                # F1
-    if schema != "1" and not schema.startswith("1."):
-        raise ValueError(f"BBR024: schema_version {schema}: BBRsim reads schema 1.x")
+    major = schema_major(sc)                                                       # F1
     if _req(sc, "dataset_id", "", "str") != dataset_id:                           # F2
         raise ValueError(f"BBR024: dataset_id {sc['dataset_id']!r}, the directory says {dataset_id!r}")
     prefix = dataset_id + "_"                                                      # F3
@@ -537,7 +885,7 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
     _req(xf, "points_per_key_retained", "exit_field.", "int")
     if _req(xf, "outside_points", "exit_field.", "str") not in ("none", "omitted", "zero"):
         raise ValueError("BBR024: exit_field.outside_points must be none, omitted or zero")
-    if _req(xf, "columns", "exit_field.", "list") != WG_COLUMNS:
+    if _req(xf, "columns", "exit_field.", "list") != (WG_COLUMNS_2 if major == 2 else WG_COLUMNS):
         raise ValueError("BBR025: exit_field.columns differ from the positional order BBRHFSSData reads")
 
     cs = _req(xf, "cross_section", "exit_field.", "dict")                         # F8
@@ -554,10 +902,13 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
     else:
         raise ValueError(f"BBR024: unknown cross_section shape {shape!r}")
 
-    tr = _req(sc, "transmittance", "", "dict")                                     # F9
-    _expect(_req(tr, "definition", "transmittance.", "str"), TRANSMITTANCE, "transmittance.definition")
-    if _req(tr, "incoming_includes_cos_theta", "transmittance.", "bool"):
-        raise ValueError("BBR025: transmittance.incoming_includes_cos_theta must be false")
+    if major == 1:                                                                 # F9
+        tr = _req(sc, "transmittance", "", "dict")
+        _expect(_req(tr, "definition", "transmittance.", "str"), TRANSMITTANCE, "transmittance.definition")
+        if _req(tr, "incoming_includes_cos_theta", "transmittance.", "bool"):
+            raise ValueError("BBR025: transmittance.incoming_includes_cos_theta must be false")
+    else:                      # under 2.x the transmittance, exit-field, cross-term and per-key blocks replace it
+        _schema2(sc, cs)
 
     sym = _req(sc, "symmetry", "", "dict")                                         # F10
     for k in ("mirror_l", "mirror_g", "end_to_end"):
@@ -602,6 +953,8 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
     if got[0] != want[0] or abs(got[1] - want[1]) > MODE_REL * want[1] or abs(got[2] - want[2]) > MODE_REL * want[2]:
         raise ValueError(f"BBR025: modes (mode, cutoff_ghz, polarization_filter_limit_ghz) = {got}, "
                          f"the declared cross-section gives {want}")
+    if major == 2:             # OR-031: the declared cutoffs, re-derived entry by entry
+        _check_regime_cutoffs(sc, md, cs, got[2])
 
 
 def _contains(section, y, z):
@@ -631,15 +984,10 @@ def _axis_text(name, axis):
     return f"{name} {axis['min']!r} to {axis['max']!r} in {axis['count']} nodes"
 
 
-def _check_one(stem, d, sc, exempt):
-    """C1-C5 on the description of one polarization; exempt holds the (key, Y, Z) that C5 lets
-    lie outside the section."""
+def _check_freq(stem, d):
+    """Every Freq token parses and agrees with the directory frequency to 0.1 %, as BBRHFSSData checks
+    each row (BBR009; CDX-001)."""
     tag = f"{stem}_Ephi={d['ephi']}"
-    ff, xf = sc["far_field"], sc["exit_field"]
-    if d["far_field"]["columns"] != ff["columns"] or d["exit_field"]["columns"] != xf["columns"]:
-        raise ValueError(f"BBR013: {tag}: a CSV header differs from the sidecar's columns")              # C1
-    # every Freq token parses and agrees with the directory frequency to 0.1 %, as BBRHFSSData checks
-    # each row (BBR009; CDX-001)
     f_dir = hfss.parse_frequency_GHz(stem.rsplit("_", 1)[1])
     for name, tokens in d["freq_tokens"].items():
         for tok in tokens:
@@ -647,6 +995,77 @@ def _check_one(stem, d, sc, exempt):
             if f is None or f_dir is None or abs(f - f_dir) > 1e-3 * f_dir:
                 raise ValueError(f"BBR009: {tag}/{name}: Freq column {tok!r} does not match the directory "
                                  f"frequency {f_dir} GHz (tolerance 0.1 %)")
+
+
+def _far_rel(a, b):
+    """a and b differ by more than 1e-6 of the larger magnitude (BBRHFSSData's FarRel)."""
+    return abs(a - b) > DIVISOR_REL * max(abs(a), abs(b))
+
+
+def _check_rows_v2(stem, d, sc, recs, sidecar_path):
+    """The row checks of BBRHFSSData::LoadWaveguide under 2.x (BBR012, naming key, polarization and value),
+    in file order: InterceptFactor constant within its key, equal to the key's c_key and to the closed form
+    of the declared grid; OutgoingPower exactly 0 on every row of a dark basis (OR-038); and T = OutgoingPower
+    / (IngoingPower * InterceptFactor) from the key's first row against the sidecar's t_flux / c_k, 1e-6
+    relative on a lit key, both exactly 0 on a dark one. A key without a record is left to C2."""
+    ephi = d["ephi"]
+    thetas = [float(x) for x in sc["excitation"]["incident_theta_deg"]]
+    iw, out, inp, fac = d["rows2"]
+
+    def find(phi, theta):
+        for r in recs:
+            if abs(r["phi"] - phi) <= KEY_TOL and abs(r["theta"] - theta) <= KEY_TOL:
+                return r
+        return None
+
+    first, cache = {}, {}
+    for n in range(len(out)):
+        phi, theta = float(iw[n, 0]), float(iw[n, 1])
+        key = (round(phi, 2), round(theta, 2))
+        if (phi, theta) not in cache:
+            cache[(phi, theta)] = find(phi, theta)
+        rec = cache[(phi, theta)]
+        f, o, i = float(fac[n]), float(out[n]), float(inp[n])
+
+        def bad(what):
+            raise ValueError(f"BBR012: {stem}_Ephi={ephi}/waveguide.csv, key ({_rep(phi)}, {_rep(theta)}) "
+                             f"polarization {ephi}: {what} (sidecar {sidecar_path})")
+
+        if key in first and _far_rel(f, first[key]):
+            bad(f"InterceptFactor {_rep(f)} differs from the key's first row, {_rep(first[key])}, by more than "
+                "1e-6 relative: not constant within the key")
+        dark = False
+        if rec is not None:
+            if _far_rel(f, rec["c_k"]):
+                bad(f"InterceptFactor {_rep(f)} differs from the sidecar's transmittance.c_key {_rep(rec['c_k'])} "
+                    "by more than 1e-6 relative")
+            closed = intercept_factor(rec["theta"], thetas)
+            if _far_rel(f, closed):
+                bad(f"InterceptFactor {_rep(f)} differs from {_rep(closed)}, the closed form of the declared grid, "
+                    "by more than 1e-6 relative")
+            dark = rec["dark1"] if ephi else rec["dark0"]
+            if dark and o != 0.0:
+                bad(f"the sidecar declares this basis dark, but OutgoingPower = {_rep(o)}; a dark basis has "
+                    "OutgoingPower exactly 0 on every row of its key (OR-038)")
+        if key not in first:
+            t = o / (i * f) if i * f > 0.0 else 0.0
+            first[key] = f
+            if rec is not None:
+                tf = (rec["t_flux1"] if ephi else rec["t_flux0"]) / rec["c_k"]
+                if (t != 0.0 or tf != 0.0) if dark else _far_rel(t, tf):
+                    bad(f"T = OutgoingPower / (IngoingPower * InterceptFactor) = {_rep(t)} but the sidecar's "
+                        f"t_flux / c_k = {_rep(tf)}" + ("; a dark basis has both exactly 0" if dark
+                                                         else ", more than 1e-6 relative apart"))
+
+
+def _check_one(stem, d, sc, exempt):
+    """C1-C5 on the description of one polarization; exempt holds the (key, Y, Z) that C5 lets
+    lie outside the section."""
+    tag = f"{stem}_Ephi={d['ephi']}"
+    ff, xf = sc["far_field"], sc["exit_field"]
+    if d["far_field"]["columns"] != ff["columns"] or d["exit_field"]["columns"] != xf["columns"]:
+        raise ValueError(f"BBR013: {tag}: a CSV header differs from the sidecar's columns")              # C1
+    _check_freq(stem, d)
     # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them; the waveguide keys must equal the
     # declared grid, and the far-field keys must equal them (BBR007 in BBRHFSSData too). A declared
     # key without rows would be served by its nearest neighbour, another incidence's tables (CDX-021).
@@ -747,12 +1166,19 @@ def _check_one(stem, d, sc, exempt):
 
 def check_csvs(base, stem, sc):
     """C1-C5 on both polarizations, as BBRHFSSData runs them when it is given the sidecar, plus
-    the far-field step and the agreement of Ephi=1 with Ephi=0 on keys, grids and per-key counts.
+    the far-field step and the agreement of Ephi=1 with Ephi=0 on keys, grids and per-key counts. Under
+    2.x the tables have 16 columns and the row checks of the loader come first (_check_rows_v2).
 
     Precondition: sc has passed check(); its blocks and types are not re-checked here. A missing
     far_field.csv or waveguide.csv raises ValueError starting BBR001 or BBR002, as in BBRHFSSData.
     """
-    d0, d1 = describe_csvs(base, stem)["polarizations"]
+    v2 = schema_major(sc) == 2
+    d0, d1 = describe_csvs(base, stem, v2)["polarizations"]
+    if v2:               # the row checks of the 2.x loader come before the declaration checks, per polarization
+        recs = key_records(sc)
+        for p in (d0, d1):
+            _check_freq(stem, p)
+            _check_rows_v2(stem, p, sc, recs, path_for(base, stem))
     # C5: with outside_points "zero" a point outside the section is allowed when its six field
     # components are exactly zero in both polarizations; with "none" or "omitted" none is.
     exempt = d0["zero_points"] & d1["zero_points"] if sc["exit_field"]["outside_points"] == "zero" else set()
@@ -805,12 +1231,15 @@ def _same(got, want, where="modes"):
 
 
 def check_full(base, dataset_id, stem, dir_freq_ghz):
-    """Everything: check(), the full modes block (basis is recorded only, not compared), the
-    sha256, bytes and rows of the four CSVs, and check_csvs(). Unknown fields are ignored."""
+    """Everything: check(), under 1.x the full modes block (basis is recorded only, not compared), the
+    sha256, bytes and rows of the four CSVs, and check_csvs(). Unknown fields are ignored. Under 2.x the
+    modes block is the regime-cutoff list check() re-derived."""
     sc = load(base, stem)
     check(sc, dataset_id, stem, dir_freq_ghz)
-    want = modes_for(sc["exit_field"]["cross_section"], sc["frequency_ghz"])
-    _same(sc["modes"], {k: v for k, v in want.items() if k != "basis"})
+    major = schema_major(sc)
+    if major == 1:
+        want = modes_for(sc["exit_field"]["cross_section"], sc["frequency_ghz"])
+        _same(sc["modes"], {k: v for k, v in want.items() if k != "basis"})
     files = _req(sc, "files", "", "dict")
     for rel, entry in file_entries(base, stem).items():
         got = files.get(rel)
@@ -821,7 +1250,173 @@ def check_full(base, dataset_id, stem, dir_freq_ghz):
                 raise ValueError(f"BBR024: {path_for(base, stem)}: files[{rel!r}].{k} is {got.get(k)!r}, "
                                  f"the CSV gives {entry[k]!r}")
     check_csvs(base, stem, sc)
-    # the load-time checks of the BBRHFSSData constructor, BBR027 included (CDX-008): a dataset that
-    # passes here but refuses to load would stop a Geant4 run at the first photon of its frequency
-    hfss.load_dataset(stem, base)
+    if major == 1:
+        # the load-time checks of the BBRHFSSData constructor, BBR027 included (CDX-008): a dataset that
+        # passes here but refuses to load would stop a Geant4 run at the first photon of its frequency.
+        # The Python mirror reads the 1.0 tables only; its 2.x reader (hfss.load_dataset, the 2.0
+        # positions and the per-photon cap) is a later task, so a 2.x dataset stops at check_csvs().
+        hfss.load_dataset(stem, base)
     return sc
+
+
+# --- the schema-2 builder ------------------------------------------------------------------------
+
+def _hemisphere_power_w(rows, dtheta_deg, dphi_deg):
+    """Far-field power over the outward hemisphere the CSV spans: rows with sin(Theta) cos(Phi) > 1e-6
+    summed with weight sin(Theta) dTheta dPhi (radians) and (|rE_theta|^2 + |rE_phi|^2) / (2 eta0)."""
+    theta, phi = np.radians(rows.Theta.to_numpy(float)), np.radians(rows.Phi.to_numpy(float))
+    sin_t = np.sin(theta)
+    outward = sin_t * np.cos(phi) > 1e-6
+    inten = (rows.rEtheta_real.to_numpy(float) ** 2 + rows.rEtheta_imag.to_numpy(float) ** 2
+             + rows.rEphi_real.to_numpy(float) ** 2 + rows.rEphi_imag.to_numpy(float) ** 2)
+    weight = sin_t * math.radians(dtheta_deg) * math.radians(dphi_deg)
+    return float(np.sum((weight * inten)[outward]) / (2.0 * ETA0))
+
+
+def build_schema2_from_csvs(base, dataset_id, frequency_label, *, section, extent_mm, provenance,
+                            exit_origin_mm, plane_wave_origin_mm, bounding_box_mm, step_m=None, w=None,
+                            rotational=False, abs_powers=None, pose_rule="canonical-z", resolution_mm=None,
+                            outside_points="none", rim_points="included", bounds_method="vertices", walls="PEC"):
+    """A schema-2.0 sidecar for <dataset_id>_<frequency_label>, read off its finalized 2.0 CSVs.
+
+    c_key and cell_90 come from the declared grid (the incident angles the tables hold); t_flux per key
+    and polarization is the first row's OutgoingPower over its IngoingPower (the magnitude numerator is
+    copied from OutgoingPower unless abs_powers {(phi, theta): (p0, p1)} gives it); W = 1 unless w
+    {(phi, theta): (w0, w1)} gives it, and always 1 on a dark basis; ff_over_flux is the outward-hemisphere
+    far-field power over the stored exit flux, null on a dark basis. step_m: a number (both axes), a dict
+    {"y_e": ..., "z_e": ...}, or None to read it off the lattice, (max - min)/(count - 1).
+
+    A basis is dark where |t_flux| <= 1e-12 (the producer's threshold). Its OutgoingPower must be exactly 0
+    on every row: numerical residue is refused (BBR012) rather than written into a sidecar that contradicts
+    its own tables; the caller converts a numerical zero before building. The CSVs are never modified, and
+    the checksums are those of the files as they stand.
+    """
+    stem = f"{dataset_id}_{frequency_label}"
+    freq = hfss.parse_frequency_GHz(frequency_label)
+    d = describe_csvs(base, stem, True)
+    d0, d1 = d["polarizations"]
+    phis, thetas = d["incident_phi_deg"], d["incident_theta_deg"]
+    cell = cell_90(thetas)
+    if cell is None:
+        raise ValueError("BBR025: the declared incident_theta_deg has no theta = 90 deg entry with a theta above "
+                         "it: cell_90 cannot be derived (HF-049)")
+    delta = _delta(thetas)
+    mode, cut, filt = lowest_mode(section)
+    far = [_read_csv(base, stem, e, "far_field.csv", FF_COLUMNS) for e in (0, 1)]
+    far_groups = [f.assign(kp=f.IWavePhi.round(2), kt=f.IWaveTheta.round(2)).groupby(["kp", "kt"]) for f in far]
+    rows = []
+    for dd in (d0, d1):
+        iw = dd["rows2"][0]
+        keys = pd.DataFrame({"kp": np.round(iw[:, 0], 2), "kt": np.round(iw[:, 1], 2)})
+        rows.append(keys.groupby(["kp", "kt"]).indices)
+    c_key, per_key, scale, ff_ratio = [], [], [], []
+    for ph in phis:
+        for t in thetas:
+            key = (round(ph, 2), round(t, 2))
+            ck = intercept_factor(t, thetas)
+            tflux, absp, darks, ratios = [], [], [], []
+            for e, dd in enumerate((d0, d1)):
+                idx = rows[e].get(key)
+                if idx is None:
+                    raise ValueError(f"BBR007: {stem}_Ephi={e}: declared key ({_rep(ph)}, {_rep(t)}) has no rows")
+                out, inp = dd["rows2"][1], dd["rows2"][2]
+                flux, a_i = float(out[idx[0]]), float(inp[idx[0]])
+                if not a_i > 0.0:
+                    raise ValueError(f"BBR012: {stem}_Ephi={e}: key ({_rep(ph)}, {_rep(t)}) has IngoingPower "
+                                     f"{_rep(a_i)}; the entrance power must be positive")
+                tf = flux / a_i
+                dark = abs(tf) <= DARK_REL
+                if dark and np.any(out[idx] != 0.0):
+                    raise ValueError(f"BBR012: {stem}_Ephi={e}: key ({_rep(ph)}, {_rep(t)}) polarization {e} is dark "
+                                     f"(|t_flux| = {_rep(abs(tf))} <= 1e-12) but holds OutgoingPower other than "
+                                     "exactly 0 (e.g. " + _rep(float(out[idx][out[idx] != 0.0][0])) + "); convert "
+                                     "the numerical zero before building (OR-038)")
+                tflux.append(0.0 if dark else tf)
+                absp.append(float(abs_powers[(ph, t)][e]) if abs_powers and (ph, t) in abs_powers else flux)
+                darks.append(dark)
+                ratios.append(None if dark else _hemisphere_power_w(
+                    far_groups[e].get_group(key), d["far_field"]["theta_deg"]["step"], d["far_field"]["phi_deg"]["step"]) / flux)
+            ww = w.get((ph, t)) if w else None
+            w0, w1 = (1.0 if darks[0] else (ww[0] if ww else 1.0)), (1.0 if darks[1] else (ww[1] if ww else 1.0))
+            c_key.append({"phi_deg": ph, "theta_deg": t, "c_k": ck})
+            per_key.append({"phi_deg": ph, "theta_deg": t, "c_k": ck, "polarizations": {
+                "0": {"t_flux": tflux[0], "outgoing_power_abs_re_s_w": absp[0]},
+                "1": {"t_flux": tflux[1], "outgoing_power_abs_re_s_w": absp[1]}}})
+            scale.append({"phi_deg": ph, "theta_deg": t, "w0": w0, "w1": w1, "dark0": darks[0], "dark1": darks[1]})
+            ff_ratio.append({"phi_deg": ph, "theta_deg": t, "polarizations": {"0": ratios[0], "1": ratios[1]}})
+    grid = {}
+    for ax in ("y_e", "z_e"):
+        g = dict(d["exit_field"]["grid"][ax])
+        step = step_m.get(ax) if isinstance(step_m, dict) else step_m
+        if step is None:
+            if g["count"] < 2:
+                raise ValueError(f"BBR024: exit_field.grid.{ax} has {g['count']} node; its step cannot be derived")
+            step = (g["max"] - g["min"]) / (g["count"] - 1)
+        g["step"] = float(step)
+        grid[ax] = g
+    return {
+        "schema_version": "2.0",
+        "dataset_id": dataset_id,
+        "frequency_ghz": freq,
+        "frequency_label": frequency_label,
+        "provenance": provenance,
+        "model": {"kind": SCHEMA2_STRINGS["model.kind"]},
+        "conventions": {"time_dependence": "exp(+j omega t)", "phasor": "peak"},
+        "frames": {
+            "canonical": CANONICAL, "pose_rule": pose_rule,
+            "hfss_global_axes_in_canonical": HFSS_AXES,
+            "entrance_face": {"axis": "z", "side": "min"}, "exit_face": {"axis": "z", "side": "max"},
+            "entrance_outward_normal_global": [0, 0, -1], "exit_outward_normal_global": [0, 0, 1],
+            "exit_cs": {"name": "outgoing_cs", "origin": "exit_face_center",
+                        "origin_mm_global": exit_origin_mm, **EXIT_CS_GLOBAL},
+            "exit_cs_axes_in_canonical": IDENTITY,
+        },
+        "excitation": {
+            "coordinate_system": "global", "incidence_convention": "arrival_direction",
+            "normal_entry_theta_deg": 180.0,
+            "incident_phi_deg": phis, "incident_theta_deg": thetas,
+            "ei_v_per_m": 1.0, "incoming_power_w": d["incoming_power_w"],
+            "polarization_convention": POLARIZATION,
+            "plane_wave_origin": "entrance_face_center", "origin_mm_global": plane_wave_origin_mm,
+        },
+        "far_field": {"coordinate_system": "exit_cs", "definition": "Theta-Phi",
+                      "component_basis": "spherical_in_exit_cs", "radiation_surface": "exit_face",
+                      **d["far_field"], "normalization": SCHEMA2_STRINGS["far_field.normalization"],
+                      "ff_over_flux": ff_ratio},
+        "exit_field": {
+            "coordinate_system": "exit_cs", "points_in_si": True, "field_in_ref_cs": False,
+            "field_components_frame": "hfss_global", "plane": "x_e=0", "resolution_mm": resolution_mm,
+            "grid": grid, "cross_section": section, "outside_points": outside_points,
+            "bounds_method": bounds_method, "rim_points": rim_points,
+            "points_per_key_retained": d["exit_field"]["points_per_key_retained"],
+            "columns": d["exit_field"]["columns"],
+            "tangential_components": list(SCHEMA2_TANGENTIAL),
+            "quadrature": SCHEMA2_QUADRATURE[section["shape"]],
+            "sampler": SCHEMA2_STRINGS["exit_field.sampler"],
+            "scale": {"rule": SCHEMA2_STRINGS["exit_field.scale.rule"], "per_key": scale},
+            "column_order_check": {"rule": SCHEMA2_STRINGS["exit_field.column_order_check.rule"],
+                                   "method": "reference",
+                                   "reference": {"dataset_id": "InfParallelPlate_crack1Rohan",
+                                                 "frequency_ghz": 500, "passed": True}},
+            "plane_tolerance_m": SCHEMA2_PLANE_TOL_M,
+        },
+        "transmittance": {
+            "definition": SCHEMA2_STRINGS["transmittance.definition"],
+            "numerator": SCHEMA2_STRINGS["transmittance.numerator"],
+            "incoming": SCHEMA2_STRINGS["transmittance.incoming"],
+            "above_one": SCHEMA2_STRINGS["transmittance.above_one"],
+            "c_key": c_key, "cell_90": cell,
+            "cell_90_assumes": {"emitter": "uniform_theta", "cos_floor": COS_FLOOR,
+                                "band_deg": [90.0 - delta / 2, 90.0]},
+            "per_key": per_key,
+        },
+        "cross_term": {"density": SCHEMA2_STRINGS["cross_term.density"], "definition": SCHEMA2_CROSS_TERM,
+                       "valid_below_ghz": filt, "above_limit": SCHEMA2_STRINGS["cross_term.above_limit"]},
+        "symmetry": {"mirror_l": True, "mirror_g": True, "end_to_end": True, "rotational": rotational},
+        "boundaries": {"entrance": "radiation", "exit": "radiation", "walls": walls},
+        "geometry": {"shape": "box" if section["shape"] == "rectangle" else "cylinder",
+                     "extent_mm": extent_mm, "bounding_box_mm": bounding_box_mm},
+        "modes": {"mode": mode, "cutoff_ghz": cut, "polarization_filter_limit_ghz": filt,
+                  "regime_cutoffs_ghz": regime_cutoffs(section)},
+        "files": file_entries(base, stem),
+    }

@@ -105,7 +105,7 @@ def test_build_then_full_check(tmp_path):
 
 
 @pytest.mark.parametrize("edit,code", [
-    (lambda s: s.update(schema_version="2.0"), "BBR024"),
+    (lambda s: s.update(schema_version="3.0"), "BBR024"),
     (lambda s: s.update(dataset_id="other"), "BBR024"),
     (lambda s: s.update(frequency_label="501GHz"), "BBR024"),
     (lambda s: s["far_field"].update(points_per_key="2"), "BBR024"),
@@ -635,8 +635,8 @@ def built(tmp_path):
 
 
 def test_invariant_keys(tmp_path):
-    assert set(sidecar.invariant(built(tmp_path))) == {"frames", "symmetry", "boundaries", "geometry",
-                                                      "modes", "cross_section"}
+    assert list(sidecar.invariant(built(tmp_path))) == ["schema", "excitation", "frames", "symmetry", "boundaries",
+                                                       "geometry", "modes", "cross_section"]
 
 
 @pytest.mark.parametrize("edit", [
@@ -912,3 +912,610 @@ def test_validator_fails_a_tampered_checksum(tmp_path, repo_root):
     rc, rows, tail = run_validator(repo_root, base)
     assert rc == 1 and rows[0].startswith(f"  FAIL {base}/c_500GHz: ValueError: BBR024: ") and "sha256" in rows[0]
     assert tail[-1] == "RESULT: FAIL"
+
+
+# --- schema 2.x (Tasks 1-3 of the reader plan: OR-028, OR-031, OR-034, OR-036, OR-038, HF-040, HF-047, HF-049) ----
+# The reference is tests/schema2_fixture.py, written independently of bbrsim.sidecar and the same content
+# as tests/HFSSFixture.hh (NineKeyGrid2, SidecarJson2).
+
+import hashlib
+
+import schema2_fixture as fx
+
+ID = "crack"
+
+
+def setp(d, path, value):
+    """d[a][b]...[z] = value for a slash path; a numeric step indexes a list."""
+    *head, last = path.split("/")
+    for k in head:
+        d = d[int(k)] if isinstance(d, list) else d[k]
+    if isinstance(d, list):
+        d[int(last)] = value
+    else:
+        d[last] = value
+
+
+def mut2(fn, **kw):
+    s = fx.sidecar2(**kw)
+    fn(s)
+    return s
+
+
+def check2(sc, stem=fx.STEM, freq=500.0):
+    sidecar.check(sc, ID, stem, freq)
+
+
+def s2_dataset(tmp_path, **kw):
+    base = str(tmp_path)
+    return base, fx.write_nine_key_grid2(base, **kw)
+
+
+def edit_key(path, phi, theta, fn):
+    """Apply fn(fields, n) to every data row of key (phi, theta) in a CSV (n counts the key's rows)."""
+    lines = open(path).read().splitlines()
+    n = 0
+    for i, line in enumerate(lines[1:], start=1):
+        v = line.split(",")
+        if float(v[2]) == phi and float(v[3]) == theta:
+            fn(v, n)
+            n += 1
+            lines[i] = ",".join(v)
+    assert n, "no row of the key"
+    open(path, "w").write("\n".join(lines) + "\n")
+
+
+def wg_path(base, stem, e):
+    return os.path.join(base, f"{stem}_Ephi={e}", "waveguide.csv")
+
+
+def test_s2_parses(tmp_path):
+    sc = fx.sidecar2()
+    check2(sc)
+    assert sidecar.schema_major(sc) == 2 and sidecar.schema_major(fx.sidecar2(stem="crack_500GHz")) == 2
+    recs = sidecar.key_records(sc)
+    assert len(recs) == 9
+    assert recs[0]["phi"] == 0 and recs[0]["theta"] == 90 and recs[1]["theta"] == 135 and recs[3]["phi"] == 45
+    dark = [r for r in recs if r["phi"] == 0 and r["theta"] == 180][0]
+    assert dark["dark1"] and not dark["dark0"] and dark["t_flux0"] == 0.6 and dark["t_flux1"] == 0.0
+    assert dark["c_k"] == pytest.approx(1.0, abs=1e-12) and dark["w1"] == 1.0
+    a = [r for r in recs if (r["phi"], r["theta"]) == (45, 135)][0]
+    assert not a["dark0"] and not a["dark1"] and a["w0"] == 0.9 and a["t_flux1"] == 0.3
+    assert a["c_k"] == pytest.approx(math.cos(math.radians(45)), rel=1e-12)
+    e = [r for r in recs if (r["phi"], r["theta"]) == (90, 90)][0]
+    assert 0.083 < e["c_k"] < 0.085
+    # the disc variant (R2: uniform_disc, TE11 lowest) parses too, and so does the 1.x schema untouched
+    check2(fx.sidecar2(disc=True))
+    assert sidecar.schema_major({"schema_version": "1.0"}) == 1
+
+
+def test_s2_version_gate():
+    for v in ("3.0", "0.9", "20.0", "12", "2x"):
+        with pytest.raises(ValueError, match=r"^BBR024: .*BBRsim reads 1\.x and 2\.x"):
+            check2(mut2(lambda s: s.update(schema_version=v)))
+    with pytest.raises(ValueError, match=r"^BBR024"):
+        sidecar.schema_major({"schema_version": 2})
+    with pytest.raises(ValueError, match=r"^BBR024"):
+        sidecar.schema_major({})
+    check2(mut2(lambda s: s.update(schema_version="2.7", x_future=[1, 2])))
+    check2(mut2(lambda s: s.update(schema_version="2")))
+    assert sidecar.schema_major({"schema_version": "1"}) == 1 and sidecar.schema_major({"schema_version": "1.4"}) == 1
+
+
+S2_STRING_EDITS = [
+    ("model/kind", "slot_in_wall", "model.kind"),
+    ("transmittance/definition", "OutgoingPower / IngoingPower", "transmittance.definition"),
+    ("transmittance/numerator", "exit_abs_re_s", "transmittance.numerator"),
+    ("transmittance/incoming", "area_times_intensity_times_cos", "transmittance.incoming"),
+    ("transmittance/above_one", "load_time_rescale", "transmittance.above_one"),
+    ("exit_field/tangential_components", ["Ex", "Ez"], "exit_field.tangential_components"),
+    ("exit_field/quadrature", "uniform_disc", "exit_field.quadrature"),
+    ("exit_field/sampler", "abs_e_squared", "exit_field.sampler"),
+    ("exit_field/scale/rule", "none", "exit_field.scale.rule"),
+    ("cross_term/density", "all_components", "cross_term.density"),
+    ("cross_term/above_limit", "ignore", "cross_term.above_limit"),
+    ("far_field/normalization", "absolute", "far_field.normalization"),
+    ("exit_field/column_order_check/rule", "none", "exit_field.column_order_check.rule"),
+    ("exit_field/column_order_check/reference/passed", False, "exit_field.column_order_check.reference.passed"),
+    ("exit_field/plane_tolerance_m", 1e-9, "exit_field.plane_tolerance_m"),
+    ("exit_field/columns", ["Freq", "Ephi", "IWavePhi", "IWaveTheta", "OutgoingPower", "IngoingPower", "X", "Y", "Z",
+                            "Ex_real", "Ey_real", "Ez_real", "Ex_imag", "Ey_imag", "Ez_imag", "InterceptFactor"],
+     "exit_field.columns"),
+]
+
+
+def test_s2_fixed_strings():
+    # the module's dict carries every fixed string of the field list
+    assert sidecar.SCHEMA2_STRINGS["transmittance.definition"] == "OutgoingPower / (IngoingPower * InterceptFactor)"
+    assert sidecar.SCHEMA2_STRINGS["exit_field.scale.rule"] == \
+        "sum_i w_i abs(E_t,i)^2 h_y h_z / (2 eta0) = outgoing_power_w"
+    assert sidecar.WG_COLUMNS_2[9:15] == ["Ex_real", "Ex_imag", "Ey_real", "Ey_imag", "Ez_real", "Ez_imag"]
+    assert sidecar.WG_COLUMNS_2[15] == "InterceptFactor" and len(sidecar.WG_COLUMNS_2) == 16
+    for path, value, field in S2_STRING_EDITS:
+        with pytest.raises(ValueError, match=r"^BBR025: .*" + field.replace(".", r"\.")):
+            check2(mut2(lambda s: setp(s, path, value)))
+    # trapezoid is the only quadrature of a rectangle, and uniform_disc of a disc
+    with pytest.raises(ValueError, match=r"^BBR025: .*exit_field\.quadrature"):
+        check2(mut2(lambda s: s["exit_field"].update(quadrature="trapezoid"), disc=True))
+    # a missing block is BBR024, a mistyped string too
+    with pytest.raises(ValueError, match=r"^BBR024: missing field model"):
+        check2(mut2(lambda s: s.pop("model")))
+    with pytest.raises(ValueError, match=r"^BBR024: transmittance\.numerator"):
+        check2(mut2(lambda s: setp(s, "transmittance/numerator", 3)))
+    with pytest.raises(ValueError, match=r"^BBR024: missing field exit_field\.scale"):
+        check2(mut2(lambda s: s["exit_field"].pop("scale")))
+    with pytest.raises(ValueError, match=r"^BBR024: conventions"):
+        check2(mut2(lambda s: s.update(conventions=[1])))
+    # the 1.x column list is not the 2.x one, and a 2.x sidecar naming the 1.0 text is refused
+    with pytest.raises(ValueError, match=r"^BBR025: .*exit_field\.columns"):
+        check2(mut2(lambda s: s["exit_field"].update(columns=list(sidecar.WG_COLUMNS))))
+
+
+S2_LISTS = [("transmittance/c_key", "c_k", False), ("transmittance/per_key", "polarizations/0/t_flux", True),
+            ("exit_field/scale/per_key", "w0", False), ("far_field/ff_over_flux", "polarizations/0", True)]
+
+
+@pytest.mark.parametrize("lst,number,pols", S2_LISTS, ids=[x[0] for x in S2_LISTS])
+def test_s2_per_key_lists(lst, number, pols):
+    def get(s):
+        d = s
+        for k in lst.split("/"):
+            d = d[k]
+        return d
+
+    # a duplicate key, a missing key, a key off the declared grid by 1e-6, a string angle, an object
+    with pytest.raises(ValueError, match=r"^BBR024: .*duplicate"):
+        check2(mut2(lambda s: get(s).append(copy.deepcopy(get(s)[0]))))
+    with pytest.raises(ValueError, match=r"^BBR024: .*no record for declared key"):
+        check2(mut2(lambda s: get(s).pop()))
+    with pytest.raises(ValueError, match=r"^BBR024: .*does not match a declared key"):
+        check2(mut2(lambda s: get(s)[0].update(theta_deg=90.0 + 1e-6)))
+    with pytest.raises(ValueError, match=r"^BBR024: .*phi_deg"):
+        check2(mut2(lambda s: get(s)[0].update(phi_deg="0")))
+    with pytest.raises(ValueError, match=r"^BBR024: .*must be a list"):
+        check2(mut2(lambda s: setp(s, lst, {})))
+    if pols:
+        with pytest.raises(ValueError, match=r"^BBR024: .*polarizations"):
+            check2(mut2(lambda s: get(s)[0]["polarizations"].pop("1")))
+        with pytest.raises(ValueError, match=r"^BBR024: .*polarizations"):
+            check2(mut2(lambda s: get(s)[0].pop("polarizations")))
+        with pytest.raises(ValueError, match=r"^BBR024: .*polarizations"):
+            check2(mut2(lambda s: get(s)[0]["polarizations"].update({"2": 1.0})))
+    # a non-finite or non-numeric number is refused (NaN and an overflowed 1e999 read back as non-finite)
+    for bad in (float("nan"), float("inf"), "nan"):
+        with pytest.raises(ValueError, match=r"^BBR024"):
+            check2(mut2(lambda s: setp(s, f"{lst}/0/{number}", bad)))
+    # 5e-10 off the declared key still matches (1e-9)
+    s = fx.sidecar2()
+    get(s)[0]["theta_deg"] = 90.0 + 5e-10
+    get(s)[3]["phi_deg"] = 45.0 - 5e-10
+    check2(s)
+
+
+def test_s2_per_key_other_checks():
+    # ff_over_flux: null on a lit basis is refused, null on a dark basis parses (the fixture has one)
+    with pytest.raises(ValueError, match=r"^BBR024: .*null"):
+        check2(mut2(lambda s: setp(s, "far_field/ff_over_flux/0/polarizations/0", None)))
+    assert fx.sidecar2()["far_field"]["ff_over_flux"][2]["polarizations"]["1"] is None
+    check2(mut2(lambda s: setp(s, "far_field/ff_over_flux/0/polarizations/0", 0.0)))
+    with pytest.raises(ValueError, match=r"^BBR024: .*finite number"):
+        check2(mut2(lambda s: setp(s, "far_field/ff_over_flux/0/polarizations/0", "x")))
+    # a scale weight must be positive
+    with pytest.raises(ValueError, match=r"^BBR024: .*w0"):
+        check2(mut2(lambda s: setp(s, "exit_field/scale/per_key/0/w0", 0.0)))
+    # per_key c_k disagreeing with c_key is a self-contradiction: BBR024
+    with pytest.raises(ValueError, match=r"^BBR024: .*c_k"):
+        check2(mut2(lambda s: setp(s, "transmittance/per_key/1/c_k", 0.5)))
+
+
+def test_s2_cell90_values():
+    assert sidecar.cell_90([0, 45, 90, 135, 180]) == pytest.approx(0.08384881979, abs=1e-10)
+    assert sidecar.cell_90([90, 105, 120, 135, 150, 165, 180]) == pytest.approx(0.03663305469, abs=1e-10)
+    assert sidecar.cell_90([0, 45, 90, 135, 180]) == pytest.approx(0.0838488197937161, abs=1e-14)
+    assert sidecar.cell_90([90, 105, 120, 135, 150, 165, 180]) == pytest.approx(0.036633054690581604, abs=1e-14)
+    assert sidecar.cell_90([120, 180]) is None
+    assert sidecar.cell_90([0, 45, 90]) is None                       # nothing above 90 deg
+    assert sidecar.intercept_factor(135.0, [90, 135, 180]) == pytest.approx(math.cos(math.radians(45)), rel=1e-14)
+    assert sidecar.intercept_factor(180.0, [90, 135, 180]) == pytest.approx(1.0, abs=1e-15)
+    assert sidecar.intercept_factor(90.0, [90, 135, 180]) == sidecar.cell_90([90, 135, 180])
+    assert sidecar.intercept_factor(45.0, [0, 45, 90, 135, 180]) == pytest.approx(math.cos(math.radians(45)), rel=1e-14)
+    # c_key at (0, 135) off by 2e-6 relative is refused (BBR025), off by 5e-7 parses
+    c135 = math.cos(math.radians(45))
+    with pytest.raises(ValueError, match=r"^BBR025: .*c_k"):
+        check2(mut2(lambda s: setp(s, "transmittance/c_key/1/c_k", c135 * (1 + 2e-6))))
+    check2(mut2(lambda s: setp(s, "transmittance/c_key/1/c_k", c135 * (1 + 5e-7))))
+    # cell_90 and the c_k at 90 deg must follow the declared grid
+    with pytest.raises(ValueError, match=r"^BBR025: .*cell_90"):
+        check2(mut2(lambda s: setp(s, "transmittance/cell_90", 0.08384881979 * 1.001)))
+    with pytest.raises(ValueError, match=r"^BBR025: .*c_k"):
+        check2(mut2(lambda s: setp(s, "transmittance/c_key/0/c_k", 0.19134)))
+    check2(mut2(lambda s: setp(s, "transmittance/cell_90", 0.0838488197937161 * (1 + 5e-7))))
+    # the 35-key style grid: Delta = 15 deg gives the 0.0366 cell
+    th = (90, 105, 120, 135, 150, 165, 180)
+    s = fx.sidecar2(thetas=th)
+    check2(s)
+    assert s["transmittance"]["cell_90"] == pytest.approx(0.03663305469, abs=1e-10) and len(sidecar.key_records(s)) == 21
+
+
+def test_s2_no_theta_90_refused():
+    # a declared grid without 90 deg cannot give the cell: BBR025, before any per-key matching
+    s = fx.sidecar2()
+    s["excitation"]["incident_theta_deg"] = [135.0, 180.0]
+    with pytest.raises(ValueError, match=r"^BBR025: .*theta = 90"):
+        check2(s)
+    s["excitation"]["incident_theta_deg"] = [90.0]                    # nothing above 90 deg either
+    with pytest.raises(ValueError, match=r"^BBR025: .*theta = 90"):
+        check2(s)
+
+
+def test_s2_dark_tflux_bbr024():
+    # OR-038: a dark basis has t_flux exactly 0; the sidecar contradicting itself is BBR024
+    bad = mut2(lambda s: setp(s, "transmittance/per_key/2/polarizations/1/t_flux", 1e-15))
+    with pytest.raises(ValueError, match=r"^BBR024: .*key \(phi 0, theta 180\).*polarization 1.*1e-15.*OR-038"):
+        check2(bad)
+    with pytest.raises(ValueError, match=r"^BBR024: .*polarization 0"):
+        check2(mut2(lambda s: setp(s, "exit_field/scale/per_key/0/dark0", True)))
+    check2(fx.sidecar2())                                              # the fixture's own dark key parses
+    # a lit basis with t_flux 0 is fine
+    check2(mut2(lambda s: setp(s, "transmittance/per_key/0/polarizations/0/t_flux", 0.0)))
+
+
+def test_s2_emitter():
+    base = "transmittance/cell_90_assumes"
+    for path, value, field in ((f"{base}/emitter", "lambertian", "emitter"), (f"{base}/cos_floor", 0.02, "cos_floor"),
+                               (f"{base}/band_deg", [60.0, 90.0], "band_deg")):
+        with pytest.raises(ValueError, match=r"^BBR025: .*cell_90_assumes\." + field):
+            check2(mut2(lambda s: setp(s, path, value)))
+    with pytest.raises(ValueError, match=r"^BBR024: .*band_deg"):
+        check2(mut2(lambda s: s["transmittance"]["cell_90_assumes"].pop("band_deg")))
+    with pytest.raises(ValueError, match=r"^BBR024: .*band_deg"):
+        check2(mut2(lambda s: setp(s, f"{base}/band_deg", [67.5])))
+    check2(mut2(lambda s: setp(s, f"{base}/band_deg", [67.5 + 5e-10, 90.0])))
+
+
+def test_s2_grid_step():
+    for ax, bad in (("y_e", 1.001e-3), ("z_e", 2.4e-5)):
+        with pytest.raises(ValueError, match=rf"^BBR024: .*exit_field\.grid\.{ax}\.step"):
+            check2(mut2(lambda s: setp(s, f"exit_field/grid/{ax}/step", bad)))
+        with pytest.raises(ValueError, match=rf"^BBR024: .*exit_field\.grid\.{ax}\.step"):
+            check2(mut2(lambda s: s["exit_field"]["grid"][ax].pop("step")))
+        # choice 3: a rectangle axis with one node has no step and no trapezoid
+        with pytest.raises(ValueError, match=rf"^BBR024: .*exit_field\.grid\.{ax} needs count >= 2"):
+            check2(mut2(lambda s: setp(s, f"exit_field/grid/{ax}/count", 1)))
+    with pytest.raises(ValueError, match=r"^BBR024: .*step must be > 0"):
+        check2(mut2(lambda s: setp(s, "exit_field/grid/y_e/step", 0.0)))
+    check2(mut2(lambda s: setp(s, "exit_field/grid/y_e/step", 1e-3 * (1 + 5e-7))))
+
+
+def test_s2_regime_cutoffs():
+    r1 = sidecar.regime_cutoffs({"shape": "rectangle", "y_e_half_m": 5e-3, "z_e_half_m": 25e-6})
+    assert len(r1) == 7 and [r1[0]["mode"], r1[1]["mode"], r1[6]["mode"]] == ["TE10", "TE01", "TE06"]
+    assert r1[0]["cutoff_ghz"] == pytest.approx(14.9896229, rel=1e-6)
+    assert r1[1]["cutoff_ghz"] == pytest.approx(2997.92458, rel=1e-6)
+    assert r1[6]["cutoff_ghz"] == pytest.approx(17987.5475, rel=1e-6)
+    r2 = sidecar.regime_cutoffs({"shape": "rectangle", "y_e_half_m": 5e-3, "z_e_half_m": 50e-6})
+    assert len(r2) == 14 and (r2[0]["mode"], r2[9]["mode"], r2[10]["mode"], r2[13]["mode"]) == \
+        ("TE10", "TE09", "TE0,10", "TE0,13")
+    assert r2[13]["cutoff_ghz"] == pytest.approx(19486.5098, rel=1e-6)
+    rd = sidecar.regime_cutoffs({"shape": "disc", "radius_m": 50e-6})
+    assert [e["mode"] for e in rd] == ["TE11", "TM01", "TE21"]
+    assert [e["cutoff_ghz"] for e in rd] == pytest.approx([1756.98, 2294.85, 2914.56], rel=1e-5)
+    # the fixture's own list is accepted; an entry off by 2e-6 is refused (BBR025), by 5e-7 it parses
+    s = fx.sidecar2()
+    assert len(s["modes"]["regime_cutoffs_ghz"]) == 7
+    c1 = s["modes"]["regime_cutoffs_ghz"][1]["cutoff_ghz"]
+    for tag in ("regime_cutoffs_ghz", "TE01"):
+        with pytest.raises(ValueError, match=r"^BBR025: .*" + tag):
+            check2(mut2(lambda s: setp(s, "modes/regime_cutoffs_ghz/1/cutoff_ghz", c1 * (1 + 2e-6))))
+    check2(mut2(lambda s: setp(s, "modes/regime_cutoffs_ghz/1/cutoff_ghz", c1 * (1 + 5e-7))))
+    # a missing, an extra and a relabelled entry are refused
+    with pytest.raises(ValueError, match=r"^BBR025: .*regime_cutoffs_ghz"):
+        check2(mut2(lambda s: s["modes"]["regime_cutoffs_ghz"].pop()))
+    with pytest.raises(ValueError, match=r"^BBR025: .*regime_cutoffs_ghz"):
+        check2(mut2(lambda s: s["modes"]["regime_cutoffs_ghz"].append({"mode": "TE07", "cutoff_ghz": 20983.0})))
+    with pytest.raises(ValueError, match=r"^BBR025: .*TE0,2"):
+        check2(mut2(lambda s: setp(s, "modes/regime_cutoffs_ghz/2/mode", "TE0,2")))
+    # mistyped or absent: BBR024
+    with pytest.raises(ValueError, match=r"^BBR024: missing field modes\.regime_cutoffs_ghz"):
+        check2(mut2(lambda s: s["modes"].pop("regime_cutoffs_ghz")))
+    with pytest.raises(ValueError, match=r"^BBR024: .*modes\.regime_cutoffs_ghz must be an array"):
+        check2(mut2(lambda s: s["modes"].update(regime_cutoffs_ghz="TE10")))
+    with pytest.raises(ValueError, match=r"^BBR024: .*mode"):
+        check2(mut2(lambda s: s["modes"]["regime_cutoffs_ghz"][0].pop("mode")))
+    # a section taller along g than l: TE01 is the lowest, so the ascending list starts with it
+    tall = fx.sidecar2(y_half=1e-5, z_half=2e-5)
+    check2(tall)
+    cuts = [e["cutoff_ghz"] for e in tall["modes"]["regime_cutoffs_ghz"]]
+    assert tall["modes"]["regime_cutoffs_ghz"][0]["mode"] == "TE01" and cuts == sorted(cuts)
+    # the dropped schema-1 mode fields are not needed; carrying them is harmless (unknown fields ignored)
+    def legacy(s):
+        s["modes"].update(propagating_count=33, basis="closed PEC", list_limit_ghz=20000.0, mode_count_below_limit=9999,
+                          gap_family_onsets=[{"n": 1, "mode": "TE01", "cutoff_ghz": 1.0}],
+                          cutoffs=[{"mode": "TE11", "cutoff_ghz": 1.0, "degeneracy": 2}])
+    check2(mut2(legacy))
+    assert sidecar.same_invariant(mut2(legacy), fx.sidecar2())
+
+
+def test_s2_cross_term_limit():
+    lim = fx.sidecar2()["modes"]["polarization_filter_limit_ghz"]
+    assert fx.sidecar2()["cross_term"]["valid_below_ghz"] == lim and lim == pytest.approx(2997.92458, rel=1e-6)
+    with pytest.raises(ValueError, match=r"^BBR025: .*cross_term\.valid_below_ghz"):
+        check2(mut2(lambda s: setp(s, "cross_term/valid_below_ghz", lim * (1 + 2e-6))))
+    with pytest.raises(ValueError, match=r"^BBR025: .*polarization_filter_limit_ghz"):
+        check2(mut2(lambda s: setp(s, "cross_term/valid_below_ghz", lim * (1 - 2e-6))))
+    check2(mut2(lambda s: setp(s, "cross_term/valid_below_ghz", lim * (1 + 5e-7))))
+    with pytest.raises(ValueError, match=r"^BBR024: .*cross_term\.valid_below_ghz"):
+        check2(mut2(lambda s: s["cross_term"].pop("valid_below_ghz")))
+
+
+def test_invariant_schema_major_and_grid():
+    # Choice 1: one ID must not mix schema majors or incidence grids across frequencies
+    one = built_1x()
+    two = fx.sidecar2()
+    d = sidecar.invariant_diff(one, two)
+    assert d and d[0] == "schema" and not sidecar.same_invariant(one, two) and not sidecar.same_invariant(two, one)
+    assert sidecar.invariant_diff(two, one) == sidecar.invariant_diff(one, two)
+    assert sidecar.invariant(two)["schema"] == 2 and sidecar.invariant(one)["schema"] == 1
+    # a 15-key style and a 35-key style grid of one geometry differ in "excitation" only
+    a = fx.sidecar2()
+    b = fx.sidecar2(thetas=(90, 105, 120, 135, 150, 165, 180), phis=(0, 22.5, 45, 67.5, 90))
+    assert sidecar.invariant_diff(a, b) == ["excitation"] == sidecar.invariant_diff(b, a)
+    assert not sidecar.same_invariant(a, b)
+    # the same grid at another frequency agrees (2.x)
+    assert sidecar.invariant_diff(a, fx.sidecar2()) == [] and sidecar.same_invariant(a, fx.sidecar2())
+    # a changed phi list alone is also a different grid
+    assert sidecar.invariant_diff(a, fx.sidecar2(phis=(0, 90))) == ["excitation"]
+    # names come in order: schema first, then the existing blocks
+    sec = fx.sidecar2(y_half=4.0e-3)
+    assert sidecar.invariant_diff(one, sec)[0] == "schema"
+    # the section also moves the extent_mm l that the check ties to it (CDX-028)
+    assert sidecar.invariant_diff(a, sec) == ["geometry", "modes", "cross_section"]
+
+
+def built_1x():
+    """A schema-1 sidecar whose grid is the one of the schema-2 fixture's keys (0, 180) only."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        return tiny_sidecar(d, write_tiny(d))
+
+
+# --- the 2.x CSV checks ---------------------------------------------------------------------------
+
+def test_s2_csvs_pass(tmp_path):
+    base, stem = s2_dataset(tmp_path)
+    sc = fx.sidecar2()
+    sidecar.check_csvs(base, stem, sc)
+    base2 = str(tmp_path / "disc")
+    os.makedirs(base2)
+    stem2 = fx.write_nine_key_grid2(base2, disc=True)
+    sidecar.check_csvs(base2, stem2, fx.sidecar2(disc=True))
+
+
+def test_s2_header_bbr013(tmp_path):
+    base, stem = s2_dataset(tmp_path)
+    sc = fx.sidecar2()
+    p = wg_path(base, stem, 0)
+    text = open(p).read()
+    # the 1.0 labels over 2.0 data: the header differs from the declared 2.0 list
+    open(p, "w").write(text.replace(",".join(sidecar.WG_COLUMNS_2), ",".join(sidecar.WG_COLUMNS_2[:9] + [
+        "Ex_real", "Ey_real", "Ez_real", "Ex_imag", "Ey_imag", "Ez_imag", "InterceptFactor"]), 1))
+    with pytest.raises(ValueError, match=r"^BBR013"):
+        sidecar.check_csvs(base, stem, sc)
+    # a 15-column table (no InterceptFactor) under a 2.x sidecar
+    base2 = str(tmp_path / "b")
+    os.makedirs(base2)
+    fx.write_nine_key_grid2(base2)
+    p = wg_path(base2, stem, 1)
+    lines = open(p).read().splitlines()
+    open(p, "w").write("\n".join(",".join(l.split(",")[:15]) for l in lines) + "\n")
+    with pytest.raises(ValueError, match=r"^BBR013"):
+        sidecar.check_csvs(base2, stem, sc)
+    # a row with a field too many
+    base3 = str(tmp_path / "c")
+    os.makedirs(base3)
+    fx.write_nine_key_grid2(base3)
+    p = wg_path(base3, stem, 0)
+    lines = open(p).read().splitlines()
+    lines[3] += ",1"
+    open(p, "w").write("\n".join(lines) + "\n")
+    with pytest.raises(ValueError, match=r"^BBR013"):
+        sidecar.check_csvs(base3, stem, sc)
+
+
+def test_s2_intercept_column_bbr012(tmp_path):
+    sc = fx.sidecar2()
+    scale = lambda f: (lambda v, n: v.__setitem__(15, repr(float(v[15]) * f)))
+    # one row (the fifth) of (45, 135) Ephi=0 off by 2e-6: not constant within the key
+    base, stem = s2_dataset(tmp_path / "a")
+    edit_key(wg_path(base, stem, 0), 45, 135, lambda v, n: scale(1 + 2e-6)(v, n) if n == 4 else None)
+    with pytest.raises(ValueError, match=r"^BBR012: .*key \(45, 135\) polarization 0.*not constant within the key"):
+        sidecar.check_csvs(base, stem, sc)
+    # every row of the key off by 2e-6: constant, but not the sidecar's c_key
+    base, stem = s2_dataset(tmp_path / "b")
+    edit_key(wg_path(base, stem, 1), 45, 135, scale(1 + 2e-6))
+    with pytest.raises(ValueError, match=r"^BBR012: .*key \(45, 135\) polarization 1.*transmittance\.c_key"):
+        sidecar.check_csvs(base, stem, sc)
+    # within 1e-6 (5e-7, on one row and on every row of both polarizations): passes
+    base, stem = s2_dataset(tmp_path / "c")
+    edit_key(wg_path(base, stem, 0), 45, 135, lambda v, n: scale(1 + 5e-7)(v, n) if n == 4 else None)
+    for e in (0, 1):
+        edit_key(wg_path(base, stem, e), 90, 90, scale(1 + 5e-7))
+    sidecar.check_csvs(base, stem, sc)
+
+
+def test_s2_intercept_column_closed_form(tmp_path):
+    """A sidecar whose c_key was edited alongside the column still has the reader's own recomputation to meet:
+    the sidecar itself is refused (BBR025); a CSV column at the closed form's 2e-6 off while c_key is
+    the one the sidecar declares is the c_key branch above. Both stand."""
+    s = mut2(lambda s: setp(s, "transmittance/c_key/1/c_k", math.cos(math.radians(45)) * (1 + 2e-6)))
+    with pytest.raises(ValueError, match=r"^BBR025"):
+        check2(s)
+
+
+def test_s2_two_t_sources_bbr012(tmp_path):
+    # t_flux 0.6 in the sidecar, OutgoingPower 0.61e-9 over IngoingPower 1e-9 in the CSV
+    base, stem = s2_dataset(tmp_path)
+    edit_key(wg_path(base, stem, 0), 90, 180, lambda v, n: v.__setitem__(4, "6.1e-10"))
+    with pytest.raises(ValueError, match=r"^BBR012: .*key \(90, 180\) polarization 0.*t_flux / c_k"):
+        sidecar.check_csvs(base, stem, fx.sidecar2())
+
+
+def test_s2_dark_outgoing_bbr012(tmp_path):
+    # OR-038: a dark basis needs OutgoingPower exactly 0 on every row; 1e-25 on the third row is refused
+    base, stem = s2_dataset(tmp_path)
+    edit_key(wg_path(base, stem, 1), 0, 180, lambda v, n: v.__setitem__(4, "1e-25") if n == 2 else None)
+    with pytest.raises(ValueError, match=r"^BBR012: .*key \(0, 180\) polarization 1.*OutgoingPower = (1e-25|9\.99\d*e-26)"):
+        sidecar.check_csvs(base, stem, fx.sidecar2())
+    # the dark basis keeps nonzero stored fields (the fixture's), which is fine
+    base2 = str(tmp_path / "ok")
+    os.makedirs(base2)
+    fx.write_nine_key_grid2(base2)
+    sidecar.check_csvs(base2, stem, fx.sidecar2())
+
+
+def test_s2_dark_first_row_residue_bbr012(tmp_path):
+    """A dark basis whose first row is the residue (T = 1e-16 here) contradicts the sidecar's t_flux = 0:
+    both T sources must be exactly 0 on a dark key."""
+    base, stem = s2_dataset(tmp_path)
+    edit_key(wg_path(base, stem, 1), 0, 180, lambda v, n: v.__setitem__(4, "1e-25"))
+    with pytest.raises(ValueError, match=r"^BBR012: .*key \(0, 180\) polarization 1"):
+        sidecar.check_csvs(base, stem, fx.sidecar2())
+
+
+# --- the schema-2 builder -------------------------------------------------------------------------
+
+def build2(base, stem, **kw):
+    ds_id, label = stem.rsplit("_", 1)
+    section = kw.pop("section", {"shape": "rectangle", "y_e_half_m": 4.5e-3, "z_e_half_m": 2.5e-5})
+    width = ((2e3 * section["radius_m"],) * 2 if section["shape"] == "disc"
+             else (2e3 * section["y_e_half_m"], 2e3 * section["z_e_half_m"]))
+    return sidecar.build_schema2_from_csvs(
+        base, ds_id, label, section=section, extent_mm={"p": 4.0, "l": width[0], "g": width[1]},
+        provenance={"producer": "test"}, exit_origin_mm=[0.0, 0.0, 4.0], plane_wave_origin_mm=[0.0, 0.0, 0.0],
+        bounding_box_mm=[-0.026, -5.0, 0.0, 0.026, 5.0, 4.0], **kw)
+
+
+def digest(base):
+    out = {}
+    for root, _, files in os.walk(base):
+        for f in files:
+            with open(os.path.join(root, f), "rb") as fh:
+                out[os.path.join(root, f)] = hashlib.sha256(fh.read()).hexdigest()
+    return out
+
+
+def test_s2_builder_roundtrip(tmp_path):
+    base, stem = s2_dataset(tmp_path)
+    before = digest(base)
+    sc = build2(base, stem)
+    assert digest(base) == before                                     # the builder never modifies its inputs
+    sidecar.write(base, stem, sc)
+    got = sidecar.check_full(base, ID, stem, 500.0)
+    assert got["schema_version"] == "2.0" and sidecar.schema_major(got) == 2
+    ref = fx.sidecar2()
+    # the blocks the CSVs and the declared grid determine equal the independent reference
+    for blk in ("symmetry", "boundaries", "model", "conventions", "dataset_id", "frequency_label", "frequency_ghz"):
+        assert got[blk] == ref[blk], blk
+    # the two copies of the closed forms agree to rounding (the fixture's are written independently)
+    assert got["modes"]["mode"] == ref["modes"]["mode"]
+    assert got["modes"]["cutoff_ghz"] == pytest.approx(ref["modes"]["cutoff_ghz"], rel=1e-12)
+    assert got["modes"]["polarization_filter_limit_ghz"] == pytest.approx(
+        ref["modes"]["polarization_filter_limit_ghz"], rel=1e-12)
+    assert [e["mode"] for e in got["modes"]["regime_cutoffs_ghz"]] == [e["mode"] for e in ref["modes"]["regime_cutoffs_ghz"]]
+    assert [e["cutoff_ghz"] for e in got["modes"]["regime_cutoffs_ghz"]] == pytest.approx(
+        [e["cutoff_ghz"] for e in ref["modes"]["regime_cutoffs_ghz"]], rel=1e-12)
+    assert {k: v for k, v in got["cross_term"].items() if k != "valid_below_ghz"} == \
+        {k: v for k, v in ref["cross_term"].items() if k != "valid_below_ghz"}
+    assert got["cross_term"]["valid_below_ghz"] == pytest.approx(ref["cross_term"]["valid_below_ghz"], rel=1e-12)
+    assert {k: got["excitation"][k] for k in ("incident_phi_deg", "incident_theta_deg")} == \
+        {k: ref["excitation"][k] for k in ("incident_phi_deg", "incident_theta_deg")}
+    assert got["frames"]["hfss_global_axes_in_canonical"] == ref["frames"]["hfss_global_axes_in_canonical"]
+    t, rt = got["transmittance"], ref["transmittance"]
+    assert t["c_key"] == rt["c_key"] and t["cell_90"] == rt["cell_90"] and t["cell_90_assumes"] == rt["cell_90_assumes"]
+    for g, r in zip(t["per_key"], rt["per_key"]):
+        assert (g["phi_deg"], g["theta_deg"], g["c_k"]) == (r["phi_deg"], r["theta_deg"], r["c_k"])
+        for p in "01":
+            assert g["polarizations"][p]["t_flux"] == pytest.approx(r["polarizations"][p]["t_flux"], rel=1e-12)
+    # no other numerator given: the magnitude is the stored OutgoingPower
+    assert t["per_key"][0]["polarizations"]["0"]["outgoing_power_abs_re_s_w"] == pytest.approx(0.6e-9)
+    scale = got["exit_field"]["scale"]["per_key"]
+    assert all(s["w0"] == 1.0 and s["w1"] == 1.0 for s in scale)
+    dark = [s for s in scale if s["dark1"]]
+    assert len(dark) == 1 and (dark[0]["phi_deg"], dark[0]["theta_deg"]) == (0, 180) and not dark[0]["dark0"]
+    ffr = got["far_field"]["ff_over_flux"]
+    for rec in ffr:
+        for p in "01":
+            v = rec["polarizations"][p]
+            dk = (rec["phi_deg"], rec["theta_deg"], p) == (0, 180, "1")
+            assert (v is None) == dk and (dk or (math.isfinite(v) and v > 0))
+    assert got["exit_field"]["grid"]["y_e"]["step"] == pytest.approx(1e-3)
+    assert got["exit_field"]["grid"]["z_e"]["step"] == pytest.approx(2.5e-5)
+    assert got["exit_field"]["columns"] == sidecar.WG_COLUMNS_2 and got["exit_field"]["quadrature"] == "trapezoid"
+    assert got["files"] and all(k.startswith(stem) for k in got["files"])
+
+
+def test_s2_builder_w_and_steps(tmp_path):
+    base, stem = s2_dataset(tmp_path)
+    w = {(ph, t): (0.9, 0.8) for ph in fx.PHIS for t in fx.THETAS}
+    sc = build2(base, stem, w=w, step_m={"y_e": 1e-3, "z_e": 2.5e-5}, rotational=True)
+    scale = {(s["phi_deg"], s["theta_deg"]): s for s in sc["exit_field"]["scale"]["per_key"]}
+    assert (scale[(45, 135)]["w0"], scale[(45, 135)]["w1"]) == (0.9, 0.8)
+    assert (scale[(0, 180)]["w0"], scale[(0, 180)]["w1"]) == (0.9, 1.0)       # a dark basis has W = 1
+    assert sc["symmetry"]["rotational"] is True
+    sidecar.write(base, stem, sc)
+    sidecar.check_full(base, ID, stem, 500.0)
+    # a scalar step applies to both axes (the step must still meet the lattice, so a wrong one is refused)
+    sc2 = build2(base, stem, step_m=1e-3)
+    with pytest.raises(ValueError, match=r"^BBR024: .*step"):
+        sidecar.check(sc2, ID, stem, 500.0)
+    # abs_powers override the copied numerator
+    sc3 = build2(base, stem, abs_powers={(0, 180): (7e-10, 5e-22)})
+    pk = [p for p in sc3["transmittance"]["per_key"] if (p["phi_deg"], p["theta_deg"]) == (0, 180)][0]
+    assert pk["polarizations"]["0"]["outgoing_power_abs_re_s_w"] == 7e-10
+    assert pk["polarizations"]["1"]["outgoing_power_abs_re_s_w"] == 5e-22
+
+
+def test_s2_builder_disc_roundtrip(tmp_path):
+    base, stem = s2_dataset(tmp_path, disc=True)
+    sc = build2(base, stem, section={"shape": "disc", "radius_m": 5e-5})
+    sidecar.write(base, stem, sc)
+    got = sidecar.check_full(base, ID, stem, 500.0)
+    assert got["exit_field"]["quadrature"] == "uniform_disc" and got["modes"]["mode"] == "TE11"
+    assert [e["mode"] for e in got["modes"]["regime_cutoffs_ghz"]] == ["TE11", "TM01", "TE21"]
+    assert got["geometry"]["shape"] == "cylinder"
+    assert got["cross_term"]["valid_below_ghz"] == got["modes"]["polarization_filter_limit_ghz"]
+    # and it carries no 1.x mode lists
+    assert not {"gap_family_onsets", "cutoffs", "propagating_count", "basis", "list_limit_ghz"} & set(got["modes"])
+
+
+def test_s2_builder_refuses_a_dark_basis_with_residue(tmp_path):
+    base, stem = s2_dataset(tmp_path)
+    # one row of the dark basis holds a numerical residue: refused, nothing written
+    edit_key(wg_path(base, stem, 1), 0, 180, lambda v, n: v.__setitem__(4, "1e-25") if n == 2 else None)
+    with pytest.raises(ValueError, match=r"^BBR012: .*dark.*OutgoingPower"):
+        build2(base, stem)
+    # the first row alone being the residue is also refused (|t_flux| = 1e-16 <= 1e-12 but nonzero)
+    base2 = str(tmp_path / "b")
+    os.makedirs(base2)
+    fx.write_nine_key_grid2(base2)
+    edit_key(wg_path(base2, stem, 1), 0, 180, lambda v, n: v.__setitem__(4, "1e-25"))
+    with pytest.raises(ValueError, match=r"^BBR012: .*dark.*OutgoingPower"):
+        build2(base2, stem)
+    assert not os.path.exists(sidecar.path_for(base2, stem))
+
+
+def test_s2_builder_needs_the_2x_header(tmp_path):
+    base = str(tmp_path)
+    stem = write_tiny(base)                                           # 1.0 tables
+    with pytest.raises(ValueError, match=r"^BBR013"):
+        build2(base, stem, section={"shape": "rectangle", "y_e_half_m": 2e-3, "z_e_half_m": 2.5e-5})
+
+
+def test_s2_check_full_on_a_stale_checksum(tmp_path):
+    base, stem = s2_dataset(tmp_path)
+    sc = build2(base, stem)
+    sidecar.write(base, stem, sc)
+    with open(wg_path(base, stem, 0), "a") as fh:
+        fh.write("\n")
+    with pytest.raises(ValueError, match=r"^BBR024: .*sha256"):
+        sidecar.check_full(base, ID, stem, 500.0)
