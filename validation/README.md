@@ -231,6 +231,7 @@ ignored. At discovery and initialization, sidecar only (no CSV is read):
 - F9 `transmittance`: the supported `definition` string and `incoming_includes_cos_theta` false (`BBR025`).
 - F10 `symmetry`: `mirror_l`, `mirror_g` and `end_to_end` all true, because the sampler folds by both mirrors and serves both ends from one table; `rotational` is recorded only (`BBR025`). `boundaries`: `entrance` and `exit` `"radiation"`, `walls` `"PEC"`, the model the transport implements: a non-transmission is specular reflection with no wall loss, and the mode formulas assume a closed PEC guide (`BBR025`; a missing or mistyped field is `BBR024`).
 - F11 `geometry.extent_mm`: p, l, g > 0 (`BBR024`); for a rectangle, l and g equal the full widths 2 x `y_e_half_m` and 2 x `z_e_half_m` of the declared section to 1e-6 relative (`BBR024`, naming the field and the section; a disc's l and g are the HFSS bounding box and are not compared with its diameter). p is compared with the placed solid in F12. The placed solid's bounding limits along local x, y, z are printed as one `[BBR]` info line and stored as `hfss_extent_mm` and `geant4_extent_mm` in `data.hfss_datasets` of each `<stem>.metadata.json`.
+- F11b `provenance.material`, the producer's AEDT material name for the gap: a string must read `vacuum` (any case), else `BBR025`; null or an absent key is accepted (the legacy schema-1 sidecars carry null), any other type is `BBR024` (CDX-029). Both twins check it.
 - F12 `exit_field.cross_section` against the placed solid, at the first run initialization, for every placement of the ID: the solid's local origin is inside it, and the declared section's boundary, mapped onto both exit faces (±x) under both transverse mirrors with the wrapper's axial inset (20 times the surface tolerance, 2e-8 mm), must equal the solid (OR-020): boundary samples (a rectangle's corners and edge midpoints, 360 points round a disc) 1 nm inside the declared section must lie inside the solid, and samples 1 nm beyond the section inflated by the 1e-6 containment tolerance must not. The solid may therefore be smaller than the declared section by at most 1 nm and larger by at most 1 nm plus 1e-6 relative; a Geant4 section with a margin, in either direction, is `BBR025`. The exit points that HFSS placed on a wall are clamped 1 nm inside the section at load (below), so they lie inside a solid of exactly that section. The solid's length along local x (`DistanceToOut` from the origin along +x and -x, summed) must equal `geometry.extent_mm.p`: at most 1 nm shorter and at most 1 nm plus 1e-6 relative longer, else `BBR025` naming both lengths (CDX-028).
 - F13 `modes.mode`, `.cutoff_ghz`, `.polarization_filter_limit_ghz`: re-derived from `cross_section` to 1e-6 relative with closed forms (rectangle f_mn = (c/2)·√((m/a)² + (n/b)²), c = 299792458 m/s; disc TE11 with x′₁₁ = 1.8411837813). The full lists are re-derived only by the Python validator, with scipy (`BBR025`).
 
@@ -252,6 +253,21 @@ stricter one). C5 accepts a point up to that far outside the section; the clamp
 below moves it inside. Incidence keys are rounded to 0.01° before the C2 comparison,
 as `BBRHFSSData` rounds them. The far-field ranges use 1e-9 degrees and the
 exit-grid ranges 1e-9 relative to the largest declared |value|.
+
+Exit hand-off (CDX-027, G4-027). After an HFSS transmission the wrapper starts the photon inside the
+crack at normal distance `inset` = 20 times the surface tolerance (2e-8 mm) from the exit plane, so Geant4
+11.1's `OpBoun06` cannot fire. The start lies on the ray through the sampled exit point,
+`pos_out - (inset/n) dir_out` with n the direction's component along the exit normal, so the photon crosses
+the exit plane at the point HFSS sampled: a start moved along the normal only would send a grazing photon from a
+wall row (1 nm inside the wall after the clamp below) into that wall before the exit plane. The ray start is
+valid when it lies inside the solid and its ray reaches the exit plane before leaving it (`DistanceToOut`, to the
+surface tolerance). If it is not (a grazing photon heading away from the wall it starts beside), the normal inset
+is used under the same test; if neither is valid (a rectangle corner, a near-tangential photon at a disc rim) the
+normal inset is kept and the photon is counted as an exit-start fallback. No random number is drawn. Each
+thread's `[BBR] diffraction events=<n> T_obs=<t> exit_start_fallback=<f>` line (every 100th diffraction) carries
+its own count, and the master prints one line at the end of every run with the totals over all threads:
+`[BBR] run <id> hfss_transmissions=<m> exit_start_fallback=<f>` (always, 0 included; an information line, not a
+warning). In the regression's transmit, oblique, frequency, round and tree cases the count is 0 in every run.
 
 After C5, with a sidecar, `BBRHFSSData` clamps every exit point closer than 1 nm to
 the declared section's boundary, or past it (within C5's tolerance), to 1 nm inside

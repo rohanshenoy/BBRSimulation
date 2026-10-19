@@ -348,7 +348,11 @@ write one (`bbrsim.sidecar.build_from_csvs`; the mock generators show how),
 then run `conda run -n bbrsim python validation/check_dataset_sidecars.py
 <dir>/waveguides` before the Geant4 run. The message names the absolute
 sidecar path and the field. See [Dataset
-sidecars](validation/README.md#dataset-sidecars).
+sidecars](validation/README.md#dataset-sidecars). A `BBR024` that names
+`geometry.extent_mm.l` or `.g` and the full width of the declared section means
+the sidecar contradicts itself (for a rectangle the two must agree to 1e-6
+relative): regenerate the sidecar from the producer's job, do not edit one number.
+`provenance.material` must be a string or null; any other type is `BBR024`.
 
 **`BBR025`**: the dataset declares a convention or a geometry BBRsim does not
 implement. The message names the field (a frame, incidence, far-field or
@@ -358,7 +362,12 @@ solid does not equal the declared exit cross-section (the Geant4 section must
 equal the HFSS one to within 1 nm, or 1 nm plus 1e-6 relative where larger, as
 the test-world cracks do since OR-020; check also that local x is the
 propagation axis: a bare `G4Tubs` has it on z); or, at the first CSV load of a
-frequency, it counts the exit points outside the declared cross-section. A dataset produced outside the
+frequency, it counts the exit points outside the declared cross-section. Two further messages name the
+length and the material. `the crack volume's length ... differs from the HFSS model's ... mm` means the
+solid's extent along local x is not `geometry.extent_mm.p` (within 1 nm, or 1 nm plus 1e-6 relative where
+longer): the Geant4 crack must be exactly as long as the HFSS model, as the test-world plates make it.
+`provenance.material is "..."; the gap must be vacuum` means the dataset was solved with a gap material
+other than vacuum, which the sampler does not model (a null material in a legacy sidecar is accepted). A dataset produced outside the
 canonical pose is rejected, not remapped. See [Dataset
 sidecars](validation/README.md#dataset-sidecars).
 
