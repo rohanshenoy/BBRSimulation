@@ -7,7 +7,9 @@
 #ifndef HFSSFixture_hh
 #define HFSSFixture_hh
 #include "BBRTestSupport.hh"
+#include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -271,7 +273,7 @@ inline SidecarParams SidecarFrom(const std::string& stem, const Dataset& d) {
   }
   for (const auto& v : detail::Rows(d.wg0.empty() ? d.wg1 : d.wg0)) {
     double ip, it, y, z;
-    if (v.size() != 15 || !detail::Num(v[2], ip) || !detail::Num(v[3], it) ||
+    if ((v.size() != 15 && v.size() != 16) || !detail::Num(v[2], ip) || !detail::Num(v[3], it) ||
         !detail::Num(v[7], y) || !detail::Num(v[8], z)) continue;
     phis.insert(ip); thetas.insert(it); Y.insert(y); Z.insert(z); ++wgN[{ip, it}];
   }
@@ -355,6 +357,177 @@ inline std::string SidecarJson(const SidecarParams& p) {
   return j.str();
 }
 
+// --- schema 2.0 -----------------------------------------------------------------
+// Sixteen-column waveguide rows (...,Ex_real,Ex_imag,Ey_real,Ey_imag,Ez_real,Ez_imag,InterceptFactor)
+// and a 2.0 sidecar carrying every field of the 2.0 field list. SidecarJson2 starts from the 1.0
+// text of the same SidecarParams and rewrites what 2.0 changes, so the shared blocks cannot drift.
+const char* const WG_HDR2 = "Freq,Ephi,IWavePhi,IWaveTheta,OutgoingPower,IngoingPower,X,Y,Z,Ex_real,Ex_imag,Ey_real,Ey_imag,Ez_real,Ez_imag,InterceptFactor\n";
+
+// tflux holds one {t0, t1, dark0, dark1} per declared key in declared order (phi-major, then theta;
+// dark as 0/1); empty means t0 = 0.6, t1 = 0.3, nothing dark. yStep/zStep of 0 are derived from the
+// declared lattice. emitter and floor feed transmittance.cell_90_assumes.
+struct Schema2Params {
+  SidecarParams base;
+  std::vector<std::array<double, 4>> tflux;
+  double yStep = 0., zStep = 0.;
+  std::string emitter = "uniform_theta";
+  double floor = 0.01;
+};
+
+namespace detail {
+constexpr double kPiF = 3.14159265358979323846;
+// A fixture-local copy of the HF-049 rule, not shared with the library: the reference for the
+// parser's own copy. Delta = (smallest declared theta above 90) - 90; -1 if there is none or no 90.
+inline double DeltaF(const std::vector<double>& th) {
+  bool has90 = false;
+  double above = 1e300;
+  for (double t : th) {
+    if (std::abs(t - 90.) <= 1e-9) has90 = true;
+    else if (t > 90.) above = std::min(above, t);
+  }
+  return (has90 && above < 1e300) ? above - 90. : -1.;
+}
+inline double Cell90F(const std::vector<double>& th) {
+  const double d = DeltaF(th);
+  if (d < 0.) return -1.;
+  const double a0 = kPiF / 2 - d / 2 * kPiF / 180., af = std::acos(0.01), L = kPiF / 2 - a0;
+  const auto prim = [](double a) { return std::log(1. / std::cos(a) + std::tan(a)); };
+  const double I = af > a0 ? (prim(af) - prim(a0)) + (kPiF / 2 - af) / 0.01 : (kPiF / 2 - a0) / 0.01;
+  return L / I;
+}
+inline double InterceptF(double theta, const std::vector<double>& th) {
+  return std::abs(theta - 90.) <= 1e-9 ? Cell90F(th) : std::abs(std::cos(theta * kPiF / 180.));
+}
+}  // namespace detail
+
+inline std::string SidecarJson2(const Schema2Params& p) {
+  using nlohmann::json;
+  constexpr double c = 299792458.0;
+  const SidecarParams& b = p.base;
+  json j = json::parse(SidecarJson(b));
+  j["schema_version"] = "2.0";
+  j["model"] = {{"kind", "screen_free_abc"}};
+  j["conventions"] = {{"time_dependence", "exp(+j omega t)"}, {"phasor", "peak"}};
+
+  const double cell90 = detail::Cell90F(b.thetas), delta = detail::DeltaF(b.thetas);
+  json cKey = json::array(), perKey = json::array(), scalePer = json::array(), ffRatio = json::array();
+  std::size_t k = 0;
+  for (double phi : b.phis)
+    for (double theta : b.thetas) {
+      const std::array<double, 4> t = k < p.tflux.size() ? p.tflux[k] : std::array<double, 4>{0.6, 0.3, 0., 0.};
+      const bool d0 = t[2] != 0., d1 = t[3] != 0.;
+      const double ck = detail::InterceptF(theta, b.thetas);
+      cKey.push_back({{"phi_deg", phi}, {"theta_deg", theta}, {"c_k", ck}});
+      perKey.push_back({{"phi_deg", phi}, {"theta_deg", theta}, {"c_k", ck},
+                        {"polarizations", {{"0", {{"t_flux", d0 ? 0. : t[0]}, {"outgoing_power_abs_re_s_w", 1.05e-9 * t[0]}}},
+                                           {"1", {{"t_flux", d1 ? 0. : t[1]}, {"outgoing_power_abs_re_s_w", 1.05e-9 * t[1]}}}}}});
+      scalePer.push_back({{"phi_deg", phi}, {"theta_deg", theta}, {"w0", d0 ? 1. : 0.9}, {"w1", d1 ? 1. : 0.8},
+                          {"dark0", d0}, {"dark1", d1}});
+      ffRatio.push_back({{"phi_deg", phi}, {"theta_deg", theta},
+                         {"polarizations", {{"0", d0 ? json(nullptr) : json(0.179)}, {"1", d1 ? json(nullptr) : json(0.179)}}}});
+      ++k;
+    }
+  json band = json::array({90. - delta / 2, 90.});
+  j["transmittance"] = {
+      {"definition", "OutgoingPower / (IngoingPower * InterceptFactor)"},
+      {"numerator", "exit_flux_re_s_dot_n"},
+      {"incoming", "area_times_intensity_undivided"},
+      {"above_one", "per_photon_cap"},
+      {"c_key", cKey},
+      {"cell_90", cell90},
+      {"cell_90_assumes", {{"emitter", p.emitter}, {"cos_floor", p.floor}, {"band_deg", band}}},
+      {"per_key", perKey}};
+
+  json& xf = j["exit_field"];
+  const double ys = p.yStep > 0. ? p.yStep : (b.yCount > 1 ? (b.yMax - b.yMin) / (b.yCount - 1) : 0.);
+  const double zs = p.zStep > 0. ? p.zStep : (b.zCount > 1 ? (b.zMax - b.zMin) / (b.zCount - 1) : 0.);
+  xf["grid"]["y_e"]["step"] = ys;
+  xf["grid"]["z_e"]["step"] = zs;
+  xf["columns"] = {"Freq", "Ephi", "IWavePhi", "IWaveTheta", "OutgoingPower", "IngoingPower", "X", "Y", "Z", "Ex_real",
+                   "Ex_imag", "Ey_real", "Ey_imag", "Ez_real", "Ez_imag", "InterceptFactor"};
+  xf["tangential_components"] = {"Ex", "Ey"};
+  xf["quadrature"] = b.disc ? "uniform_disc" : "trapezoid";
+  xf["sampler"] = "abs_e_t_squared_times_quadrature";
+  xf["scale"] = {{"rule", "sum_i w_i abs(E_t,i)^2 h_y h_z / (2 eta0) = outgoing_power_w"}, {"per_key", scalePer}};
+  xf["column_order_check"] = {{"rule", "reference_exporter_interleaved_v1"}, {"method", "reference"},
+                              {"reference", {{"dataset_id", "InfParallelPlate_crack1Rohan"}, {"frequency_ghz", 500},
+                                             {"passed", true}}}};
+  xf["plane_tolerance_m"] = 1e-12;
+
+  j["far_field"]["normalization"] = "pattern_only";
+  j["far_field"]["ff_over_flux"] = ffRatio;
+
+  json& md = j["modes"];
+  md.erase("propagating_count");
+  const double filter = md.at("polarization_filter_limit_ghz").get<double>();
+  json regime = json::array();
+  if (b.disc) {
+    for (const auto& [name, zero] : std::vector<std::pair<const char*, double>>{
+             {"TE11", 1.8411837813}, {"TM01", 2.404825557695773}, {"TE21", 3.054236928227140}})
+      regime.push_back({{"mode", name}, {"cutoff_ghz", zero * c / (2 * detail::kPiF * b.radius) / 1e9}});
+  } else {
+    const double a = 2 * b.yHalf, bb = 2 * b.zHalf;
+    regime.push_back({{"mode", "TE10"}, {"cutoff_ghz", c / (2 * a) / 1e9}});
+    for (int n = 1; n * c / (2 * bb) / 1e9 <= 20000. + 1e-9; ++n)
+      regime.push_back({{"mode", n < 10 ? "TE0" + std::to_string(n) : "TE0," + std::to_string(n)},
+                        {"cutoff_ghz", n * c / (2 * bb) / 1e9}});
+  }
+  md["regime_cutoffs_ghz"] = regime;
+
+  j["cross_term"] = {{"density", "e_t_quadrature"},
+                     {"definition", "Re rho = sum_i w_i Re(E_t0,i . conj E_t1,i) / sqrt(sum_i w_i abs(E_t0,i)^2 * sum_i w_i abs(E_t1,i)^2)"},
+                     {"valid_below_ghz", filter},
+                     {"above_limit", "warn_once"}};
+  j["transmittance"].erase("incoming_includes_cos_theta");
+  return j.dump(2) + "\n";
+}
+
+// The nine keys of NineKeyGrid with 16-column rows: the same far field, a 3 x 3 exit lattice
+// y {-1e-3, 0, 1e-3} m x z {-2.5e-5, 0, 2.5e-5} m, IngoingPower 1e-9, OutgoingPower = t_p * 1e-9
+// with t0 = 0.6 and t1 = 0.3 except Ephi=1 at (0, 180), which is dark (OutgoingPower 0 with
+// nonzero stored fields), InterceptFactor = the key's c_k, and the six field values of point i
+// equal to (i+1 ... i+6) * 1e-3 for Ephi=0 and in reverse order for Ephi=1.
+inline Dataset NineKeyGrid2() {
+  const Dataset g = NineKeyGrid();
+  const std::vector<double> th{90., 135., 180.};
+  Dataset d{g.ff0, WG_HDR2, g.ff1, WG_HDR2};
+  const double ys[] = {-1e-3, 0., 1e-3}, zs[] = {-2.5e-5, 0., 2.5e-5};
+  for (int ph : {0, 45, 90})
+    for (int t : {90, 135, 180}) {
+      const std::string key = detail::Fmt(ph) + "," + detail::Fmt(t) + ",";
+      const std::string ck = detail::Fmt(detail::InterceptF(t, th));
+      for (int e : {0, 1}) {
+        const bool dark = e == 1 && ph == 0 && t == 180;
+        const double tp = e == 0 ? 0.6 : 0.3;
+        std::string& wg = e == 0 ? d.wg0 : d.wg1;
+        int i = 0;
+        for (double y : ys)
+          for (double z : zs) {
+            wg += "500GHz," + std::to_string(e) + "," + key + detail::Fmt(dark ? 0. : tp * 1e-9) + ",1e-09,0," +
+                  detail::Fmt(y) + "," + detail::Fmt(z);
+            for (int f = 0; f < 6; ++f) wg += "," + detail::Fmt((e == 0 ? i + 1 + f : i + 6 - f) * 1e-3);
+            wg += "," + ck + "\n";
+            ++i;
+          }
+      }
+    }
+  return d;
+}
+
+inline Schema2Params Schema2From(const std::string& stem, const Dataset& d) {
+  Schema2Params p;
+  p.base = SidecarFrom(stem, d);
+  return p;
+}
+
+// The params of NineKeyGrid2: (0, 180) Ephi=1 is dark.
+inline Schema2Params NineKeyParams2(const std::string& stem = "crack_500GHz") {
+  Schema2Params p = Schema2From(stem, NineKeyGrid2());
+  p.tflux.assign(p.base.phis.size() * p.base.thetas.size(), std::array<double, 4>{0.6, 0.3, 0., 0.});
+  p.tflux[2] = {0.6, 0., 0., 1.};   // phi 0: theta 90, 135, 180
+  return p;
+}
+
 // Writes <root>/waveguides/<stem>_Ephi={0,1}/{far_field,waveguide}.csv and, for
 // a <id>_<freq>GHz stem with withSidecar, <stem>.dataset.json from SidecarFrom.
 // An empty string skips that file (to provoke BBR001/BBR002).
@@ -370,6 +543,14 @@ inline std::filesystem::path WriteDataset(const std::filesystem::path& root,
   std::filesystem::create_directories(wg / (stem + "_Ephi=1"));
   if (withSidecar && detail::FrequencyStem(stem))
     bbrtest::WriteFile(wg / (stem + ".dataset.json"), SidecarJson(SidecarFrom(stem, d)));
+  return wg;
+}
+
+// Writes the CSVs of d and the 2.0 sidecar of p.
+inline std::filesystem::path WriteDataset2(const std::filesystem::path& root, const std::string& stem,
+                                           const Dataset& d, const Schema2Params& p) {
+  const auto wg = WriteDataset(root, stem, d, false);
+  bbrtest::WriteFile(wg / (stem + ".dataset.json"), SidecarJson2(p));
   return wg;
 }
 
