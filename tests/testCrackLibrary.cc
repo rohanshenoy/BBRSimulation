@@ -158,12 +158,12 @@ int main(int argc, char** argv) {
       auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
       auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
       new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
-      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapA");
       auto* thin = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 5 * mm, 0.020 * mm), BBRMaterials::GetVacuumWG(), "gapB");
       new G4PVPlacement(nullptr, {0, 0, -10 * mm}, ok, "gap:1", wlv, false, 0);
       new G4PVPlacement(nullptr, {0, 0, 10 * mm}, thin, "gap:2", wlv, false, 0);
       ExpectG4Exception("BBR025", [] { BBRCrackLibrary::Instance().ValidatePlacedCracks(); }, "BBRDatasetSidecar",
-                        "does not fit strictly inside crack volume gap:2");
+                        "does not equal crack volume gap:2");
     }},
     {"validate_placed_cracks_ok", [] {
       TempDir d; Grid(d.path(), "gap", {"50", "500"});
@@ -171,7 +171,7 @@ int main(int argc, char** argv) {
       auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
       auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
       new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
-      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapA");
       new G4PVPlacement(nullptr, {}, ok, "gap", wlv, false, 0);
       BBRCrackLibrary::Instance().ValidatePlacedCracks();
       // Once per process: the second call is a no-op, so a crack placed since is not checked.
@@ -188,8 +188,8 @@ int main(int argc, char** argv) {
       auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
       auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
       new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
-      auto* a = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
-      auto* b = new G4LogicalVolume(new G4Box("gapB", 2.5 * mm, 5.5 * mm, 0.03 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      auto* a = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* b = new G4LogicalVolume(new G4Box("gapB", 2.5 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapB");
       new G4PVPlacement(nullptr, {0, 0, -10 * mm}, a, "gap:1", wlv, false, 0);
       new G4PVPlacement(nullptr, {0, 0, 10 * mm}, b, "gap:2", wlv, false, 0);
       CHECK(BBRCrackLibrary::Instance().PlacedCracksJson() == "[]");   // not validated yet
@@ -198,7 +198,7 @@ int main(int argc, char** argv) {
       CHECK(arr.is_array() && arr.size() == 2);
       if (!arr.is_array() || arr.size() != 2) return;
       const std::vector<std::pair<std::string, std::vector<double>>> want = {
-          {"gap:1", {4., 10., 0.052}}, {"gap:2", {5., 11., 0.06}}};
+          {"gap:1", {4., 9., 0.05}}, {"gap:2", {5., 9., 0.05}}};
       for (std::size_t i = 0; i < 2; ++i) {
         const auto& c = arr[i];
         CHECK(c.at("volume") == want[i].first);

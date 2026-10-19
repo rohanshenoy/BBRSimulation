@@ -82,7 +82,7 @@ bbrsim_add_test_program(testHFSSData LABEL unit
 bbrsim_add_test_program(testSidecar LABEL unit
   CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f10_boundaries f13_modes
         invariant_physics_only invariant_diff field_types
-        recorded_fields f12_fits_solid)
+        recorded_fields f12_fits_solid f12_equality)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
   CASES selection_grid5 token_verbatim discovery_errors discovery_missing_far_field discovery_missing_waveguide

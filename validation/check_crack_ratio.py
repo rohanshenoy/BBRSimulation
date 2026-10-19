@@ -28,8 +28,8 @@ from bbrsim import select
 PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 
 # Aperture areas [mm^2]
-A1 = 2 * 5.1 * 2 * 0.026   # crack1
-A2 = 2 * 5.1 * 2 * 0.051   # crack2
+A1 = 2 * 5.0 * 2 * 0.025   # crack1
+A2 = 2 * 5.0 * 2 * 0.050   # crack2
 expected_ratio = A2 / A1
 
 df = load_crossings(PATH)

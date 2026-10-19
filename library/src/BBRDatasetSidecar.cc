@@ -153,15 +153,16 @@ G4bool BBRCrossSection::Contains(G4double y, G4double z, G4double relTol) const 
   return y * y + z * z <= radius_m * radius_m * (1. + relTol);
 }
 
-std::vector<std::pair<G4double, G4double>> BBRCrossSection::Boundary(G4double relTol, G4int nDisc) const {
+std::vector<std::pair<G4double, G4double>> BBRCrossSection::Boundary(G4double relTol, G4int nDisc,
+                                                                     G4double offset_m) const {
   std::vector<std::pair<G4double, G4double>> out;
   if (shape == kRectangle) {
-    const double y = yHalf_m * (1. + relTol), z = zHalf_m * (1. + relTol);
+    const double y = yHalf_m * (1. + relTol) + offset_m, z = zHalf_m * (1. + relTol) + offset_m;
     for (double sy : {-1., 0., 1.})
       for (double sz : {-1., 0., 1.})
         if (sy != 0. || sz != 0.) out.emplace_back(sy * y, sz * z);
   } else {
-    const double r = radius_m * std::sqrt(1. + relTol);
+    const double r = radius_m * std::sqrt(1. + relTol) + offset_m;
     for (G4int i = 0; i < nDisc; ++i) {
       const double a = 2. * kPi * i / nDisc;
       out.emplace_back(r * std::cos(a), r * std::sin(a));
@@ -426,24 +427,40 @@ void BBRDatasetSidecar::CheckFitsSolid(const G4VSolid& solid, const std::string&
   if (solid.Inside(G4ThreeVector()) != kInside)
     Fail("BBR025", path, "the local origin of crack volume " + volumeName + " is not inside its solid; the wrapper "
                          "finds the exit face from the origin along local x (BBSimOpBoundaryProcess.cc)");
+  // F12 (OR-020): the solid must equal the declared section. On the sampling plane just inside each
+  // end face, boundary points kClampInset_m inside the declared section must be inside the solid (the
+  // solid is at most that much smaller), and points kClampInset_m beyond the section inflated by the
+  // 1e-6 relative containment tolerance must not be (the solid is at most that much larger). The
+  // clamp at load moves exit points to kClampInset_m inside the section, so both bounds are what a
+  // clamped point needs.
   const double inset = 20. * G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
-  int bad = 0;
+  const auto inward = crossSection.Boundary(0., 360, -BBRCrossSection::kClampInset_m);
+  const auto outward = crossSection.Boundary(1e-6, 360, BBRCrossSection::kClampInset_m);
+  int small = 0, large = 0;
   G4ThreeVector worst;
   for (const double dir : {1., -1.}) {
     const double half = solid.DistanceToOut(G4ThreeVector(), G4ThreeVector(dir, 0., 0.));
-    for (const auto& [y, z] : crossSection.Boundary())
-      for (const double sy : {1., -1.})
-        for (const double sz : {1., -1.}) {
+    for (const double sy : {1., -1.})
+      for (const double sz : {1., -1.}) {
+        for (const auto& [y, z] : inward) {
           const G4ThreeVector p(dir * (half - inset), sy * y * CLHEP::m, sz * z * CLHEP::m);
-          if (solid.Inside(p) != kInside) { ++bad; worst = p; }
+          if (solid.Inside(p) != kInside) { ++small; worst = p; }
         }
+        for (const auto& [y, z] : outward) {
+          const G4ThreeVector p(dir * (half - inset), sy * y * CLHEP::m, sz * z * CLHEP::m);
+          if (solid.Inside(p) == kInside) { ++large; worst = p; }
+        }
+      }
   }
-  if (bad) {
+  if (small || large) {
     std::ostringstream ed;
-    ed << "the declared exit cross-section does not fit strictly inside crack volume " << volumeName << ": "
-       << bad << " boundary sample(s) are not inside, e.g. local " << worst / mm << " mm. Make the Geant4 section "
-       << "larger than the HFSS one by a recorded margin (as the 52/102 um test-world gaps are), or check the "
-       << "solid's axis (local x must be the propagation axis; a bare G4Tubs has it on z).";
+    ed << "the declared exit cross-section does not equal crack volume " << volumeName << "'s section: "
+       << small << " sample(s) just inside the declared boundary are not inside the solid and " << large
+       << " just outside it are inside, e.g. local " << worst / mm << " mm. The solid is "
+       << (small && large ? "smaller than the HFSS section in places and larger than it in others"
+                          : small ? "smaller than the HFSS section" : "larger than the HFSS section")
+       << "; it must equal it (OR-020) within 1 nm, or 1 nm plus 1e-6 relative where larger, with local x "
+       << "the propagation axis (a bare G4Tubs has it on z).";
     Fail("BBR025", path, ed.str());
   }
 }

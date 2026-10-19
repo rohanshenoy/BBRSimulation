@@ -67,8 +67,8 @@ class BBRCrackLibrary
 
   // Validates every vacuum_wg volume of the geometry before the first event:
   // discovers its dataset (sidecars and CSV presence included) and checks that
-  // each sidecar's exit cross-section fits strictly inside the volume's solid
-  // (F12, fatal BBR025). Prints each crack's HFSS and Geant4 extents (F11).
+  // each sidecar's exit cross-section equals the volume's solid section
+  // (F12, fatal BBR025; OR-020). Prints each crack's HFSS and Geant4 extents (F11).
   // Called once per process by BBSimOpBoundaryProcess::BuildPhysicsTable; later
   // calls return.
   void ValidatePlacedCracks();

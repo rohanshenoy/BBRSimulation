@@ -273,12 +273,12 @@ int main(int argc, char** argv) {
     }},
     {"f12_fits_solid", [] {
       const auto box = Parse(Valid());                  // section 4.5 mm x 25 um
-      box.CheckFitsSolid(G4Box("ok", 2 * mm, 5 * mm, 0.026 * mm), "ok");
+      box.CheckFitsSolid(G4Box("ok", 2 * mm, 4.5 * mm, 0.025 * mm), "ok");
       // The fit message names the volume; the origin message is the other check of CheckFitsSolid.
-      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("thin", 2 * mm, 5 * mm, 0.025 * mm), "thin"); }, "BBRDatasetSidecar",
-                        "the declared exit cross-section does not fit strictly inside crack volume thin: ");
-      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("short", 2 * mm, 4 * mm, 0.026 * mm), "short"); }, "BBRDatasetSidecar",
-                        "the declared exit cross-section does not fit strictly inside crack volume short: ");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("thin", 2 * mm, 4.5 * mm, 0.024 * mm), "thin"); }, "BBRDatasetSidecar",
+                        "the declared exit cross-section does not equal crack volume thin");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("short", 2 * mm, 4 * mm, 0.025 * mm), "short"); }, "BBRDatasetSidecar",
+                        "the declared exit cross-section does not equal crack volume short");
       // A solid whose local origin is not inside it: the wrapper finds the exit face from the origin.
       G4DisplacedSolid off("off", new G4Box("b", 2 * mm, 5 * mm, 0.026 * mm), G4Transform3D(G4RotationMatrix(), G4ThreeVector(0, 0, 1 * mm)));
       ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(off, "off"); }, "BBRDatasetSidecar",
@@ -286,12 +286,31 @@ int main(int argc, char** argv) {
       auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
       p.disc = true; p.radius = 5e-5;
       const auto disc = Parse(hfssfix::SidecarJson(p));
-      disc.CheckFitsSolid(*Tube(0.051 * mm), "tube51");
-      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(*Tube(0.050 * mm), "tube50"); }, "BBRDatasetSidecar",   // rim on the wall
-                        "the declared exit cross-section does not fit strictly inside crack volume tube50: ");
+      disc.CheckFitsSolid(*Tube(0.050 * mm), "tube50");
       // A plain G4Tubs keeps its axis on local z, so local x is radial: rejected at startup.
-      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(G4Tubs("bare", 0., 0.051 * mm, 0.2 * mm, 0., CLHEP::twopi), "bare"); }, "BBRDatasetSidecar",
-                        "the declared exit cross-section does not fit strictly inside crack volume bare: ");
+      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(G4Tubs("bare", 0., 0.050 * mm, 0.2 * mm, 0., CLHEP::twopi), "bare"); }, "BBRDatasetSidecar",
+                        "the declared exit cross-section does not equal crack volume bare");
+    }},
+    {"f12_equality", [] {
+      // OR-020: the solid must equal the declared section, so a larger one fails as well as a smaller one.
+      const auto box = Parse(Valid());                  // section 4.5 mm x 25 um
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("wide", 2 * mm, 4.5 * mm, 0.026 * mm), "wide"); }, "BBRDatasetSidecar",
+                        "larger than");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("narrow", 2 * mm, 4.5 * mm, 0.024 * mm), "narrow"); }, "BBRDatasetSidecar",
+                        "smaller than");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("long", 2 * mm, 5 * mm, 0.025 * mm), "long"); }, "BBRDatasetSidecar",
+                        "larger than");
+      // Tolerance edges on the 25 um half-gap: 1 nm absolute smaller, 1 nm (plus 1e-6 relative) larger.
+      box.CheckFitsSolid(G4Box("larger_half_nm", 2 * mm, 4.5 * mm, 0.025 * mm + 5e-7 * mm), "larger_half_nm");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("larger_2nm", 2 * mm, 4.5 * mm, 0.025 * mm + 2e-6 * mm), "larger_2nm"); },
+                        "BBRDatasetSidecar", "larger than");
+      ExpectG4Exception("BBR025", [&] { box.CheckFitsSolid(G4Box("smaller_2nm", 2 * mm, 4.5 * mm, 0.025 * mm - 2e-6 * mm), "smaller_2nm"); },
+                        "BBRDatasetSidecar", "smaller than");
+      auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
+      p.disc = true; p.radius = 5e-5;
+      const auto disc = Parse(hfssfix::SidecarJson(p));
+      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(*Tube(0.051 * mm), "tube51"); }, "BBRDatasetSidecar", "larger than");
+      ExpectG4Exception("BBR025", [&] { disc.CheckFitsSolid(*Tube(0.049 * mm), "tube49"); }, "BBRDatasetSidecar", "smaller than");
     }},
   });
 }

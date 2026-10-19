@@ -1,7 +1,7 @@
 # Validation_CrackWall.mac — regression for the reflection normal on daughter->mother
-# crossings. 1000 photons start INSIDE crack1 (x = 2 mm, mid-slab) heading
-# mostly +z, so each strikes the crack's z-wall (Cu) ~380 times before leaving
-# through the x = 4 mm face. Correct behaviour: specular reflection about z
+# crossings. 1000 photons start INSIDE crack1 (x = 0.5 mm, mid-plate) heading
+# mostly +z, so each strikes the crack's z-wall (Cu) ~100 times before leaving
+# through the x = 1 mm face. Correct behaviour: specular reflection about z
 # (pz flips sign), the photon never enters the copper.
 #
 # Validate:
@@ -13,7 +13,7 @@
 /random/setSeeds 4242 17
 /run/initialize
 /bbr/gun/mode true
-/bbr/gun/posX 2.0
+/bbr/gun/posX 0.5
 /bbr/gun/posY 0.0
 /bbr/gun/posZ 0.0
 /bbr/gun/dirX 0.1

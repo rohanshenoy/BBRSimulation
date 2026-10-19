@@ -25,8 +25,8 @@ class G4VSolid;
 //           that disagrees with its directory (ID, frequency) or, through
 //           BBRCrackLibrary, with its sibling frequencies' invariant blocks
 //   BBR025  a convention, frame, symmetry, cross-section or mode the sampler
-//           does not implement, or a declared exit section that does not fit
-//           strictly inside the placed crack solid
+//           does not implement, or a declared exit section that does not equal
+//           the placed crack solid's section (F12; OR-020)
 struct BBRCrossSection {
   enum Shape { kRectangle, kDisc };
   Shape shape = kRectangle;
@@ -38,8 +38,10 @@ struct BBRCrossSection {
   // producer-valid dataset is rejected.
   G4bool Contains(G4double y_m, G4double z_m, G4double relTol = 1e-6) const;
   // Points [m] on the boundary inflated by relTol: corners and edge midpoints of
-  // a rectangle, nDisc points around a disc.
-  std::vector<std::pair<G4double, G4double>> Boundary(G4double relTol = 1e-6, G4int nDisc = 360) const;
+  // a rectangle, nDisc points around a disc. offset_m is added to each half-size, or
+  // to the radius, after the relTol inflation; negative moves the points inward.
+  std::vector<std::pair<G4double, G4double>> Boundary(G4double relTol = 1e-6, G4int nDisc = 360,
+                                                      G4double offset_m = 0.) const;
   static constexpr G4double kClampInset_m = 1e-9;   // OR-020: exit points are clamped this far inside the section
 };
 
