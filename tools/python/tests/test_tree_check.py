@@ -603,7 +603,7 @@ def test_e2e_passes(checker, e2e, e2e_tables):
     names = {n for _, n, _ in rows}
     assert {"tree unchanged", "sentinel", "selection", f"coverage {CRACK1}", f"coverage {CRACK2}",
             f"log startup {CRACK1}", f"log grid {CRACK2}", "log hygiene",
-            f"log BBR008 {CRACK1} low", f"log BBR026 {CRACK2} below"} <= names
+            f"log BBR008 {CRACK1} low", f"log BBR026 {CRACK2} TE10 below"} <= names
     passing = {n for s, n, _ in rows if s == "PASS"}
     assert any(n.endswith(" event_id") for n in passing)
 
