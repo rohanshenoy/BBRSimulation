@@ -7,7 +7,10 @@
 #include "G4ios.hh"
 #include "Randomize.hh"
 #include <cmath>
+#include <iomanip>
+#include <sstream>
 #include <string>
+#include <utility>
 
 using namespace bbrtest;
 using hfssfix::Dataset;
@@ -63,6 +66,30 @@ std::string ReplaceAll(std::string text, const std::string& from, const std::str
   if (text.find(from) == std::string::npos) throw std::runtime_error("ReplaceAll: '" + from + "' not in the text");
   for (auto p = text.find(from); p != std::string::npos; p = text.find(from, p + to.size())) text.replace(p, from.size(), to);
   return text;
+}
+
+// A complete exit lattice at one key (0,180) with one far-field row and the same field at every exit
+// point (Ey for Ephi=0, Ez for Ephi=1): the exit CDF is uniform, so row j of M is drawn with
+// U = (j + 0.5) / M (the OR-020 clamp tests).
+using YZ = std::pair<double, double>;
+Dataset UniformLattice(const std::vector<YZ>& pts) {
+  const auto num = [](double v) { std::ostringstream o; o << std::setprecision(17) << v; return o.str(); };
+  std::vector<std::string> ex;
+  for (const auto& [y, z] : pts) ex.push_back(num(y) + "," + num(z));
+  return Rows({"0,90"}, ex);
+}
+// Where SampleExitPosition puts row j of M, with the exit face's centre at 0 and the axes (Y, Z).
+G4ThreeVector DrawRow(const BBRHFSSData& h, ScriptedEngine& eng, std::size_t j, std::size_t M) {
+  eng.Push((double(j) + 0.5) / double(M));
+  return h.SampleExitPosition(1, 0, 0, 180, G4ThreeVector(), TH, PH);
+}
+std::size_t Count(const std::string& text, const std::string& what) {
+  std::size_t n = 0;
+  for (auto q = text.find(what); q != std::string::npos; q = text.find(what, q + what.size())) ++n;
+  return n;
+}
+std::string ClampLine(const std::string& stem, int n) {
+  return "[BBR] HFSS " + stem + ": " + std::to_string(n) + " exit point(s) clamped 1 nm inside the declared cross-section\n";
 }
 
 }  // namespace
@@ -558,6 +585,141 @@ int main(int argc, char** argv) {
       p.outsidePoints = "zero";
       TempDir d3; ExpectG4Exception("BBR025", [&] { LoadChecked(d3, one, &p); },
                                     "BBRHFSSData", "1 exit point(s) lie outside");
+    }},
+    {"exit_clamp_rectangle", [] {
+      // OR-020 (C2, C3): an exit point on a wall of the declared section, or within C5's tolerance
+      // outside it, is moved to 1 nm inside, per axis; every other point is exactly unchanged.
+      const double yw = 4.5e-3, zw = 2.5e-5, d = 1e-9;
+      CHECK(BBRCrossSection::kClampInset_m == d);           // the 1 nm of the log line and of the spec
+      std::vector<YZ> pts;                                   // Y outer, Z inner: row = 3 iy + iz
+      for (const double y : {-4.5e-3, -2.25e-3, 0., 2.25e-3, 4.5e-3})
+        for (const double z : {-2.5e-5, 0., 2.5e-5}) pts.push_back({y, z});
+      const std::size_t M = pts.size();
+      CHECK(M == 15);
+      const Dataset ds = UniformLattice(pts);
+      const auto clamp1 = [&](double v, double half) { return std::abs(v) > half - d ? std::copysign(half - d, v) : v; };
+      ScriptedEngine eng;
+      G4Random::setTheEngine(&eng);
+
+      auto p = hfssfix::SidecarFrom("c_500GHz", ds);        // widens the section to the lattice: set it after
+      p.yHalf = yw; p.zHalf = zw;
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir dir; auto h = LoadChecked(dir, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(Count(cap.out, "clamped") == 1);
+      CHECK(cap.out.find(ClampLine("c_500GHz", 12)) != std::string::npos);
+
+      std::size_t moved = 0;
+      for (std::size_t j = 0; j < M; ++j) {
+        const auto r = DrawRow(h, eng, j, M);
+        const double y = pts[j].first, z = pts[j].second;
+        if (std::abs(y) == yw || std::abs(z) == zw) {
+          ++moved;
+          CHECK_NEAR(r.y(), clamp1(y, yw) * CLHEP::m, 1e-11);
+          CHECK_NEAR(r.z(), clamp1(z, zw) * CLHEP::m, 1e-11);
+        } else {
+          CHECK(r.y() == y * CLHEP::m);
+          CHECK(r.z() == z * CLHEP::m);
+        }
+      }
+      CHECK(moved == 12);
+      // The corner moves on both axes, a long-wall point on one, the three points between the walls not at all.
+      const auto corner = DrawRow(h, eng, 14, M);           // (+4.5 mm, +25 um)
+      CHECK_NEAR(corner.y(), (yw - d) * CLHEP::m, 1e-11);
+      CHECK_NEAR(corner.z(), (zw - d) * CLHEP::m, 1e-11);
+      const auto end = DrawRow(h, eng, 13, M);              // (+4.5 mm, 0)
+      CHECK_NEAR(end.y(), (yw - d) * CLHEP::m, 1e-11);
+      CHECK(end.z() == 0.);
+      for (const std::size_t j : {std::size_t(4), std::size_t(7), std::size_t(10)}) {   // (-2.25 mm, 0), (0, 0), (+2.25 mm, 0)
+        const auto r = DrawRow(h, eng, j, M);
+        CHECK(r.y() == pts[j].first * CLHEP::m);
+        CHECK(r.z() == 0.);
+      }
+
+      // Past the wall, inside C5's relative 1e-6: the end columns at 4.5 mm lie 5e-7 beyond a section of
+      // y_half = 4.5 mm / (1 + 5e-7) and still land 1 nm inside it.
+      const double yw2 = 4.5e-3 / (1. + 5e-7);
+      p.yHalf = yw2;
+      Capture cap2;
+      G4iosSetDestination(&cap2);
+      TempDir dir2; auto h2 = LoadChecked(dir2, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(cap2.out.find(ClampLine("c_500GHz", 12)) != std::string::npos);
+      for (std::size_t j = 0; j < M; ++j) {
+        const auto r = DrawRow(h2, eng, j, M);
+        CHECK_NEAR(r.y(), clamp1(pts[j].first, yw2) * CLHEP::m, 1e-11);
+        CHECK_NEAR(r.z(), clamp1(pts[j].second, zw) * CLHEP::m, 1e-11);
+      }
+      const auto end2 = DrawRow(h2, eng, 13, M);            // (+4.5 mm, 0)
+      CHECK_NEAR(end2.y(), (yw2 - d) * CLHEP::m, 1e-11);
+      CHECK(end2.z() == 0.);
+      CHECK(eng.Remaining() == 0);
+    }},
+    {"exit_clamp_disc", [] {
+      // The four rim points of a disc land 1 nm inside it, on their own axis; the centre stays.
+      const double R = 5e-5, d = 1e-9;
+      const std::vector<YZ> pts = {{-5e-5, 0.}, {0., -5e-5}, {0., 0.}, {0., 5e-5}, {5e-5, 0.}};   // the lattice {-R, 0, R}^2 inside the disc
+      const std::size_t M = pts.size();
+      const Dataset ds = UniformLattice(pts);
+      ScriptedEngine eng;
+      G4Random::setTheEngine(&eng);
+
+      auto p = hfssfix::SidecarFrom("c_500GHz", ds);        // lattice {-R, 0, R} on both axes, 5 retained points
+      p.disc = true; p.radius = R; p.outsidePoints = "omitted";
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir dir; auto h = LoadChecked(dir, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(Count(cap.out, "clamped") == 1);
+      CHECK(cap.out.find(ClampLine("c_500GHz", 4)) != std::string::npos);
+      for (std::size_t j = 0; j < M; ++j) {
+        const auto r = DrawRow(h, eng, j, M);
+        if (j == 2) {
+          CHECK(r.y() == 0.);
+          CHECK(r.z() == 0.);
+        } else {
+          CHECK_NEAR(r.y(), std::copysign(pts[j].first != 0. ? R - d : 0., pts[j].first) * CLHEP::m, 1e-11);
+          CHECK_NEAR(r.z(), std::copysign(pts[j].second != 0. ? R - d : 0., pts[j].second) * CLHEP::m, 1e-11);
+          CHECK_NEAR(std::hypot(r.y(), r.z()), (R - d) * CLHEP::m, 1e-11);
+        }
+      }
+
+      // A radius that the lattice's rim exceeds by 4e-7 (inside C5's relative 1e-6): the rim is clamped to R2 - 1 nm.
+      const double R2 = R / (1. + 4e-7);
+      p.radius = R2;
+      Capture cap2;
+      G4iosSetDestination(&cap2);
+      TempDir dir2; auto h2 = LoadChecked(dir2, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(cap2.out.find(ClampLine("c_500GHz", 4)) != std::string::npos);
+      const auto rim = DrawRow(h2, eng, 4, M);              // (+R, 0)
+      CHECK_NEAR(rim.y(), (R2 - d) * CLHEP::m, 1e-11);
+      CHECK_NEAR(rim.z(), 0., 1e-11);
+      const auto mid = DrawRow(h2, eng, 2, M);              // (0, 0)
+      CHECK(mid.y() == 0.);
+      CHECK(mid.z() == 0.);
+      CHECK(eng.Remaining() == 0);
+    }},
+    {"exit_clamp_needs_sidecar", [] {
+      // The clamp needs the declared section; without a sidecar nothing is moved and nothing is logged.
+      std::vector<YZ> pts;
+      for (const double y : {-4.5e-3, -2.25e-3, 0., 2.25e-3, 4.5e-3})
+        for (const double z : {-2.5e-5, 0., 2.5e-5}) pts.push_back({y, z});
+      const std::size_t M = pts.size();
+      ScriptedEngine eng;
+      G4Random::setTheEngine(&eng);
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir d; auto h = Load(d, UniformLattice(pts));      // direct construction, no sidecar
+      G4iosSetDestination(nullptr);
+      CHECK(cap.out.find("clamped") == std::string::npos);
+      const auto r = DrawRow(h, eng, 13, M);                 // (+4.5 mm, 0)
+      CHECK(r.y() == 4.5e-3 * CLHEP::m);
+      CHECK(r.z() == 0.);
+      const auto c = DrawRow(h, eng, 14, M);                 // (+4.5 mm, +25 um)
+      CHECK(c.y() == 4.5e-3 * CLHEP::m);
+      CHECK(c.z() == 2.5e-5 * CLHEP::m);
     }},
     {"sidecar_real_data", [] {
       const char* root = std::getenv("BBRSIM_TEST_DATA");

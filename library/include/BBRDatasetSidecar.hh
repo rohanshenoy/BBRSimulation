@@ -40,6 +40,7 @@ struct BBRCrossSection {
   // Points [m] on the boundary inflated by relTol: corners and edge midpoints of
   // a rectangle, nDisc points around a disc.
   std::vector<std::pair<G4double, G4double>> Boundary(G4double relTol = 1e-6, G4int nDisc = 360) const;
+  static constexpr G4double kClampInset_m = 1e-9;   // OR-020: exit points are clamped this far inside the section
 };
 
 struct BBRAxisRange {

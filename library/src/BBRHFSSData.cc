@@ -133,7 +133,12 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
       G4Exception("BBRHFSSData", "BBR007", FatalException, ed);
     }
   }
-  if (sidecar) CheckAgainstSidecar(*sidecar, dirStem);
+  if (sidecar) {
+    CheckAgainstSidecar(*sidecar, dirStem);
+    const G4int n = ClampExitPoints(sidecar->crossSection);
+    G4cout << "[BBR] HFSS " << dirStem << ": " << n
+           << " exit point(s) clamped 1 nm inside the declared cross-section" << G4endl;
+  }
 
   // Polarization cross term (Wang eq. 58 applied to eq. 53): the transmitted power of a
   // mixed polarization is |Et E0 + Ep E1|^2 integrated over the exit face, which adds
@@ -686,6 +691,30 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
 }
 
 // ---------------------------------------------------------------------------
+
+// OR-020: an exit point on (or, within C5's tolerance, past) a wall is moved to
+// kClampInset_m inside the declared section, so it lies strictly inside a solid of exactly that
+// section. A clamp, not a shift: points already that far inside do not move. Weights and the
+// Ephi pairing are untouched (both polarizations share one ExitPoint).
+G4int BBRHFSSData::ClampExitPoints(const BBRCrossSection& cs)
+{
+  const G4double d = BBRCrossSection::kClampInset_m;
+  G4int n = 0;
+  for (auto& [key, ds] : fData)
+    for (auto& ep : ds.exitPoints) {
+      const G4double y0 = ep.y, z0 = ep.z;
+      if (cs.shape == BBRCrossSection::kRectangle) {
+        const G4double ym = cs.yHalf_m - d, zm = cs.zHalf_m - d;
+        if (std::abs(ep.y) > ym) ep.y = std::copysign(ym, ep.y);
+        if (std::abs(ep.z) > zm) ep.z = std::copysign(zm, ep.z);
+      } else {
+        const G4double r = std::hypot(ep.y, ep.z), rm = cs.radius_m - d;
+        if (r > rm) { ep.y *= rm / r; ep.z *= rm / r; }
+      }
+      if (ep.y != y0 || ep.z != z0) ++n;
+    }
+  return n;
+}
 
 G4ThreeVector BBRHFSSData::SampleExitPosition(
     G4double E_theta, G4double E_phi,

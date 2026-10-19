@@ -10,6 +10,7 @@
 #include <vector>
 
 struct BBRDatasetSidecar;
+struct BBRCrossSection;
 
 // Loads HFSS far-field and waveguide CSVs and samples the diffraction boundary
 // condition per Wang (2025) eqs. 54-58.
@@ -131,6 +132,9 @@ class BBRHFSSData
   const AngleDataset& FindDataset(G4double iwavePhi_deg, G4double iwaveTheta_deg) const;
 
   void CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4String& dirStem) const;
+  // OR-020: moves every exit point within kClampInset_m of (or outside, by C5's tolerance) the
+  // declared section to that distance inside it; returns how many points moved.
+  G4int ClampExitPoints(const BBRCrossSection& cs);
 
   // ephi_flag: 0 = Ephi=0 CSV (fill _0 fields), 1 = Ephi=1 CSV (fill _1 fields).
   void LoadFarField(const G4String& path, int ephi_flag, const BBRDatasetSidecar* sc);
