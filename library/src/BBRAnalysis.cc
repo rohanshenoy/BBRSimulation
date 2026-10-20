@@ -346,8 +346,9 @@ void BBRAnalysis::EndRun(const G4Run* run, G4bool master) {
   if (master) {
     // The workers have finished: the totals cover every thread of this run.
     const auto totals = BBSimOpBoundaryProcess::RunTotals();
-    G4cout << "[BBR] run " << run->GetRunID() << " hfss_transmissions=" << totals.first
-           << " exit_start_fallback=" << totals.second << G4endl;
+    G4cout << "[BBR] run " << run->GetRunID() << " hfss_transmissions=" << totals.transmissions
+           << " exit_start_fallback=" << totals.fallback
+           << " exit_start_normal=" << totals.normal << G4endl;
     WriteMetadata(run);
     G4cout << "=== BBR Run " << run->GetRunID() << " end: " << fRootPath << " written ===" << G4endl;
   }

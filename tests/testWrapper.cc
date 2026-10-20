@@ -204,6 +204,7 @@ int main(int argc, char** argv) {
       CHECK_VEC(r.pos, G4ThreeVector(2 * mm - Inset(), 0, kZw), 1e-12 * mm);
       CHECK(LeavesThroughExitFace(r, kExact, 2 * mm));
       CHECK(w.Process().GetExitStartFallbackCount() == 0);
+      CHECK(w.Process().GetExitStartNormalCount() == 1);
     }},
     {"exit_start_long_wall", [] {
       // A clamped +y wall row (y = 4.5 mm - 1 nm) leaving grazing toward that wall (T = 90, P = acos n).
@@ -302,6 +303,7 @@ int main(int argc, char** argv) {
       CHECK(r.status == S::kBBRDiffractionTransmit);
       CHECK_VEC(r.dir, G4ThreeVector(n, -a, a), 1e-12);
       CHECK(w.Process().GetExitStartFallbackCount() == 1);
+      CHECK(w.Process().GetExitStartNormalCount() == 0);
       CHECK_VEC(r.pos, G4ThreeVector(2 * mm - Inset(), kYw, kZw), 1e-12 * mm);
       Capture cap;
       G4iosSetDestination(&cap);
@@ -311,26 +313,33 @@ int main(int argc, char** argv) {
       }
       G4iosSetDestination(nullptr);
       CHECK(w.Process().GetExitStartFallbackCount() == 100);
-      CHECK(cap.out.find("[BBR] diffraction events=100 T_obs=1 exit_start_fallback=99\n") != std::string::npos);
+      CHECK(w.Process().GetExitStartNormalCount() == 0);
+      CHECK(cap.out.find("[BBR] diffraction events=100 T_obs=1 exit_start_fallback=99 exit_start_normal=0\n") !=
+            std::string::npos);
     }},
     {"run_totals", [] {
-      // Process-wide totals over all threads: HFSS transmissions and exit-start fallbacks, reset by the run.
+      // Process-wide totals over all threads: HFSS transmissions, exit-start fallbacks and starts at the
+      // normal inset with a valid ray, reset by the run. One grid holds the three cases, one frequency each
+      // (the crack library caches a dataset by ID for the life of the process).
+      using Totals = BBSimOpBoundaryProcess::Totals;
       const double n = 1e-3, a = std::sqrt(1. - n * n) / std::sqrt(2.);
       const double T = Deg(std::acos(a)), P = Deg(std::atan2(-a, n));
-      TempDir d; UseGrid(d, {{"500", hfssfix::OnePointOneDirection(4.5e-3, 2.5e-5, P, T)}});
+      TempDir d;
+      UseGrid(d, {{"100", hfssfix::OnePointOneDirection(4.5e-3, 2.5e-5, P, T)},   // corner: fallback
+                  {"200", OnePoint(0., 2.5e-5, AwayG(1e-3))},                      // normal inset, ray valid
+                  {"400", OnePoint(0., 2.5e-5, TowardG(1e-3))}});                  // ray start
       World w(kExact); ScriptedEngine eng;
       BBSimOpBoundaryProcess::ResetRunTotals();
-      CHECK(BBSimOpBoundaryProcess::RunTotals() == (std::pair<G4long, G4long>(0, 0)));
-      Script(eng, {0.0, 0.5, 0.5});
-      CHECK(w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng).status == S::kBBRDiffractionTransmit);   // corner fallback
-      CHECK(BBSimOpBoundaryProcess::RunTotals() == (std::pair<G4long, G4long>(1, 1)));
-      TempDir d2; UseData(d2, hfssfix::WrapKeys());   // a normal transmission, no fallback
-      World w2; ScriptedEngine eng2;
-      Script(eng2, {0.0, 0.5, 0.5});
-      CHECK(w2.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng2).status == S::kBBRDiffractionTransmit);
-      CHECK(BBSimOpBoundaryProcess::RunTotals() == (std::pair<G4long, G4long>(2, 1)));
+      CHECK(BBSimOpBoundaryProcess::RunTotals() == (Totals{0, 0, 0}));
+      const double freqs[] = {100., 200., 400.};
+      const Totals expect[] = {{1, 1, 0}, {2, 1, 1}, {3, 1, 1}};
+      for (int i = 0; i < 3; ++i) {
+        Script(eng, {0.0, 0.5, 0.5});
+        CHECK(w.Shoot({-3 * mm, 0, 0}, X, Z, EnergyEV(freqs[i]), eng).status == S::kBBRDiffractionTransmit);
+        CHECK(BBSimOpBoundaryProcess::RunTotals() == expect[i]);
+      }
       BBSimOpBoundaryProcess::ResetRunTotals();
-      CHECK(BBSimOpBoundaryProcess::RunTotals() == (std::pair<G4long, G4long>(0, 0)));
+      CHECK(BBSimOpBoundaryProcess::RunTotals() == (Totals{0, 0, 0}));
     }},
     {"exit_start_summary_zero", [] {
       // The fallback count is printed when it is 0 too.
@@ -343,7 +352,8 @@ int main(int argc, char** argv) {
         w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng);
       }
       G4iosSetDestination(nullptr);
-      CHECK(cap.out.find("[BBR] diffraction events=100 T_obs=1 exit_start_fallback=0\n") != std::string::npos);
+      CHECK(cap.out.find("[BBR] diffraction events=100 T_obs=1 exit_start_fallback=0 exit_start_normal=0\n") !=
+            std::string::npos);
     }},
     {"polarization_filter", [] {
       TempDir d; UseData(d, hfssfix::WrapKeys());

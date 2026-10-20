@@ -60,11 +60,26 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   // "[BBR] diffraction events=" line.
   G4int GetExitStartFallbackCount() const { return fNExitFallback; }
 
+  // Transmissions whose start on the ray through the sampled exit point was not valid but whose
+  // start at the normal inset was (the ray from it reaches the exit plane inside the solid), so
+  // the photon started at the normal inset and crosses the exit plane slightly off the sampled
+  // point. Not a fallback. Printed as exit_start_normal= on the "[BBR] diffraction events=" line.
+  G4int GetExitStartNormalCount() const { return fNExitNormal; }
+
   // Process-wide totals over every thread since the last reset: HFSS transmissions and, of those,
-  // exit-start fallbacks. The run action of the master resets them at the start of a run and
-  // prints them at its end (BBRAnalysis), so the count is one number per run, not one per worker.
+  // exit-start fallbacks and starts at the normal inset with a valid ray. The run action of the
+  // master resets them at the start of a run and prints them at its end (BBRAnalysis), so the
+  // counts are one number per run, not one per worker.
+  struct Totals {
+    G4long transmissions;
+    G4long fallback;
+    G4long normal;
+    bool operator==(const Totals& o) const {
+      return transmissions == o.transmissions && fallback == o.fallback && normal == o.normal;
+    }
+  };
   static void ResetRunTotals();
-  static std::pair<G4long, G4long> RunTotals();   // {transmissions, fallbacks}
+  static Totals RunTotals();
 
   G4OpBoundaryProcessStatus GetStatus() const;
   // Forward SetInvokeSD to the wrapped G4OpBoundaryProcess (no getter in G4 API).
@@ -86,11 +101,12 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   // the photon crosses the exit plane at its sampled point. Fallback: the normal inset
   // pos_out - inset normal_hat. A start is valid if it is inside the solid and its ray reaches the
   // exit plane before leaving the solid (DistanceToOut, to the surface tolerance). If neither is
-  // valid the normal inset is returned with fellBack = true.
+  // valid the normal inset is returned with fellBack = true. usedNormal is true when the normal
+  // inset was returned because the ray start was invalid and the normal inset was valid.
   G4ThreeVector ExitStart(const G4VTouchable& touch, const G4AffineTransform& xf,
                           const G4ThreeVector& pos_out, const G4ThreeVector& dir_out,
                           const G4ThreeVector& normal_hat, G4double inset,
-                          G4bool& fellBack) const;
+                          G4bool& fellBack, G4bool& usedNormal) const;
 
   G4ParticleChange fParticleChange;
 
@@ -103,9 +119,11 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4int fNReflectance         = 0;
   G4int fNReflectanceAbsorb   = 0;
   G4int fNExitFallback        = 0;
+  G4int fNExitNormal          = 0;
 
   static std::atomic<G4long> sRunTransmissions;
   static std::atomic<G4long> sRunExitFallbacks;
+  static std::atomic<G4long> sRunExitNormal;
 };
 
 #endif

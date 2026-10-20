@@ -170,7 +170,8 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   if (fNDiffraction % 100 == 0)
     G4cout << "[BBR] diffraction events=" << fNDiffraction
            << " T_obs=" << G4double(fNDiffractionTransmit)/fNDiffraction
-           << " exit_start_fallback=" << fNExitFallback << G4endl;
+           << " exit_start_fallback=" << fNExitFallback
+           << " exit_start_normal=" << fNExitNormal << G4endl;
 
   if (transmitted) {
     fLastBBRStatus = kBBRDiffractionTransmit;
@@ -226,10 +227,11 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
                   "Crack half-length is too small for the navigation inset.");
     }
 
-    G4bool fellBack = false;
+    G4bool fellBack = false, usedNormal = false;
     const G4ThreeVector pos_inside =
-        ExitStart(*touch, xf, pos_out, dir_out, normal_hat, inset, fellBack);
+        ExitStart(*touch, xf, pos_out, dir_out, normal_hat, inset, fellBack, usedNormal);
     if (fellBack) { ++fNExitFallback; ++sRunExitFallbacks; }
+    if (usedNormal) { ++fNExitNormal; ++sRunExitNormal; }
     const G4ThreeVector local_inside = xf.TransformPoint(pos_inside);
     if (touch->GetSolid()->Inside(local_inside) != kInside) {
       G4Exception("BBSimOpBoundaryProcess::HandleDiffractionBoundary",
@@ -268,7 +270,8 @@ G4ThreeVector BBSimOpBoundaryProcess::ExitStart(const G4VTouchable& touch,
                                                 const G4ThreeVector& dir_out,
                                                 const G4ThreeVector& normal_hat,
                                                 G4double inset,
-                                                G4bool& fellBack) const
+                                                G4bool& fellBack,
+                                                G4bool& usedNormal) const
 {
   const G4VSolid* solid = touch.GetSolid();
   const G4double tolerance =
@@ -286,11 +289,12 @@ G4ThreeVector BBSimOpBoundaryProcess::ExitStart(const G4VTouchable& touch,
   };
 
   fellBack = false;
+  usedNormal = false;
   const G4ThreeVector normalInset = pos_out - inset * normal_hat;
   if (n > 0.) {
     const G4ThreeVector onRay = pos_out - (inset / n) * dir_out;
     if (valid(onRay)) return onRay;
-    if (valid(normalInset)) return normalInset;
+    if (valid(normalInset)) { usedNormal = true; return normalInset; }
   }
   fellBack = true;
   return normalInset;
@@ -385,14 +389,16 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleReflectanceBoundary(
 
 std::atomic<G4long> BBSimOpBoundaryProcess::sRunTransmissions{0};
 std::atomic<G4long> BBSimOpBoundaryProcess::sRunExitFallbacks{0};
+std::atomic<G4long> BBSimOpBoundaryProcess::sRunExitNormal{0};
 
 void BBSimOpBoundaryProcess::ResetRunTotals() {
   sRunTransmissions = 0;
   sRunExitFallbacks = 0;
+  sRunExitNormal = 0;
 }
 
-std::pair<G4long, G4long> BBSimOpBoundaryProcess::RunTotals() {
-  return {sRunTransmissions.load(), sRunExitFallbacks.load()};
+BBSimOpBoundaryProcess::Totals BBSimOpBoundaryProcess::RunTotals() {
+  return {sRunTransmissions.load(), sRunExitFallbacks.load(), sRunExitNormal.load()};
 }
 
 G4String BBSimOpBoundaryProcess::GetLastBBRStatusString() const

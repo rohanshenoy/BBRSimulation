@@ -262,12 +262,17 @@ the exit plane at the point HFSS sampled: a start moved along the normal only wo
 wall row (1 nm inside the wall after the clamp below) into that wall before the exit plane. The ray start is
 valid when it lies inside the solid and its ray reaches the exit plane before leaving it (`DistanceToOut`, to the
 surface tolerance). If it is not (a grazing photon heading away from the wall it starts beside), the normal inset
-is used under the same test; if neither is valid (a rectangle corner, a near-tangential photon at a disc rim) the
-normal inset is kept and the photon is counted as an exit-start fallback. No random number is drawn. Each
-thread's `[BBR] diffraction events=<n> T_obs=<t> exit_start_fallback=<f>` line (every 100th diffraction) carries
-its own count, and the master prints one line at the end of every run with the totals over all threads:
-`[BBR] run <id> hfss_transmissions=<m> exit_start_fallback=<f>` (always, 0 included; an information line, not a
-warning). In the regression's transmit, oblique, frequency, round and tree cases the count is 0 in every run.
+is used under the same test; the photon then crosses the exit plane slightly off the sampled point, and the
+start is counted as an exit-start normal (`exit_start_normal`), a valid start and not a fallback. If neither start
+is valid (a rectangle corner, a near-tangential photon at a disc rim) the normal inset is kept and the photon is
+counted as an exit-start fallback (`exit_start_fallback`). The two counters are disjoint, and a transmission that
+used the ray start increments neither. No random number is drawn. Each thread's
+`[BBR] diffraction events=<n> T_obs=<t> exit_start_fallback=<f> exit_start_normal=<k>` line (every 100th
+diffraction) carries its own counts, and the master prints one line at the end of every run with the totals over
+all threads: `[BBR] run <id> hfss_transmissions=<m> exit_start_fallback=<f> exit_start_normal=<k>` (always, 0
+included; an information line, not a warning). In the regression's transmit, oblique, frequency, round and tree
+cases the fallback count is 0 in every run; the normal count is the number of transmissions that start beside a
+wall and head away from it.
 
 After C5, with a sidecar, `BBRHFSSData` clamps every exit point closer than 1 nm to
 the declared section's boundary, or past it (within C5's tolerance), to 1 nm inside
