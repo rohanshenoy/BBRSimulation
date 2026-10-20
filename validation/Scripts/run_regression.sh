@@ -27,11 +27,11 @@
 # 2. Builds the mock HFSS tree (each mock frequency with its dataset sidecar)
 #    and the mock round-gap tree when needed, checks that the real
 #    data/waveguides holds only 500 GHz (leak guard), generates the two
-#    real-tree checks (make_tree_check.py over data/ and over the mock tree),
-#    runs the thirteen cases in parallel with a pinned Geant4 thread count
+#    real-tree checks (make_tree_check.py over data/, the mock tree and the schema-2 mock tree),
+#    runs the fourteen cases in parallel with a pinned Geant4 thread count
 #    (BBR_THREADS, default 8), each in BUILD_DIR/regression/<case>/ (BBRSIMDATA
 #    comes from the installed env script): the seven validation/G4Macros
-#    fixtures, the two generated tree checks and four example macros
+#    fixtures, the three generated tree checks (legacy, mock, schema-2 mock) and four example macros
 #    (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
 #    their command lines are pinned by drift_guards.sh). Scans every log for
 #    GeomNav / G4Exception / BBR0xx / LP002 messages, checks that the
@@ -363,7 +363,7 @@ scan_log() {  # case-dir [tolerated-codes-ERE]
 }
 # refl, planck, config_mt and lp run the example macros themselves, pinned by the
 # drift guard "regression macros pinned"; the next seven are validation-only fixtures,
-# and the two tree checks run the macros make_tree_check.py generated above.
+# and the three tree checks run the macros make_tree_check.py generated above.
 run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
 run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
 run_macro config_mt "$TESTWORLD" "$REPO/examples/testworld/G4Macros/config_mt.mac"   &

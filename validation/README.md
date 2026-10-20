@@ -29,11 +29,11 @@ consumer smoke test and the `bbrsim data default` and `version stamp` checks,
 then step 1c: the C++
 tests (`ctest`), the Python tests (`pytest`, from `/` on the installed
 `bbrsim`; pytest must be installed, `pip install -e "tools/python[test]"`) and
-`Scripts/tests/test_env.sh` (`env scripts`). It runs the thirteen cases in parallel,
+`Scripts/tests/test_env.sh` (`env scripts`). It runs the fourteen cases in parallel,
 each in `BUILD_DIR/regression/<case>/`, with `G4FORCENUMBEROFTHREADS` pinned to
 8 (`BBR_THREADS` overrides; Geant4 warns when a run has more threads than the
 square root of its events, and the log scan would fail on a many-core machine),
-and runs the validators on their output. Seven cases run the fixtures here, two
+and runs the validators on their output. Seven cases run the fixtures here, three
 run the real-tree checks generated at run time (see [Real-tree check](#real-tree-check)),
 and four run example macros directly (see [Regression inputs](#regression-inputs)).
 Last come two rows: `installed examples` (both examples installed into
@@ -67,7 +67,8 @@ fingerprint stays fixed; pytest also exercises real redirected output and per-re
 | `lp_cad` | `Validation_LightPipeCAD.mac` | `bbrsimLightPipe` | `check_invariants.py` (cad mode, the bundled `box_sample.stl` through `BBRSIMDATA`) |
 | `tree_legacy` | `tree_check.mac`, generated from `data/` | `bbrsimTestWorld` | `check_tree_run.py --log run.log` on the case directory; `check_invariants.py` on each of the 16 `tree_rNNN.root` |
 | `tree_mock` | `tree_check.mac`, generated from `BUILD_DIR/mock_hfss` | `bbrsimTestWorld` | the same, on its 92 `tree_rNNN.root` |
-| — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL); `check_dataset_sidecars.py` on `data/waveguides`, `BUILD_DIR/mock_hfss/waveguides` and `BUILD_DIR/mock_round_gap/waveguides` |
+| `tree_v2` | `tree_check.mac`, generated from `BUILD_DIR/mock_v2` (the two cracks relabelled to schema 2.0 by `Scripts/make_mock_schema2.py`, the round gap written natively by `Scripts/make_mock_round_gap.py --schema 2`) | `bbrsimTestWorld` | the same, with the 2.x rows of [Real-tree check](#real-tree-check), on its `tree_rNNN.root` |
+| — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL); `check_dataset_sidecars.py` on `data/waveguides`, `BUILD_DIR/mock_hfss/waveguides`, `BUILD_DIR/mock_round_gap/waveguides` and `BUILD_DIR/mock_v2/waveguides` |
 
 A case passes when the binary exits 0, writes its ROOT output, and its log
 holds no `GeomNav`, `G4Exception`, `BBR0xx` or `LP002` line, except two
@@ -75,7 +76,7 @@ tolerated warnings: `BBR008` (frequency case: its clamp warnings, exactly one
 per side required) and `BBR026` (planck, config_mt, transmit and frequency:
 Planck photons below the cracks' TE10 cutoff at 14.99 GHz served by a dataset
 above it, at most once per dataset and direction). The round case's gun
-photons sit above its TE11 cutoff, so `BBR026` fails it. The two tree cases tolerate `BBR008` and `BBR026`; `check_tree_run.py` then requires exactly the warnings their output implies.
+photons sit above its TE11 cutoff, so `BBR026` fails it. The legacy and mock tree cases tolerate `BBR008` and `BBR026`, and the schema-2 tree case also `BBR028`; `check_tree_run.py` then requires exactly the warnings their output implies.
 
 ## Drift guards
 
@@ -112,8 +113,8 @@ not installed is skipped) and exits with its FAIL count.
 - `check_round_gap.py` — all 49 checks over the nine runs of `Validation_RoundGap.mac` (2000 GHz, against the mock `RoundGap_r50um` table): one gap entry per event along the gun direction; T_obs within 3 σ (binomial) of the `bbrsim.hfss` prediction; every exit on the exit face and within the 50 µm HFSS radius, which is also the Geant4 hole's radius; for the three fixed polarizations, the share of exits inside R/2 within 4 σ of the table's prediction, which tells the Ephi=0 and Ephi=1 radial profiles apart; and the mean exit direction within 4 standard errors of the prediction in each component. The last run, at the diagonal key (45°, 135°) with a fixed polarization of equal θ̂ and φ̂ components, makes the polarization cross term 2 E_θ E_φ √(T₀T₁) Re ρ large (Re ρ = 0.288 in the mock): T = 0.511 against 0.289 with the term's sign flipped, 28 σ apart, so it pins that sign end to end; the random-polarization diagonal run averages the term out. With `--log` (as the runner calls it) one more check: the run log holds exactly one `[BBR] crack RoundGap_r50um:` line reporting its sidecar fit, the startup check of the placed solid against the sidecar; without it, 48 checks.
 - `check_invariants.py` — both invariants, each printed in its own section: no photons in metal (no crossing starts inside a `Cu_RRR*` or `BBR_Perfect*` material, and the file holds at least one crossing; `--allow-no-crossings` waives only the latter, for the world-exit fixture), and termination labels (the file holds at least one `abspoints` row, no `unknown` label, every world exit is `WorldExit`, every absorption has a volume, and the `BBRAbsorb` counts agree between the two ntuples). A code with no legend entry fails the section that reads that column (`legend lacks code(s) …`), so a legend gap cannot make a check pass vacuously.
 - `check_cu_serov.py` — full-Drude loss for the `OF_Cu` (RRR 3) and `HP_Cu` (RRR 6) aliases within ±10 % of Serov et al. (2016). **XFAIL:** `HP_Cu` comes out 13 % low at 230 GHz, because RRR 6 was derived with Hagen-Rubens. Whether to move `HP_Cu` to RRR 5 or accept a wider tolerance is an open decision; the runner reports the check as XFAIL, and as XPASS (a failure) if it starts passing.
-- `cutoff warning once` (runner row, no ROOT input) — `BBR026` is tolerated in the planck, config_mt, transmit and frequency cases, and fires at most once per dataset and direction in each case's log (each case is its own process, with its own one-shot flags). The row fails closed: every `G4Exception : BBR026` banner must have a description line that parses as `BBR026 dataset=<id> direction=below|above`, so a changed message format fails rather than passing unseen. See [Dataset sidecars](#dataset-sidecars).
-- `check_dataset_sidecars.py` — every dataset in the real tree (`data/waveguides`) and the two mock trees (`BUILD_DIR/mock_hfss/waveguides`, `BUILD_DIR/mock_round_gap/waveguides`) has a complete trio and a sidecar that passes `bbrsim.sidecar.check_full` (checks, full mode lists, CSV checksums, C1-C5), and the frequencies of each ID agree on the frequency-independent blocks; each directory must hold at least one dataset. See [Dataset sidecars](#dataset-sidecars).
+- `cutoff warning once` (runner row, no ROOT input) — `BBR026` is tolerated in the planck, config_mt, transmit and frequency cases, and fires at most once per dataset, mode and direction in each case's log (each case is its own process, with its own one-shot flags). The row fails closed: every `G4Exception : BBR026` banner must have a description line that parses as `BBR026 dataset=<id> direction=below|above mode=<label>`, so a changed message format fails rather than passing unseen. See [Dataset sidecars](#dataset-sidecars).
+- `check_dataset_sidecars.py` — every dataset in the real tree (`data/waveguides`) and the three mock trees (`BUILD_DIR/mock_hfss/waveguides`, `BUILD_DIR/mock_round_gap/waveguides`, `BUILD_DIR/mock_v2/waveguides`) has a complete trio and a sidecar that passes `bbrsim.sidecar.check_full` (checks, the mode lists under 1.x or the regime cutoffs under 2.x, CSV checksums, C1-C5 and the 2.x row checks), and the frequencies of each ID agree on the frequency-independent blocks; each directory must hold at least one dataset. See [Dataset sidecars](#dataset-sidecars).
 
 One validator needs an output the fixtures do not produce, so it is run by
 hand: `check_cu_absorptance.py` (0.3 < A_obs/A_theory < 3 against the
@@ -143,8 +144,9 @@ index the runs by position, so change a fixture only together with its
 validators. Every `Validation_*.mac` must also be called by the runner (drift guard
 `every fixture is run`).
 
-The two tree cases run macros that `Scripts/make_tree_check.py` writes into their
-case directories at run time, from `data/` and from the mock tree. They are not
+The three tree cases run macros that `Scripts/make_tree_check.py` writes into their
+case directories at run time, from `data/`, from the mock tree and from the
+schema-2 mock tree. They are not
 fixtures and are not pinned; their validator reads the run plan from the
 manifest beside the macro.
 
@@ -168,7 +170,7 @@ conda run -n bbrsim python <repo>/validation/check_crack_transmittance.py output
 
 **Placement and timing.** Every `<id>_<freq>GHz_Ephi={0,1}` directory pair
 under `waveguides/` has a sidecar `<id>_<freq>GHz.dataset.json` beside it
-(JSON, schema 1.x, agreed with Blackbody-Simulations on 2026-10-05). BBRsim
+(JSON, schema 1.x or 2.x; 1.x agreed with Blackbody-Simulations on 2026-10-05, 2.x described in the Schema 2.x paragraph below). BBRsim
 reads it when it discovers the dataset, and checks every placed crack at the
 first run initialization (`/run/initialize` with a multithreaded or task run
 manager, as in the examples; `/run/beamOn` with a sequential one), before any
@@ -183,6 +185,8 @@ complete dataset with sidecars for each placed crack; the test world always
 places both `InfParallelPlate_crack1Rohan` and `InfParallelPlate_crack2`. The
 frequency-independent blocks are repeated in every frequency's file, so a
 copied frequency stays self-describing. Every frequency of one ID must agree on
+the schema major version and the incidence grid (`excitation.incident_phi_deg` and
+`incident_theta_deg`: one dataset ID never mixes schema 1 and 2, or two grids, in one tree),
 the frame mapping (`frames.hfss_global_axes_in_canonical` and
 `frames.exit_cs_axes_in_canonical`), `symmetry`, `boundaries`, `geometry.shape`
 and `geometry.extent_mm`, the `modes` block without `basis` and
@@ -220,7 +224,7 @@ sidecar that declares any other frame is rejected (F4).
 later 1.x sidecar may carry fields this version does not know; they are
 ignored. At discovery and initialization, sidecar only (no CSV is read):
 
-- F1 `schema_version`: the major version is 1 (`BBR024`).
+- F1 `schema_version`: `"1"` or `"1.x"` reads as schema 1, `"2"` or `"2.x"` as schema 2; anything else is `BBR024` ("BBRsim reads 1.x and 2.x"). The checks below are the schema-1 ones; where 2.x differs, see the Schema 2.x paragraph below.
 - F2 `dataset_id`: equals the directory ID and the stripped physical-volume name (`BBR024`).
 - F3 `frequency_label`, `frequency_ghz`: the label equals the directory token plus `GHz`; `frequency_ghz` and the label's parsed value are within 0.1 % of the directory frequency (`BBR024`).
 - F4 `frames`: `hfss_global_axes_in_canonical` is a right-handed orthonormal basis, `exit_cs.z` = x × y, `exit_cs` mapped through it equals `exit_cs_axes_in_canonical`, the exit and entrance outward normals map to +p and −p, and the frame is the one the sampler implements (`BBR025`).
@@ -261,9 +265,13 @@ crack at normal distance `inset` = 20 times the surface tolerance (2e-8 mm) from
 the exit plane at the point HFSS sampled: a start moved along the normal only would send a grazing photon from a
 wall row (1 nm inside the wall after the clamp below) into that wall before the exit plane. The ray start is
 valid when it lies inside the solid and its ray reaches the exit plane before leaving it (`DistanceToOut`, to the
-surface tolerance). If it is not (a grazing photon heading away from the wall it starts beside), the normal inset
-is used under the same test; the photon then crosses the exit plane slightly off the sampled point, and the
-start is counted as an exit-start normal (`exit_start_normal`), a valid start and not a fallback. If neither start
+surface tolerance). If it is not (a photon that starts beside a wall and grazes away from it: the on-ray start
+would lie on the far side of the wall behind it), the normal inset is used under the same test; the photon never
+hits a wall, but crosses the exit plane inward of the sampled point by at most `inset` x t/n (t the tangential
+component of the direction along the offset, n its component along the exit normal), and the start is counted as
+an exit-start normal (`exit_start_normal`), a valid start and not a fallback. A photon that grazes toward a wall
+uses the on-ray start and is counted by neither counter; the tree check's `exit direction` row proves that no
+transmitted photon hits a wall. If neither start
 is valid (a rectangle corner, a near-tangential photon at a disc rim) the normal inset is kept and the photon is
 counted as an exit-start fallback (`exit_start_fallback`). The two counters are disjoint, and a transmission that
 used the ray start increments neither. No random number is drawn. Each thread's
@@ -272,7 +280,7 @@ diffraction) carries its own counts, and the master prints one line at the end o
 all threads: `[BBR] run <id> hfss_transmissions=<m> exit_start_fallback=<f> exit_start_normal=<k>` (always, 0
 included; an information line, not a warning). In the regression's transmit, oblique, frequency, round and tree
 cases the fallback count is 0 in every run; the normal count is the number of transmissions that start beside a
-wall and head away from it.
+wall and graze away from it.
 
 After C5, with a sidecar, `BBRHFSSData` clamps every exit point closer than 1 nm to
 the declared section's boundary, or past it (within C5's tolerance), to 1 nm inside
@@ -292,9 +300,18 @@ neither cannot be sampled, and BBRsim refuses it rather than draw uniformly
 (`BBR027`). The same code stops a run whose photon's mixed polarization makes
 the two basis far fields or exit fields cancel everywhere.
 
-At run time, `BBR026` (a `JustWarning`, once per dataset and direction) fires
-when a photon's frequency and the grid frequency serving it lie on opposite
-sides of `modes.cutoff_ghz`; the runner tolerates it only where it is expected.
+At run time, `BBR026` (a `JustWarning`) fires once per dataset, mode and
+direction when a photon's frequency and the grid frequency serving it lie on
+opposite sides of a regime cutoff of the dataset: under schema 1 the lowest
+mode, `modes.cutoff_ghz`; under schema 2 every entry of
+`modes.regime_cutoffs_ghz`. The text is `BBR026 dataset=<id>
+direction=below|above mode=<label> nu_GHz=... grid_GHz=... cutoff_GHz=... :
+...`; the `mode=` token follows `direction=`, so a pattern that matched the old
+text still matches. A one-point grid warns too. `BBR028` (a `JustWarning`,
+schema 2 only) fires once per dataset when a table at or above
+`cross_term.valid_below_ghz` serves a photon:
+`BBR028 dataset=<id> grid_GHz=<f> valid_below_GHz=<l> : ...`. The table is used
+unchanged in both cases; the runner tolerates them only where they are expected.
 
 Recorded, and except `boundaries` (F10) not checked against the conventions
 BBRsim implements (of these, only `boundaries`, `geometry.shape` and
@@ -315,6 +332,64 @@ sidecar's `frames.exit_cs.origin_mm_global`. A geometry without cracks records
 `[]`. The `files` checksums are verified by the runner's
 `check_dataset_sidecars.py`; BBRsim itself does not verify them.
 
+**Schema 2.x.** A sidecar whose `schema_version` is `"2.x"` is read by the same
+two twins (`BBRDatasetSidecar`, `bbrsim.sidecar`) under the checks of this
+section, with the differences below; the Python mirror `bbrsim.hfss` and the C++
+loader read the 16-column `waveguide.csv` of the same dataset (a 2.x data
+directory read without its sidecar is `BBR024`, never the 1.0 column map).
+Schema-1 files and the legacy fixtures are unchanged.
+
+- Columns. `exit_field.columns` is the 2.0 list (the 1.0 list with the six field
+  columns relabelled and `InterceptFactor` appended, last); the field values are
+  read by position, Ex = columns 9 and 10, Ey = 11 and 12, Ez = 13 and 14, each as
+  (real, imaginary) (`BBR025` for any other list, `BBR013` for a CSV header that
+  differs from it). The far-field columns and `far_field.csv` are unchanged.
+- Transmittance. `OutgoingPower` is the exit flux and `IngoingPower` is the
+  entrance area times the intensity, undivided. `InterceptFactor` c_k is
+  |cos θ_k| at every key except θ = 90°, where it is `transmittance.cell_90`, the
+  cell value derived from the declared θ list: 1/⟨1/max(cos α, 0.01)⟩ for α
+  uniform on [90° − Δ/2, 90°], Δ the gap between 90° and the next declared θ
+  (0.08384881979 for Δ = 45°, 0.03663305469 for Δ = 15°). A declared θ list with
+  no 90° entry, or nothing above it, is `BBR025`. T of a polarization is
+  OutgoingPower / (IngoingPower × InterceptFactor), from the key's first row; a
+  value above 1 is kept, the per-photon clamp in `GetTransmittance` is the cap,
+  and there is no load-time rescale and no "normalized to 1" line. The sidecar
+  also carries `transmittance.c_key` and `per_key` (c_k and `t_flux`, the flux
+  transmittance undivided) as the cross-check of the column, and
+  `cell_90_assumes` (emitter `uniform_theta`, the only emitter BBRsim has,
+  `cos_floor` 0.01, `band_deg` [90 − Δ/2, 90]); any other emitter, floor or band
+  is `BBR025`.
+- Sidecar checks. Fixed strings must equal the producer's (`model.kind`,
+  `transmittance.definition`, `.numerator`, `.incoming`, `.above_one`,
+  `exit_field.tangential_components`, `.quadrature`, `.sampler`, `.scale.rule`,
+  `cross_term.density`, `.above_limit`, `far_field.normalization`, the
+  column-order rule with `reference.passed` true, `plane_tolerance_m` 1e-12): a
+  difference is `BBR025`. Per-key records are matched to the declared keys to
+  1e-9; c_k, `cell_90`, `modes.polarization_filter_limit_ghz`,
+  `cross_term.valid_below_ghz` and each `modes.regime_cutoffs_ghz` entry are
+  compared with the reader's own derivation to 1e-6 relative (`BBR025`). The
+  modes block is `mode`, `cutoff_ghz`, `polarization_filter_limit_ghz` and the
+  `regime_cutoffs_ghz` list (a rectangle's TE10 and TE0n up to 20 THz, a disc's
+  TE11, TM01 and TE21); the mode lists, counts and `basis` of schema 1 are gone.
+  `exit_field.grid.<axis>.step` must equal (max − min)/(count − 1) to 1e-6
+  relative, and a rectangle axis with fewer than 2 nodes is `BBR024`.
+  `provenance.material` is required (see F11b).
+- Dark bases. A polarization with `exit_field.scale.per_key` `dark0` or `dark1`
+  true must have `t_flux` exactly 0 in the sidecar (`BBR024`, at discovery) and
+  `OutgoingPower` exactly 0 on every row of its key in the CSV (`BBR012`, at
+  load); a dark basis is never sampled and its overlap with the other is 0. T is
+  never reset to make a contradiction pass.
+- CSV rows (`BBR012`, naming the key, polarization and value): `InterceptFactor`
+  constant within a key and equal to the key's c_k and to the closed form of the
+  declared grid (1e-6 relative); the two T sources, the CSV's first row and
+  `t_flux` / c_k, equal to 1e-6 relative on a lit key and both exactly 0 on a dark
+  one.
+- Sampling. Exit positions are drawn with weight |E_t|² (Ex and Ey) times the
+  quadrature weight: the trapezoid rule on a rectangle (half weight on the first
+  and last node of each axis, a quarter at a corner, assigned before the 1 nm
+  clamp), 1 on a disc. The cross term uses the same density, and the
+  polarization-filter limit bounds its validity (`BBR028` above it).
+
 **Tools.** `validation/check_dataset_sidecars.py <waveguides-dir> [...]`
 (default: `waveguides/` under the data root of `bbrsim.paths.data_dir()`)
 checks every dataset in the given directories. A dataset `<id>_<freq>GHz` is
@@ -322,7 +397,7 @@ the trio `<stem>_Ephi=0/`, `<stem>_Ephi=1/` and `<stem>.dataset.json`; other
 files (a tree manifest, `SHA256SUMS`) are ignored, and a stem missing any part
 of the trio fails. A complete dataset is checked with
 `bbrsim.sidecar.check_full`: F1-F11 and F13, the full mode lists re-derived
-with scipy, the sha256, size and row count of the four CSVs, C1-C5 on both
+with scipy (schema 1; schema 2 re-derives the regime cutoffs in closed form), the sha256, size and row count of the four CSVs, C1-C5 on both
 polarizations, and the load-time checks of `bbrsim.hfss.load_dataset`
 (`BBR027` included), so a dataset that passes cannot stop a run at its first
 photon. The frequencies of one ID in one directory must also agree on
@@ -416,6 +491,12 @@ highest grid frequencies run 0.1 % inside the grid, because an exact edge reads
 back one ulp outside and clamps. Keep every event count at or above the square
 of the thread count (Geant4 warns, Run10035, otherwise).
 
+The manifest (schema `bbrsim-tree-check/2`) also records, per dataset, its schema
+major, the regime cutoffs `BBR026` is checked against (the lowest mode under
+schema 1, every regime cutoff under 2.x) and the cross-term limit `BBR028` is
+checked against (null under schema 1); the validator refuses a `/1` manifest,
+and a run regenerates it.
+
 `check_tree_run.py RUN_DIR --log RUN_DIR/run.log` reads the manifest, every
 `output/tree_rNNN.root` with its metadata, and the log.
 - Exact rows: the tree is unchanged since generation (the grids, and each
@@ -439,10 +520,20 @@ of the thread count (Geant4 warns, Run10035, otherwise).
   alone cannot catch a wall hit, because the photon reaches the wall along the
   sampled direction; a crack to plate to World pair whose two crossings are
   within 1e-6 mm of each other, as when the exit face is coplanar with the
-  plate's, counts as a clean exit and is reported in the row's detail; a run with
-  no transmission passes with a note); every grid frequency
-  served; `BBR008` and `BBR026` exactly as the output implies, no other warning,
-  and the startup lines.
+  plate's, counts as a clean exit and is reported in the row's detail. The
+  recorder drops any crossing whose step is at most half the surface tolerance, so
+  that pair exists only at a tolerance-scale step above it; a true zero-step
+  coplanar exit leaves no plate to World row and shows as a wall hit, the safe
+  direction. A run with no transmission passes with a note); every grid frequency
+  served; `BBR008`, `BBR026` and `BBR028` exactly as the output implies (`BBR026` once per
+  dataset, regime mode and direction, keyed on `mode=`; `BBR028` once per 2.x dataset
+  whose selected table lies at or above its cross-term limit, so the round gap's
+  2000 GHz table warns on a tree that carries it), no other warning, and the startup
+  lines. Under 2.x the row `sidecars 2.x` runs `bbrsim.sidecar.check_full` on each 2.x
+  sidecar of the aimed datasets, because loading the tables does not repeat the 2.x CSV
+  row checks (`InterceptFactor`, the two T sources, a dark basis's `OutgoingPower`,
+  the checksums). Predicted transmittance under 2.x is the clamped mixture mean, since
+  T of a basis may exceed 1 and each polarization angle is capped per photon.
 - Statistical rows: transmittance per run and probe; exit direction, the mean of
   each component and the mean square of the transverse ones; per Planck run, the
   transmissions against the summed per-photon prediction and the entries per
@@ -456,8 +547,8 @@ of the thread count (Geant4 warns, Run10035, otherwise).
 
 Apart from the physics row, every row compares BBRsim with the mirror reading
 the same files: the check proves the consumer, not the data, whose physics is
-accepted on the HFSS side. The runner runs it as the cases `tree_legacy` and
-`tree_mock`. On any other tree, check the sidecars first:
+accepted on the HFSS side. The runner runs it as the cases `tree_legacy`,
+`tree_mock` and `tree_v2`. On any other tree, check the sidecars first:
 
 ```bash
 conda run -n bbrsim python validation/check_dataset_sidecars.py <root>/waveguides

@@ -55,6 +55,11 @@ class BBRCrackLibrary
   // sides of a cutoff. A schema-2 table at or above its cross-term validity limit
   // (cross_term.valid_below_ghz) serving a photon triggers one BBR028 warning per
   // dataset; the table is used unchanged.
+  // The warning texts begin
+  //   BBR026 dataset=<id> direction=below|above mode=<label> nu_GHz=... grid_GHz=... cutoff_GHz=... :
+  //   BBR028 dataset=<id> grid_GHz=<f> valid_below_GHz=<l> :
+  // (the mode= token follows direction=, so a pattern for the older text still matches); the
+  // regression runner and check_tree_run.py parse them.
   // Fatal, from the discovery the first call for an id runs: BBR011 if the
   // data directory is unreadable, holds no <id>_<freq>GHz_Ephi=0 directory for
   // this id, a legacy <id>_Ephi=0 directory or two directories with the same

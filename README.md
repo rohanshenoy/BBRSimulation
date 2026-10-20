@@ -271,9 +271,9 @@ validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 
 The runner builds and installs the library with its C++ tests
 (`BUILD_BBRSIM_TESTS=ON`), runs them (CTest), the Python tests (pytest) and
-the env-script test, builds both examples against the install, runs thirteen
-fixed-seed cases in parallel (seven validation fixtures, two real-tree checks
-generated at run time, and four example macros)
+the env-script test, builds both examples against the install, runs fourteen
+fixed-seed cases in parallel (seven validation fixtures, three real-tree checks
+generated at run time, one of them on a schema-2.x mock tree, and four example macros)
 with the Geant4 thread count pinned to 8 (`BBR_THREADS` overrides), scans their
 logs for warnings, and runs the PASS/FAIL validators on their output. Last, it
 runs the examples installed into a separate prefix without the env script, and
@@ -338,7 +338,12 @@ RRR and temperature. Photons reflect specularly or are absorbed.
 `vacuum_wg`, named after its HFSS dataset. When a photon enters one, BBRsim
 samples transmission or reflection, the exit direction, polarization and exit
 position from ANSYS HFSS simulations of that gap. It picks the dataset nearest
-the photon's frequency; there is no interpolation between frequencies.
+the photon's frequency; there is no interpolation between frequencies. Each
+dataset carries a sidecar, schema 1.x or 2.x: under 2.x the transmittance is
+divided by a per-key intercept factor and capped at 1 per photon, and `BBR026`
+(per regime cutoff) and `BBR028` (cross term beyond its limit) warn when a table
+is served across a boundary of its validity (see `validation/README.md`,
+Dataset sidecars).
 
 **Both are handled by one class.** `BBSimOpBoundaryProcess` wraps the stock
 Geant4 `G4OpBoundaryProcess`. It handles photons entering `vacuum_wg` volumes

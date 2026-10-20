@@ -625,11 +625,19 @@ def test_exit_direction_follows_by_track_and_counts_kinds(checker):
 
 
 def test_exit_direction_coplanar_plate_pair_is_a_clean_exit(checker):
+    # The recorder drops a crossing whose step is at most half the surface tolerance (5e-10 mm), so a
+    # plate to World row exists only at a tolerance-scale step above that: 1e-9 mm here.
     status, _, detail = exit_row(
         checker, entry(),
         crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, D_OUT, x=2.0),
-        crossing(3, "CuPlate1", "Cu_RRR100_T4K", "World", "G4_Galactic", D_OUT, D_OUT, x=2.0))
+        crossing(3, "CuPlate1", "Cu_RRR100_T4K", "World", "G4_Galactic", D_OUT, D_OUT, x=2.0 + 1e-9))
     assert status == "PASS" and "1 through coplanar" in detail
+    # a true zero-step coplanar exit leaves no plate to World row (the recorder drops it): a wall hit,
+    # the safe direction
+    status, _, detail = exit_row(
+        checker, entry(),
+        crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, D_OUT, x=2.0))
+    assert status == "FAIL" and "1 wall hit" in detail
     # a real passage through the plate (a longer step) is a wall hit
     status, _, detail = exit_row(
         checker, entry(),

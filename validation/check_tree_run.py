@@ -18,7 +18,8 @@ frequency the selection rule gives for its recorded energy; every transmitted ph
 leaves its crack along its sampled direction, the next crossing of its track (n_boundary + 1)
 being crack to World with the direction unchanged to 1e-9, never into the crack's plate (the row
 "exit direction", counting wall hits, other volumes, direction mismatches and missing rows, each
-with one example; a crack to plate to World pair with no step between is a clean exit); every event_id of a run's
+with one example; a crack to plate to World pair whose plate to World row follows at once, at a tolerance-scale
+step the recorder keeps, is a clean exit: see exit_directions); every event_id of a run's
 crossings and abspoints lies in [0, events) (one output once carried a corrupted
 column); per gun run, one entry per event on the aimed crack, with the configured
 direction and energy and the expected grid frequency; per Planck run, at most one entry per event; reflections
@@ -58,7 +59,7 @@ DECIDED = (TRANSMIT, REFLECT)
 TOL_DIR = 1e-6            # entry direction against the configured one
 TOL_REFL = 1e-9           # specular reflection
 TOL_EXIT = 1e-9           # direction of a transmitted photon at the crack's exit, against the sampled one
-TOL_COPLANAR_MM = 1e-6    # a crack-plate-World pair this close is one exit through coplanar faces
+TOL_COPLANAR_MM = 1e-6    # a crack-plate-World pair this close (a step the recorder kept) is one exit through coplanar faces
 WORLD_VOLUME = "World"
 METAL_PREFIXES = ("Cu_RRR", "BBR_Perfect")
 TOL_ENERGY = 1e-12        # recorded energy against the manifest's, relative
@@ -270,7 +271,12 @@ def exit_directions(df):
     crossing enters metal), "other volume", "direction mismatch" and "no following row". A crack to
     metal row followed at once (positions within TOL_COPLANAR_MM) by a metal to World row is one exit
     through coplanar faces and is judged on the World row. Rows are one per recorded crossing, so
-    n_boundary rises by exactly 1 within a track."""
+    n_boundary rises by exactly 1 within a track. BBRPhotonRecorder drops every crossing whose step is
+    at most half the surface tolerance, so the plate to World row of a pair exists only when its step
+    lies between that and TOL_COPLANAR_MM (the exit inset of 20 times the tolerance keeps the crack to
+    plate step well above it). A true zero-step coplanar exit leaves no plate to World row: the pair
+    then shows as a wall hit, the safe direction. The coplanar branch is kept for the tolerance-scale
+    steps in between, which the recorder keeps."""
     keys = ["event_id", "track_id", "n_boundary"]
     tx = df[(df["status"] == TRANSMIT) & (df["mat_post"] == "vacuum_wg")]
     rows = {tuple(int(v) for v in k): i for i, k in zip(df.index, df[keys].to_numpy())}

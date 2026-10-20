@@ -194,8 +194,8 @@ int main(int argc, char** argv) {
       CHECK(!a.SameInvariant(Parse(hfssfix::SidecarJson(p))));
     }},
     {"invariant_diff", [] {
-      // The names of the differing top-level blocks, in the order frames, symmetry,
-      // boundaries, geometry, modes, cross_section; empty exactly when SameInvariant.
+      // The names of the differing top-level blocks, in the order schema, excitation, frames,
+      // symmetry, boundaries, geometry, modes, cross_section; empty exactly when SameInvariant.
       using V = std::vector<std::string>;
       const auto a = Parse(Valid());
       const auto pose = Parse(Edit(Valid(), "\"pose_rule\": \"canonical-z\"", "\"pose_rule\": \"legacy\""));
