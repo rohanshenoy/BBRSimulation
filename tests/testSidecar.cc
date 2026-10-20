@@ -732,9 +732,10 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR025", [&] { Parse(with("silicon")); }, "BBRDatasetSidecar", "provenance.material");
       ExpectG4Exception("BBR025", [&] { Parse(with("silicon")); }, "BBRDatasetSidecar", "silicon");
       ExpectG4Exception("BBR025", [&] { Parse(with("")); }, "BBRDatasetSidecar", "provenance.material");
-      ExpectG4Exception("BBR024", [&] { Parse(with(3)); }, "BBRDatasetSidecar", "provenance.material");
-      ExpectG4Exception("BBR024", [&] { Parse(with(true)); }, "BBRDatasetSidecar", "provenance.material");
-      ExpectG4Exception("BBR024", [&] { Parse(with(json::array({"vacuum"}))); }, "BBRDatasetSidecar", "provenance.material");
+      // under 1.x the message may name null, which 1.x accepts (CDX-029)
+      ExpectG4Exception("BBR024", [&] { Parse(with(3)); }, "BBRDatasetSidecar", "provenance.material must be a string or null");
+      ExpectG4Exception("BBR024", [&] { Parse(with(true)); }, "BBRDatasetSidecar", "provenance.material must be a string or null");
+      ExpectG4Exception("BBR024", [&] { Parse(with(json::array({"vacuum"}))); }, "BBRDatasetSidecar", "provenance.material must be a string or null");
     }},
     {"material_null_schema1", [] {
       // The legacy 500 GHz sidecars carry "material": null; null and an absent key stay accepted under 1.x.
@@ -761,8 +762,9 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR024", [&] { Parse(j.dump(2)); }, "BBRDatasetSidecar", "provenance.material");
       ExpectG4Exception("BBR025", [] { Parse(Mut2([](json& m) { m["provenance"]["material"] = "silicon"; })); },
                         "BBRDatasetSidecar", "provenance.material");
+      // the type message names null only where schema 1 accepts it
       ExpectG4Exception("BBR024", [] { Parse(Mut2([](json& m) { m["provenance"]["material"] = 3; })); },
-                        "BBRDatasetSidecar", "provenance.material");
+                        "BBRDatasetSidecar", "provenance.material must be a string under schema 2.x");
     }},
     {"f12_equality", [] {
       // OR-020: the solid must equal the declared section, so a larger one fails as well as a smaller one.

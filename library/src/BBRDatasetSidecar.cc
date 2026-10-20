@@ -584,7 +584,9 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
       if (lower != "vacuum")
         Fail("BBR025", path, "provenance.material is \"" + mat.get<std::string>() + "\"; the gap must be vacuum");
     } else if (!mat.is_null()) {
-      Fail("BBR024", path, "provenance.material must be a string or null");
+      // null is accepted under 1.x only, so only the 1.x message may name it
+      Fail("BBR024", path, sc.schemaMajor == 2 ? "provenance.material must be a string under schema 2.x"
+                                                : "provenance.material must be a string or null");
     }
   }
 

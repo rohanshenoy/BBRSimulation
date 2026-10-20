@@ -166,6 +166,8 @@ def test_material_vacuum(tmp_path, value, code):
         sidecar.check(sc, "c", stem, 500.0)
     if isinstance(value, str):
         assert repr(value) in str(e.value)
+    elif code == "BBR024":
+        assert "must be a string or null" in str(e.value)     # schema 1 accepts null, so the message may name it
 
 
 def test_material_absent_or_null_schema1(tmp_path):
@@ -194,8 +196,9 @@ def test_s2_material_required():
             check2(mut2(edit))
     with pytest.raises(ValueError, match=r"^BBR025: provenance\.material"):
         check2(mut2(lambda s: s["provenance"].update(material="silicon")))
-    with pytest.raises(ValueError, match=r"^BBR024: provenance\.material"):
+    with pytest.raises(ValueError, match=r"^BBR024: provenance\.material must be a string under schema 2\.x") as e:
         check2(mut2(lambda s: s["provenance"].update(material=3)))
+    assert "or null" not in str(e.value)                  # null is refused under 2.x, so the message must not offer it
 
 
 def test_s2_builder_writes_material(tmp_path):

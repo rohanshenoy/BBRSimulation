@@ -936,7 +936,9 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
             if mat.lower() != "vacuum":
                 raise ValueError(f"BBR025: provenance.material is {mat!r}; the gap must be vacuum")
         elif mat is not None:
-            raise ValueError(f"BBR024: provenance.material must be a string or null, not {type(mat).__name__}")
+            # null is accepted under 1.x only, so only the 1.x message may name it
+            want = "a string under schema 2.x" if major == 2 else "a string or null"
+            raise ValueError(f"BBR024: provenance.material must be {want}, not {type(mat).__name__}")
 
     ext = _req(_req(sc, "geometry", "", "dict"), "extent_mm", "geometry.", "dict")  # F11
     for k in "plg":
