@@ -372,7 +372,16 @@ Other 2.x causes: a `schema_version` that is neither 1.x nor 2.x ("BBRsim reads
 incidence grid (the message names the block); a malformed or contradictory
 per-key record; a `dark` basis whose `t_flux` is not 0; a rectangle axis with
 fewer than 2 nodes; an `exit_field.grid` step that is not (max - min)/(count - 1);
-or a 2.x data directory read without its sidecar.
+a negative per-key `t_flux`; or, in the Python mirror only, a 16-column 2.x
+`waveguide.csv` read without its sidecar. In the C++ library a 16-column table
+loaded without a 2.x sidecar is `BBR013` (wrong field count; through the crack
+library a dataset without any sidecar stops at discovery as `BBR024`).
+
+A 2.x `BBR012` at load that says "has no per-key record" means a CSV key is off
+its declared incidence angle by more than 1e-9 degree (inside the 0.01 degree
+rounding of the key checks): fix the angle in the export, never the sidecar. One
+that says "OutgoingPower ... is negative" means a row holds a negative exit flux;
+the producer stops on that, so the file was altered or came from another tool.
 
 **`BBR025`**: the dataset declares a convention or a geometry BBRsim does not
 implement. The message names the field (a frame, incidence, far-field or

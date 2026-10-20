@@ -384,6 +384,12 @@ Schema-1 files and the legacy fixtures are unchanged.
   declared grid (1e-6 relative); the two T sources, the CSV's first row and
   `t_flux` / c_k, equal to 1e-6 relative on a lit key and both exactly 0 on a dark
   one.
+- Key records and sign (OR-038, OR-034, G4-032). A CSV key with no per-key record,
+  matching raw angles to the declared ones at 1e-9 degree, is `BBR012` at load and
+  in `check_csvs` (the C2 key match rounds to 0.01 degree, so it cannot stand in); the
+  Python mirror's `load_dataset` uses the same rule. Any `OutgoingPower` below 0 on a
+  2.x row is `BBR012`, and a per-key `t_flux` below 0 in the sidecar is `BBR024` at
+  discovery.
 - Sampling. Exit positions are drawn with weight |E_t|² (Ex and Ey) times the
   quadrature weight: the trapezoid rule on a rectangle (half weight on the first
   and last node of each axis, a quarter at a corner, assigned before the 1 nm
