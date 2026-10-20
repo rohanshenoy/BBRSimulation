@@ -58,7 +58,7 @@ class BBRCrackLibrary
   // The warning texts begin
   //   BBR026 dataset=<id> direction=below|above mode=<label> nu_GHz=... grid_GHz=... cutoff_GHz=... :
   //   BBR028 dataset=<id> grid_GHz=<f> valid_below_GHz=<l> :
-  // (the mode= token follows direction=, so a pattern for the older text still matches); the
+  // (the mode= token follows direction=, so a prefix pattern for the older text that ends at direction= still matches); the
   // regression runner and check_tree_run.py parse them.
   // Fatal, from the discovery the first call for an id runs: BBR011 if the
   // data directory is unreadable, holds no <id>_<freq>GHz_Ephi=0 directory for

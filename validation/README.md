@@ -306,8 +306,8 @@ opposite sides of a regime cutoff of the dataset: under schema 1 the lowest
 mode, `modes.cutoff_ghz`; under schema 2 every entry of
 `modes.regime_cutoffs_ghz`. The text is `BBR026 dataset=<id>
 direction=below|above mode=<label> nu_GHz=... grid_GHz=... cutoff_GHz=... :
-...`; the `mode=` token follows `direction=`, so a pattern that matched the old
-text still matches. A one-point grid warns too. `BBR028` (a `JustWarning`,
+...`; the `mode=` token follows `direction=`, so a prefix pattern that matched the old
+text up to `direction=` still matches. A one-point grid warns too. `BBR028` (a `JustWarning`,
 schema 2 only) fires once per dataset when a table at or above
 `cross_term.valid_below_ghz` serves a photon:
 `BBR028 dataset=<id> grid_GHz=<f> valid_below_GHz=<l> : ...`. The table is used
@@ -341,7 +341,7 @@ Schema-1 files and the legacy fixtures are unchanged.
 
 - Columns. `exit_field.columns` is the 2.0 list (the 1.0 list with the six field
   columns relabelled and `InterceptFactor` appended, last); the field values are
-  read by position, Ex = columns 9 and 10, Ey = 11 and 12, Ez = 13 and 14, each as
+  read by 0-based position, Ex = columns 9 and 10, Ey = 11 and 12, Ez = 13 and 14, each as
   (real, imaginary) (`BBR025` for any other list, `BBR013` for a CSV header that
   differs from it). The far-field columns and `far_field.csv` are unchanged.
 - Transmittance. `OutgoingPower` is the exit flux and `IngoingPower` is the

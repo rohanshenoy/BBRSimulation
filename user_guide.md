@@ -313,7 +313,7 @@ output (default `output/bbr.root` in the current directory) through the
 | `check_crack_frequency.py` | dataset choice per photon on the mock five-frequency tree: 89 checks (`--data-dir`) |
 | `check_round_gap.py` | the opt-in straight round gap at 2000 GHz on its mock dataset: transmittance per polarization, exit positions inside the HFSS radius, the radial exit profile per polarization and the mean exit direction, 49 checks over nine runs, one of them the startup crack line in the run log (`--data-dir`, `--log`) |
 | `check_invariants.py` | no photon ever travels inside a metal, and every photon death is labelled correctly (`--allow-no-crossings` for a run that crosses no boundary) |
-| `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the two mock trees): every dataset is a complete trio with a valid schema-1 or 2.x sidecar (the mode lists or regime cutoffs, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
+| `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the three mock trees): every dataset is a complete trio with a valid schema-1 or 2.x sidecar (the mode lists or regime cutoffs, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
 | `check_tree_run.py` | reads a run that `validation/Scripts/make_tree_check.py` generated for an HFSS data tree: every photon used the right frequency table, and transmission, reflection and exit directions follow it, against `bbrsim.hfss` reading the same tree (`--log`); see [Real-tree check](validation/README.md#real-tree-check) |
 
 **Validator run by hand**, because it needs a large run:
@@ -364,7 +364,7 @@ sidecars](validation/README.md#dataset-sidecars). A `BBR024` that names
 `geometry.extent_mm.l` or `.g` and the full width of the declared section means
 the sidecar contradicts itself (for a rectangle the two must agree to 1e-6
 relative): regenerate the sidecar from the producer's job, do not edit one number.
-`provenance.material` must be a string or null; any other type is `BBR024`.
+Under schema 1, `provenance.material` must be a string or null; any other type is `BBR024`.
 Under schema 2.x it is required: null, an absent key or no `provenance` is
 `BBR024`, and the type message then reads "must be a string under schema 2.x".
 Other 2.x causes: a `schema_version` that is neither 1.x nor 2.x ("BBRsim reads
