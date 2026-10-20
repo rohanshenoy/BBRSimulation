@@ -923,9 +923,14 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
     _expect(_req(bd, "exit", "boundaries.", "str"), "radiation", "boundaries.exit")
     _expect(_req(bd, "walls", "boundaries.", "str"), "PEC", "boundaries.walls")
 
-    # the gap must be vacuum (CDX-029); null or an absent key is accepted (the legacy sidecars carry null)
+    # the gap must be vacuum (CDX-029); under 1.x null or an absent key is accepted (the legacy sidecars
+    # carry null); under 2.x it is required (OR-039): null, an absent key or no provenance is BBR024
     prov = sc.get("provenance")
-    if isinstance(prov, dict) and "material" in prov:
+    has_material = isinstance(prov, dict) and "material" in prov
+    if major == 2 and (not has_material or prov["material"] is None):
+        raise ValueError("BBR024: provenance.material is missing or null; schema 2.x requires it "
+                         "(the gap must be vacuum)")
+    if has_material:
         mat = prov["material"]
         if isinstance(mat, str):
             if mat.lower() != "vacuum":

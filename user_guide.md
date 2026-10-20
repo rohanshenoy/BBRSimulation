@@ -353,6 +353,7 @@ sidecars](validation/README.md#dataset-sidecars). A `BBR024` that names
 the sidecar contradicts itself (for a rectangle the two must agree to 1e-6
 relative): regenerate the sidecar from the producer's job, do not edit one number.
 `provenance.material` must be a string or null; any other type is `BBR024`.
+Under schema 2.x it is required: null, an absent key or no `provenance` is `BBR024`.
 
 **`BBR025`**: the dataset declares a convention or a geometry BBRsim does not
 implement. The message names the field (a frame, incidence, far-field or

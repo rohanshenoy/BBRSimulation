@@ -746,6 +746,24 @@ int main(int argc, char** argv) {
       j.erase("provenance");                            // no provenance object at all
       Parse(j.dump(2));
     }},
+    {"material_required_schema2", [] {
+      // CDX-029, OR-039: under 2.x provenance.material is required; null, an absent key or an absent
+      // provenance is BBR024 naming the field. A string still follows the shared rule.
+      json j = json::parse(Valid2());
+      CHECK(j.at("provenance").at("material") == "vacuum");   // the 2.0 fixture writes it
+      j["provenance"]["material"] = "Vacuum";
+      Parse(j.dump(2));
+      j["provenance"]["material"] = nullptr;
+      ExpectG4Exception("BBR024", [&] { Parse(j.dump(2)); }, "BBRDatasetSidecar", "provenance.material");
+      j["provenance"].erase("material");
+      ExpectG4Exception("BBR024", [&] { Parse(j.dump(2)); }, "BBRDatasetSidecar", "provenance.material");
+      j.erase("provenance");
+      ExpectG4Exception("BBR024", [&] { Parse(j.dump(2)); }, "BBRDatasetSidecar", "provenance.material");
+      ExpectG4Exception("BBR025", [] { Parse(Mut2([](json& m) { m["provenance"]["material"] = "silicon"; })); },
+                        "BBRDatasetSidecar", "provenance.material");
+      ExpectG4Exception("BBR024", [] { Parse(Mut2([](json& m) { m["provenance"]["material"] = 3; })); },
+                        "BBRDatasetSidecar", "provenance.material");
+    }},
     {"f12_equality", [] {
       // OR-020: the solid must equal the declared section, so a larger one fails as well as a smaller one.
       const auto box = Parse(Valid());                  // section 4.5 mm x 25 um

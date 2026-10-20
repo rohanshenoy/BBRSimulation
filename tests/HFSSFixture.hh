@@ -406,6 +406,7 @@ inline std::string SidecarJson2(const Schema2Params& p) {
   const SidecarParams& b = p.base;
   json j = json::parse(SidecarJson(b));
   j["schema_version"] = "2.0";
+  j["provenance"]["material"] = "vacuum";   // required under 2.x (CDX-029, OR-039)
   j["model"] = {{"kind", "screen_free_abc"}};
   j["conventions"] = {{"time_dependence", "exp(+j omega t)"}, {"phasor", "peak"}};
 

@@ -181,6 +181,29 @@ def test_material_absent_or_null_schema1(tmp_path):
     sidecar.check(sc, "c", stem, 500.0)
 
 
+def test_s2_material_required():
+    """CDX-029, OR-039: under 2.x provenance.material is required; null, an absent key or an absent
+    provenance is BBR024 naming the field; a string follows the shared rule."""
+    sc = fx.sidecar2()
+    assert sc["provenance"]["material"] == "vacuum"     # the 2.0 fixture writes it
+    check2(mut2(lambda s: s["provenance"].update(material="Vacuum")))
+    for edit in (lambda s: s["provenance"].update(material=None),
+                 lambda s: s["provenance"].pop("material"),
+                 lambda s: s.pop("provenance")):
+        with pytest.raises(ValueError, match=r"^BBR024: provenance\.material"):
+            check2(mut2(edit))
+    with pytest.raises(ValueError, match=r"^BBR025: provenance\.material"):
+        check2(mut2(lambda s: s["provenance"].update(material="silicon")))
+    with pytest.raises(ValueError, match=r"^BBR024: provenance\.material"):
+        check2(mut2(lambda s: s["provenance"].update(material=3)))
+
+
+def test_s2_builder_writes_material(tmp_path):
+    """Every 2.x builder caller here passes material "vacuum", so the built sidecar passes the 2.x rule."""
+    base, stem = s2_dataset(tmp_path)
+    assert build2(base, stem)["provenance"]["material"] == "vacuum"
+
+
 def test_extent_section_disc_not_compared(tmp_path):
     """A disc's extent_mm is the HFSS bounding box; it is not compared with 2R here."""
     base = str(tmp_path)
@@ -1391,8 +1414,8 @@ def build2(base, stem, **kw):
              else (2e3 * section["y_e_half_m"], 2e3 * section["z_e_half_m"]))
     return sidecar.build_schema2_from_csvs(
         base, ds_id, label, section=section, extent_mm={"p": 4.0, "l": width[0], "g": width[1]},
-        provenance={"producer": "test"}, exit_origin_mm=[0.0, 0.0, 4.0], plane_wave_origin_mm=[0.0, 0.0, 0.0],
-        bounding_box_mm=[-0.026, -5.0, 0.0, 0.026, 5.0, 4.0], **kw)
+        provenance={"producer": "test", "material": "vacuum"}, exit_origin_mm=[0.0, 0.0, 4.0],
+        plane_wave_origin_mm=[0.0, 0.0, 0.0], bounding_box_mm=[-0.026, -5.0, 0.0, 0.026, 5.0, 4.0], **kw)
 
 
 def digest(base):

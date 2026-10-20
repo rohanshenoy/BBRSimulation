@@ -162,7 +162,7 @@ def sidecar2(stem=STEM, *, disc=False, radius=5e-5, y_half=4.5e-3, z_half=2.5e-5
         "dataset_id": stem.rsplit("_", 1)[0],
         "frequency_ghz": float(label[:-3]),
         "frequency_label": label,
-        "provenance": {"producer": "tests/schema2_fixture.py"},
+        "provenance": {"producer": "tests/schema2_fixture.py", "material": "vacuum"},
         "model": {"kind": "screen_free_abc"},
         "conventions": {"time_dependence": "exp(+j omega t)", "phasor": "peak"},
         "frames": {

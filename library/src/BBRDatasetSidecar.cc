@@ -570,9 +570,13 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
   r.Expect(r.Str(boundaries, "exit", "boundaries."), "radiation", "boundaries.exit");
   r.Expect(r.Str(boundaries, "walls", "boundaries."), "PEC", "boundaries.walls");
 
-  // The gap must be vacuum (CDX-029): provenance.material, the producer's AEDT material name, may be
-  // null or absent (the legacy sidecars carry null) but a string must read "vacuum" in any case.
-  if (j.contains("provenance") && j.at("provenance").is_object() && j.at("provenance").contains("material")) {
+  // The gap must be vacuum (CDX-029): provenance.material, the producer's AEDT material name, must read
+  // "vacuum" in any case when it is a string. Under 1.x it may be null or absent (the legacy sidecars
+  // carry null); under 2.x it is required (OR-039), so null, an absent key or no provenance is BBR024.
+  const bool hasMaterial = j.contains("provenance") && j.at("provenance").is_object() && j.at("provenance").contains("material");
+  if (sc.schemaMajor == 2 && (!hasMaterial || j.at("provenance").at("material").is_null()))
+    Fail("BBR024", path, "provenance.material is missing or null; schema 2.x requires it (the gap must be vacuum)");
+  if (hasMaterial) {
     const json& mat = j.at("provenance").at("material");
     if (mat.is_string()) {
       std::string lower = mat.get<std::string>();

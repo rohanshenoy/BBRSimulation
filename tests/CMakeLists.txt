@@ -85,7 +85,7 @@ bbrsim_add_test_program(testSidecar LABEL unit
   CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f10_boundaries f13_modes
         invariant_physics_only invariant_diff field_types
         recorded_fields f12_fits_solid f12_equality f12_length f11_extent_section
-        material_vacuum material_null_schema1
+        material_vacuum material_null_schema1 material_required_schema2
         s2_parses_fixture s2_version_gate s2_fixed_strings s2_per_key_lists s2_c_k_and_cell90 s2_dark_tflux
         s2_emitter s2_grid_step s2_regime_cutoffs s2_dropped_modes_fields s2_cross_term invariant_schema_and_grid)
 
