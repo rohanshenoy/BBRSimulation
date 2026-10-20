@@ -429,7 +429,18 @@ of the thread count (Geant4 warns, Run10035, otherwise).
   grid frequency the selection rule gives for its recorded energy, and every
   other row −1 (the mirror computes the frequency in CLHEP's own arithmetic, so
   the comparison is exact); one entry per event on the aimed crack with the
-  configured direction and energy; specular reflections; every grid frequency
+  configured direction and energy; specular reflections; the exit direction
+  (row `run NNN ... exit direction`, CDX-027: every transmitted entry's track is
+  followed to its next crossing, `n_boundary` + 1, which must be crack to World,
+  never into the crack's plate, with the direction before and after the
+  interface equal to the sampled one (the entry row's post direction) to 1e-9
+  per component; it fails with a count and one example key per kind: wall hit,
+  other volume, direction mismatch, no following row. The pre-side direction
+  alone cannot catch a wall hit, because the photon reaches the wall along the
+  sampled direction; a crack to plate to World pair whose two crossings are
+  within 1e-6 mm of each other, as when the exit face is coplanar with the
+  plate's, counts as a clean exit and is reported in the row's detail; a run with
+  no transmission passes with a note); every grid frequency
   served; `BBR008` and `BBR026` exactly as the output implies, no other warning,
   and the startup lines.
 - Statistical rows: transmittance per run and probe; exit direction, the mean of

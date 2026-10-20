@@ -14,7 +14,11 @@ data themselves.
 Exact rows: the tree is unchanged since generation; every output names the data
 root and the placed cracks with the tree's frequencies; hfss_freq_GHz is -1 on
 every row that is not a decided crack entry; every decided entry carries the grid
-frequency the selection rule gives for its recorded energy; every event_id of a run's
+frequency the selection rule gives for its recorded energy; every transmitted photon (CDX-027)
+leaves its crack along its sampled direction, the next crossing of its track (n_boundary + 1)
+being crack to World with the direction unchanged to 1e-9, never into the crack's plate (the row
+"exit direction", counting wall hits, other volumes, direction mismatches and missing rows, each
+with one example; a crack to plate to World pair with no step between is a clean exit); every event_id of a run's
 crossings and abspoints lies in [0, events) (one output once carried a corrupted
 column); per gun run, one entry per event on the aimed crack, with the configured
 direction and energy and the expected grid frequency; per Planck run, at most one entry per event; reflections
@@ -53,6 +57,10 @@ TRANSMIT, REFLECT = "BBRDiffractionTransmit", "BBRDiffractionReflect"
 DECIDED = (TRANSMIT, REFLECT)
 TOL_DIR = 1e-6            # entry direction against the configured one
 TOL_REFL = 1e-9           # specular reflection
+TOL_EXIT = 1e-9           # direction of a transmitted photon at the crack's exit, against the sampled one
+TOL_COPLANAR_MM = 1e-6    # a crack-plate-World pair this close is one exit through coplanar faces
+WORLD_VOLUME = "World"
+METAL_PREFIXES = ("Cu_RRR", "BBR_Perfect")
 TOL_ENERGY = 1e-12        # recorded energy against the manifest's, relative
 FAMILY_ALPHA = 1e-3       # chance that a correct run fails any statistical row
 Z_FLOOR = 4.0
@@ -250,6 +258,71 @@ def check_reflections(rep, tag, dec):
     k_exp /= np.linalg.norm(k_exp, axis=1, keepdims=True)
     dev = float(np.abs(rf[["px_post", "py_post", "pz_post"]].to_numpy(float) - k_exp).max())
     rep.check(f"{tag} reflection", dev < TOL_REFL, f"{len(rf)} reflections, max deviation from specular {dev:.1e}")
+
+
+def exit_directions(df):
+    """Follow every transmitted crack entry to the next crossing of its track (n_boundary + 1).
+
+    The entry row (status BBRDiffractionTransmit, mat_post vacuum_wg) holds the sampled direction in
+    (px_post, py_post, pz_post). The next row must be crack to World (mat_pre vacuum_wg, vol_post the
+    World) with the same direction to TOL_EXIT, before and after the interface. Returns (n, bad,
+    coplanar) with n the transmissions, coplanar the count of coplanar exits and bad a dict kind -> (count, example key), kinds "wall hit" (the next
+    crossing enters metal), "other volume", "direction mismatch" and "no following row". A crack to
+    metal row followed at once (positions within TOL_COPLANAR_MM) by a metal to World row is one exit
+    through coplanar faces and is judged on the World row. Rows are one per recorded crossing, so
+    n_boundary rises by exactly 1 within a track."""
+    keys = ["event_id", "track_id", "n_boundary"]
+    tx = df[(df["status"] == TRANSMIT) & (df["mat_post"] == "vacuum_wg")]
+    rows = {tuple(int(v) for v in k): i for i, k in zip(df.index, df[keys].to_numpy())}
+    metal = lambda m: str(m).startswith(METAL_PREFIXES)
+    bad, n_coplanar = {}, 0
+
+    def note(kind, key):
+        count, example = bad.get(kind, (0, None))
+        bad[kind] = (count + 1, example or key)
+
+    for i, ev, tr, nb in zip(tx.index, tx["event_id"], tx["track_id"], tx["n_boundary"]):
+        key = (int(ev), int(tr), int(nb))
+        label = f"event {key[0]} track {key[1]} n_boundary {key[2]}"
+        d_out = tx.loc[i, ["px_post", "py_post", "pz_post"]].to_numpy(float)
+        j = rows.get((key[0], key[1], key[2] + 1))
+        if j is None:
+            note("no following row", label)
+            continue
+        nxt = df.loc[j]
+        if nxt["mat_pre"] == "vacuum_wg" and metal(nxt["mat_post"]):
+            k = rows.get((key[0], key[1], key[2] + 2))
+            after = df.loc[k] if k is not None else None
+            coplanar = (after is not None and metal(after["mat_pre"]) and after["vol_post"] == WORLD_VOLUME
+                        and float(np.linalg.norm(after[["x", "y", "z"]].to_numpy(float)
+                                                 - nxt[["x", "y", "z"]].to_numpy(float))) <= TOL_COPLANAR_MM)
+            if not coplanar:
+                note("wall hit", f"{label}, next crossing {nxt['vol_pre']} to {nxt['vol_post']}")
+                continue
+            nxt, n_coplanar = after, n_coplanar + 1
+        elif nxt["mat_pre"] != "vacuum_wg" or nxt["vol_post"] != WORLD_VOLUME:
+            note("other volume", f"{label}, next crossing {nxt['vol_pre']} to {nxt['vol_post']}")
+            continue
+        post = nxt[["px_post", "py_post", "pz_post"]].to_numpy(float)
+        pre = nxt[["px_pre", "py_pre", "pz_pre"]].to_numpy(float)
+        dev = max(float(np.abs(post - d_out).max()), float(np.abs(pre - d_out).max()))
+        if not dev <= TOL_EXIT:
+            note("direction mismatch", f"{label}, max |k - k_sampled| {dev:.1e}")
+    return len(tx), bad, n_coplanar
+
+
+def check_exit_direction(rep, tag, df):
+    """Row "<tag> exit direction": every transmitted photon leaves its crack along the sampled direction."""
+    n, bad, n_coplanar = exit_directions(df)
+    name = f"{tag} exit direction"
+    if not n:
+        rep.check(name, True, "no transmissions in this run; nothing to follow")
+    elif not bad:
+        rep.check(name, True, f"{n} transmitted photons leave the crack into the {WORLD_VOLUME} along the "
+                              f"sampled direction (to {TOL_EXIT:g}); {n_coplanar} through coplanar plate faces")
+    else:
+        rep.check(name, False, f"of {n} transmitted photons: " + "; ".join(
+            f"{count} {kind} (e.g. {example})" for kind, (count, example) in sorted(bad.items())))
 
 
 def table(rep, tag, tables, stem):
@@ -548,6 +621,7 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
                 served[r["dataset"]].update(np.unique(f_rec).tolist())
             gun_rows(rep, tag, r, dec, tables, grids)
         check_reflections(rep, tag, dec)
+        check_exit_direction(rep, tag, df)
 
     rep.check("sentinel", n_bad_sentinel == 0,
               f"{n_bad_sentinel} rows that are not decided crack entries carry a frequency other than -1")

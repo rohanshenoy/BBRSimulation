@@ -542,6 +542,102 @@ def test_tree_rebuilt_with_same_labels(repo_root, checker, tmp_path):
     assert next(s for s, n, _ in rows if n == "tree unchanged") == "FAIL"
 
 
+# --- the exit-direction row (CDX-027) ---------------------------------------------------
+D_OUT = (0.0010000005, -0.7071067, 0.7071067)
+
+
+def crossing(nb, vol_pre, mat_pre, vol_post, mat_post, d_pre, d_post, status="BBRNone", x=2.0, event=0, track=1):
+    return {"event_id": event, "track_id": track, "n_boundary": nb, "status": status,
+            "vol_pre": vol_pre, "mat_pre": mat_pre, "vol_post": vol_post, "mat_post": mat_post,
+            "px_pre": d_pre[0], "py_pre": d_pre[1], "pz_pre": d_pre[2],
+            "px_post": d_post[0], "py_post": d_post[1], "pz_post": d_post[2], "x": x, "y": 0.0, "z": 0.0}
+
+
+def entry(nb=1, d=D_OUT, **kw):
+    return crossing(nb, "World", "G4_Galactic", "crack1", "vacuum_wg", (1.0, 0.0, 0.0), d,
+                    status="BBRDiffractionTransmit", **kw)
+
+
+def leave(nb=2, d_pre=D_OUT, d_post=D_OUT, **kw):
+    return crossing(nb, "crack1", "vacuum_wg", "World", "G4_Galactic", d_pre, d_post, **kw)
+
+
+def frame(*rows):
+    import pandas as pd
+    return pd.DataFrame(list(rows))
+
+
+def exit_row(checker, *rows):
+    rep = checker.Report()
+    checker.check_exit_direction(rep, "run 000", frame(*rows))
+    (status, name, detail), = rep.rows
+    return status, name, detail
+
+
+def test_exit_direction_clean_pair_passes(checker):
+    status, name, detail = exit_row(checker, entry(), leave())
+    assert (status, name) == ("PASS", "run 000 exit direction"), detail
+    assert detail.startswith("1 transmitted photons")
+
+
+def test_exit_direction_no_transmissions_passes_with_a_note(checker):
+    status, _, detail = exit_row(checker, crossing(1, "World", "G4_Galactic", "CuPlate", "Cu_RRR100_T4K",
+                                                   (1, 0, 0), (-1, 0, 0), status="BBRReflect"))
+    assert status == "PASS" and "no transmissions" in detail
+
+
+def test_exit_direction_wall_hit_fails_even_with_the_pre_direction_intact(checker):
+    # At a wall hit the photon reaches the wall along the sampled direction, so px_pre still equals it;
+    # only the volume and the reflected post direction give the event away.
+    refl = (-D_OUT[0], D_OUT[1], D_OUT[2])
+    status, _, detail = exit_row(checker, entry(), crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K",
+                                                           D_OUT, refl))
+    assert status == "FAIL" and "1 wall hit" in detail and "event 0 track 1 n_boundary 1" in detail
+    assert "direction mismatch" not in detail
+
+
+def test_exit_direction_other_volume_fails(checker):
+    status, _, detail = exit_row(checker, entry(), crossing(2, "crack1", "vacuum_wg", "Detector", "G4_Si",
+                                                           D_OUT, D_OUT))
+    assert status == "FAIL" and "1 other volume" in detail and "wall hit" not in detail
+
+
+def test_exit_direction_direction_tolerance(checker):
+    off = lambda e: (D_OUT[0] + e, D_OUT[1], D_OUT[2])
+    assert exit_row(checker, entry(), leave(d_post=off(1e-12), d_pre=off(1e-12)))[0] == "PASS"
+    for kw in ({"d_post": off(1e-6)}, {"d_pre": off(1e-6)}):
+        status, _, detail = exit_row(checker, entry(), leave(**kw))
+        assert status == "FAIL" and "1 direction mismatch" in detail
+
+
+def test_exit_direction_missing_following_row_fails(checker):
+    status, _, detail = exit_row(checker, entry())
+    assert status == "FAIL" and "1 no following row" in detail
+
+
+def test_exit_direction_follows_by_track_and_counts_kinds(checker):
+    # Two events interleaved, one clean, one wall hit, one more with no row: three kinds counted apart.
+    rows = [entry(event=0), entry(event=1), entry(event=2), leave(event=0),
+            crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, (-D_OUT[0],) + D_OUT[1:], event=1)]
+    status, _, detail = exit_row(checker, *rows)
+    assert status == "FAIL" and "1 wall hit" in detail and "1 no following row" in detail
+    assert "event 1 " in detail and "event 2 " in detail and "of 3 transmitted" in detail
+
+
+def test_exit_direction_coplanar_plate_pair_is_a_clean_exit(checker):
+    status, _, detail = exit_row(
+        checker, entry(),
+        crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, D_OUT, x=2.0),
+        crossing(3, "CuPlate1", "Cu_RRR100_T4K", "World", "G4_Galactic", D_OUT, D_OUT, x=2.0))
+    assert status == "PASS" and "1 through coplanar" in detail
+    # a real passage through the plate (a longer step) is a wall hit
+    status, _, detail = exit_row(
+        checker, entry(),
+        crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, D_OUT, x=2.0),
+        crossing(3, "CuPlate1", "Cu_RRR100_T4K", "World", "G4_Galactic", D_OUT, D_OUT, x=2.5))
+    assert status == "FAIL" and "1 wall hit" in detail
+
+
 # --- the validator end to end: a small real run of the test world --------------------
 @pytest.fixture(scope="module")
 def e2e(repo_root, tmp_path_factory):
@@ -606,6 +702,7 @@ def test_e2e_passes(checker, e2e, e2e_tables):
             f"log BBR008 {CRACK1} low", f"log BBR026 {CRACK2} TE10 below"} <= names
     passing = {n for s, n, _ in rows if s == "PASS"}
     assert any(n.endswith(" event_id") for n in passing)
+    assert any(n.endswith(" exit direction") for n in passing)
 
 
 def test_e2e_cli(repo_root, e2e):
