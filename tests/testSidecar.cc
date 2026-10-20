@@ -486,6 +486,15 @@ int main(int argc, char** argv) {
       // dark and lit with t_flux 0 is fine; the fixture's own dark key parses
       Parse(Valid2());
     }},
+    {"s2_negative_tflux", [] {
+      // A negative per-key t_flux is the sidecar contradicting a non-negative flux: BBR024 at parse.
+      const auto bad = Mut2([](json& j) { j["transmittance"]["per_key"][1]["polarizations"]["0"]["t_flux"] = -0.1; });
+      ExpectG4Exception("BBR024", [&] { Parse(bad); }, "BBRDatasetSidecar", "negative");
+      ExpectG4Exception("BBR024", [&] { Parse(bad); }, "BBRDatasetSidecar", "polarization 0");
+      ExpectG4Exception("BBR024", [] { Parse(Mut2([](json& j) {
+                          j["transmittance"]["per_key"][3]["polarizations"]["1"]["t_flux"] = -1e-300; })); },
+                        "BBRDatasetSidecar", "negative");
+    }},
     {"s2_emitter", [] {
       ExpectG4Exception("BBR025", [] { Parse(Mut2([](json& j) { j["transmittance"]["cell_90_assumes"]["emitter"] = "lambertian"; })); },
                         "BBRDatasetSidecar", "cell_90_assumes.emitter");

@@ -281,6 +281,10 @@ void ParseSchema2(const Reader& r, const json& j, BBRDatasetSidecar& sc) {
         const std::string wpp = wp + "polarizations." + std::to_string(p) + ".";
         *tf[p] = r.Num(*pols[p], "t_flux", wpp);
         r.Num(*pols[p], "outgoing_power_abs_re_s_w", wpp);
+        // the exit flux is non-negative: a negative t_flux is the sidecar contradicting itself
+        if (*tf[p] < 0.)
+          Fail("BBR024", path, "key " + ks + " polarization " + std::to_string(p) + ": transmittance.per_key t_flux " +
+                               Fmt(*tf[p]) + " is negative; the transmitted flux is non-negative");
         // OR-038: a dark basis has t_flux exactly 0; the sidecar must not contradict itself.
         if (dark[p] && *tf[p] != 0.)
           Fail("BBR024", path, "key " + ks + " polarization " + std::to_string(p) + " is dark (exit_field.scale.per_key dark" +

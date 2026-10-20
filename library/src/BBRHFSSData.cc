@@ -430,7 +430,9 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
     auto& ds = fData[key];
 
     // 2.x row checks against the key's sidecar record (BBR012, naming key, polarization and
-    // value). A key the sidecar does not declare has no record; C2 refuses it after the load.
+    // value). The record is looked up with the row's raw angles, the sidecar's own 1e-9 degree rule;
+    // C2 matches keys after rounding to 0.01 degree, so a key without a record is not left to it:
+    // it would skip every check below and the OR-038 dark masking.
     G4double factor = 1.;
     const BBRKeyRecord* rec = v2 ? sc->Key(iwPhi, iwThe) : nullptr;
     auto bad = [&](const std::string& what) {
@@ -439,8 +441,14 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
          << " (sidecar " << sc->path << ")";
       G4Exception("BBRHFSSData::LoadWaveguide", "BBR012", FatalException, ed);
     };
+    if (v2 && !rec)
+      bad("the key has no per-key record in the sidecar (angles matched to 1e-9 degree against the declared "
+          "excitation grid)");
     if (v2) {
       factor = Num(v[15], path, "InterceptFactor");
+      if (outPow < 0.)
+        bad("OutgoingPower " + Repr(outPow) + " is negative; the exit flux is non-negative, so a negative value would "
+            "make the key's transmittance negative");
       if (tSet[key] && FarRel(factor, firstFactor[key]))
         bad("InterceptFactor " + Repr(factor) + " differs from the key's first row, " + Repr(firstFactor[key]) +
             ", by more than 1e-6 relative: not constant within the key");

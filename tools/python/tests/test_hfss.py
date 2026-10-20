@@ -583,6 +583,43 @@ def test_s2_no_rescale(tmp_path):
     assert lam_max(d.T0, d.T1, d.rho) > 1 + 1e-6
 
 
+def test_s2_key_without_record(tmp_path):
+    """The 2.x record is matched on the raw CSV angles at 1e-9 degree, as BBRHFSSData::LoadWaveguide does: a
+    key 1e-7 degree off its declared angle (inside C2's 0.01 degree rounding) has no record, BBR012."""
+    def shift(base, stem, phi, theta, dphi):
+        for e in (0, 1):
+            for name in ("far_field.csv", "waveguide.csv"):
+                p = os.path.join(base, f"{stem}_Ephi={e}", name)
+                lines = open(p).read().splitlines()
+                for i, line in enumerate(lines[1:], start=1):
+                    v = line.split(",")
+                    if float(v[2]) == phi and float(v[3]) == theta:
+                        v[2] = repr(float(v[2]) + dphi)
+                        lines[i] = ",".join(v)
+                open(p, "w").write("\n".join(lines) + "\n")
+
+    with pytest.raises(ValueError, match=r"^BBR012: .*no per-key record"):
+        s2_load(tmp_path / "a", edit=lambda b, st: shift(b, st, 0, 180, 1e-7))     # the dark key: masking not skipped
+    with pytest.raises(ValueError, match=r"^BBR012: .*no per-key record"):
+        s2_load(tmp_path / "b", edit=lambda b, st: shift(b, st, 45, 135, 1e-7))
+    ds = s2_load(tmp_path / "c", edit=lambda b, st: shift(b, st, 45, 135, 1e-10))  # inside the 1e-9 rule
+    assert ds[(45.0, 135.0)].T0 > 0
+
+
+def test_s2_axis_count_one_bbr024(tmp_path):
+    """load_dataset on an unchecked sidecar with a one-node rectangle axis: BBR024, as the parse rule says
+    (count < 2), not a division by zero in the quadrature."""
+    base = str(tmp_path)
+    stem = fx.write_nine_key_grid2(base)
+    sc = fx.sidecar2()
+    sc["exit_field"]["grid"]["y_e"].update({"count": 1, "max": sc["exit_field"]["grid"]["y_e"]["min"], "step": 0.0})
+    sidecar.write(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR024: .*count 1"):
+        hfss.load_dataset(stem, base)
+    with pytest.raises(ValueError, match=r"^BBR024"):
+        hfss._axis_index(0.0, {"min": 0.0, "max": 0.0, "count": 1}, "Z", (0.0, 180.0))
+
+
 def test_s2_dark_masking(tmp_path):
     ds = s2_load(tmp_path)
     d = ds[(0.0, 180.0)]

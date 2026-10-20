@@ -80,13 +80,14 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         exit_clamp_rectangle exit_clamp_disc exit_clamp_disc_off_axis exit_clamp_needs_sidecar
         s2_positions s2_transmittance s2_cap_no_rescale s2_intercept_column s2_two_t_sources s2_dark_outgoing
         s2_dark_masking s2_rho_weighted s2_weights_before_clamp s2_load_bbr027_density
+        s2_key_without_record s2_negative_outgoing
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 bbrsim_add_test_program(testSidecar LABEL unit
   CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f10_boundaries f13_modes
         invariant_physics_only invariant_diff field_types
         recorded_fields f12_fits_solid f12_equality f12_length f11_extent_section
         material_vacuum material_null_schema1 material_required_schema2
-        s2_parses_fixture s2_version_gate s2_fixed_strings s2_per_key_lists s2_c_k_and_cell90 s2_dark_tflux
+        s2_parses_fixture s2_version_gate s2_fixed_strings s2_per_key_lists s2_c_k_and_cell90 s2_dark_tflux s2_negative_tflux
         s2_emitter s2_grid_step s2_regime_cutoffs s2_dropped_modes_fields s2_cross_term invariant_schema_and_grid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit

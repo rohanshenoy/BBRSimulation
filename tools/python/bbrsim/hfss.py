@@ -158,7 +158,7 @@ def load_dataset(dir_stem, base_dir=None):
              for e in (0, 1)}
         if len(w[0]) != len(w[1]) or not _same(w[0], w[1], ("X", "Y", "Z"), 1e-12):
             raise ValueError(f"BBR012: {dataset_id} key {key}: Ephi=0 and Ephi=1 exit points differ")
-        rec = _key_record(sc, key) if v2 else None
+        rec = _key_record(sc, (float(phi_i), float(theta_i))) if v2 else None
         T, E = {}, {}
         for e in (0, 1):
             r = w[e].iloc[0]
@@ -227,18 +227,24 @@ def load_dataset(dir_stem, base_dir=None):
 
 
 def _key_record(sc, key):
-    """The 2.x per-key record (dark flags) of the declared key ``key`` (BBRDatasetSidecar::Key, 1e-9 deg)."""
+    """The 2.x per-key record of the CSV key ``key`` = (raw IWavePhi, raw IWaveTheta): matched on the raw
+    angles at 1e-9 degree, BBRDatasetSidecar::Key's rule and the one LoadWaveguide applies per row, not on
+    the 0.01 degree rounded group key (which C2 uses). A key without a record is BBR012."""
     from . import sidecar
     for r in sidecar.key_records(sc):
         if abs(r["phi"] - key[0]) <= sidecar.KEY_TOL and abs(r["theta"] - key[1]) <= sidecar.KEY_TOL:
             return r
-    raise ValueError(f"BBR012: key {key} is not declared by the sidecar's excitation grid")
+    raise ValueError(f"BBR012: key ({key[0]!r}, {key[1]!r}) has no per-key record in the sidecar (angles matched "
+                     "to 1e-9 degree against the declared excitation grid)")
 
 
 def _axis_index(v, axis, name, key):
     """AxisNode (BBRHFSSData.cc): the index i of the declared node min + i (max - min)/(count - 1) that v
     matches to 1e-6 of the step, else BBR012."""
     n, lo, hi = int(axis["count"]), float(axis["min"]), float(axis["max"])
+    if n < 2:
+        raise ValueError(f"BBR024: key {key}: exit_field.grid has count {n} on the {name} axis; a rectangle axis "
+                         "needs at least 2 nodes (count < 2 is refused at parse)")
     step = (hi - lo) / (n - 1)
     i = int(math.floor((v - lo) / step + 0.5))   # std::lround
     if 0 <= i < n and abs(v - (lo + i * step)) <= 1e-6 * step:

@@ -1112,6 +1112,35 @@ int main(int argc, char** argv) {
       CheckCounts("s2_weights_before_clamp", DrawExits(h, 0., 1., 90., 135., n, 777, &zmax), n, p);
       CHECK_NEAR(zmax, (2.5e-5 - 1e-9) * CLHEP::m / CLHEP::mm, 1e-12);   // the wall rows were drawn, clamped
     }},
+    {"s2_key_without_record", [] {
+      // A CSV key off its declared angle by 1e-7 degrees passes C2 (0.01 deg rounding) but has no per-key
+      // record under the sidecar's 1e-9 rule: BBR012 naming the key, not a silent skip of the row checks.
+      Dataset ds = hfssfix::NineKeyGrid2();
+      ds.wg0 = EditKey(ds.wg0, 45, 135, [](std::vector<std::string>& v, int) { v[2] = R17(45. + 1e-7); });
+      TempDir d; ExpectG4Exception("BBR012", [&] { LoadV2(d, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                   "has no per-key record");
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadV2(d2, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                    "polarization 0");
+      // The dark key's CSV angle off by 1e-7 would otherwise skip OR-038 masking: refused too.
+      Dataset dk = hfssfix::NineKeyGrid2();
+      dk.wg1 = EditKey(dk.wg1, 0, 180, [](std::vector<std::string>& v, int) { v[3] = R17(180. - 1e-7); });
+      TempDir d3; ExpectG4Exception("BBR012", [&] { LoadV2(d3, dk, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                    "has no per-key record");
+      // 1e-10 degrees is within the sidecar's 1e-9 rule: loads.
+      Dataset ok = hfssfix::NineKeyGrid2();
+      ok.wg0 = EditKey(ok.wg0, 45, 135, [](std::vector<std::string>& v, int) { v[2] = R17(45. + 1e-10); });
+      TempDir d4; LoadV2(d4, ok, hfssfix::NineKeyParams2(kS2));
+    }},
+    {"s2_negative_outgoing", [] {
+      // A negative OutgoingPower on any row of a 2.x table is refused (BBR012), not stored as a T that turns
+      // sqrt(T0 T1) into NaN and a silent 0 transmittance; the producer stops on negative flux.
+      Dataset ds = hfssfix::NineKeyGrid2();
+      ds.wg0 = EditKey(ds.wg0, 45, 135, [](std::vector<std::string>& v, int r) { if (r == 3) v[4] = "-1e-12"; });
+      TempDir d; ExpectG4Exception("BBR012", [&] { LoadV2(d, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                   "key (45, 135) polarization 0");
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadV2(d2, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                    "OutgoingPower -1e-12 is negative");
+    }},
     {"s2_load_bbr027_density", [] {
       // A lit key whose tangential field (Ex, Ey) is zero everywhere but Ez is not: the 2.x exit
       // density w |E_t|^2 is zero, so the load refuses it (BBR027).

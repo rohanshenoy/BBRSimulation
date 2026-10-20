@@ -1386,6 +1386,47 @@ def test_s2_two_t_sources_bbr012(tmp_path):
         sidecar.check_csvs(base, stem, fx.sidecar2())
 
 
+def shift_key(base, stem, phi, theta, dphi):
+    """Move the IWavePhi of key (phi, theta) by dphi in every CSV of both polarizations (a producer's key
+    that is off its declared angle: within C2's 0.01 degree rounding, outside the sidecar's 1e-9)."""
+    for e in (0, 1):
+        for name in ("far_field.csv", "waveguide.csv"):
+            edit_key(os.path.join(base, f"{stem}_Ephi={e}", name), phi, theta,
+                     lambda v, n: v.__setitem__(2, repr(float(v[2]) + dphi)))
+
+
+def test_s2_key_without_record_bbr012(tmp_path):
+    """C2 matches keys after rounding to 0.01 degree; the per-key record is matched at 1e-9 degree. A CSV key
+    in between has no record: refused (BBR012), not a silent skip of the row checks and the dark masking."""
+    base, stem = s2_dataset(tmp_path / "a")
+    shift_key(base, stem, 45, 135, 1e-7)
+    with pytest.raises(ValueError, match=r"^BBR012: .*key \(45\.0000001, 135\) polarization 0.*no per-key record"):
+        sidecar.check_csvs(base, stem, fx.sidecar2())
+    # the dark key's angle off by 1e-7 would otherwise lose the OR-038 check on its rows
+    base, stem = s2_dataset(tmp_path / "b")
+    shift_key(base, stem, 0, 180, 1e-7)
+    with pytest.raises(ValueError, match=r"^BBR012: .*no per-key record"):
+        sidecar.check_csvs(base, stem, fx.sidecar2())
+    # 1e-10 degree is inside the sidecar's rule: passes
+    base, stem = s2_dataset(tmp_path / "c")
+    shift_key(base, stem, 45, 135, 1e-10)
+    sidecar.check_csvs(base, stem, fx.sidecar2())
+
+
+def test_s2_negative_outgoing_bbr012(tmp_path):
+    base, stem = s2_dataset(tmp_path)
+    edit_key(wg_path(base, stem, 0), 45, 135, lambda v, n: v.__setitem__(4, "-1e-12") if n == 3 else None)
+    with pytest.raises(ValueError, match=r"^BBR012: .*key \(45, 135\) polarization 0.*OutgoingPower -1e-12 is negative"):
+        sidecar.check_csvs(base, stem, fx.sidecar2())
+
+
+def test_s2_negative_tflux_bbr024():
+    with pytest.raises(ValueError, match=r"^BBR024: .*polarization 0.*t_flux -0\.1 is negative"):
+        check2(mut2(lambda s: setp(s, "transmittance/per_key/1/polarizations/0/t_flux", -0.1)))
+    with pytest.raises(ValueError, match=r"^BBR024: .*polarization 1.*is negative"):
+        check2(mut2(lambda s: setp(s, "transmittance/per_key/3/polarizations/1/t_flux", -1e-300)))
+
+
 def test_s2_dark_outgoing_bbr012(tmp_path):
     # OR-038: a dark basis needs OutgoingPower exactly 0 on every row; 1e-25 on the third row is refused
     base, stem = s2_dataset(tmp_path)

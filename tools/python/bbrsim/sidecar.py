@@ -670,6 +670,9 @@ def _schema2_keys(sc, phis, thetas):
                 wpp = f"{wp}polarizations.{p}."
                 t = _req(pol, "t_flux", wpp, "num")
                 _req(pol, "outgoing_power_abs_re_s_w", wpp, "num")
+                if t < 0.0:
+                    raise ValueError(f"BBR024: key {ks} polarization {p}: transmittance.per_key t_flux {_g12(t)} is "
+                                     "negative; the transmitted flux is non-negative")
                 if dark[p] and t != 0.0:
                     raise ValueError(f"BBR024: key {ks} polarization {p} is dark (exit_field.scale.per_key dark{p}), "
                                      f"but transmittance.per_key t_flux is {_g12(t)}; a dark basis needs t_flux "
@@ -1014,7 +1017,9 @@ def _check_rows_v2(stem, d, sc, recs, sidecar_path):
     in file order: InterceptFactor constant within its key, equal to the key's c_key and to the closed form
     of the declared grid; OutgoingPower exactly 0 on every row of a dark basis (OR-038); and T = OutgoingPower
     / (IngoingPower * InterceptFactor) from the key's first row against the sidecar's t_flux / c_k, 1e-6
-    relative on a lit key, both exactly 0 on a dark one. A key without a record is left to C2."""
+    relative on a lit key, both exactly 0 on a dark one. The record is matched on the row's raw angles at KEY_TOL
+    (BBRDatasetSidecar::Key); C2 matches after rounding to 0.01 degree, so a key without a record is refused
+    here (BBR012), not skipped. A negative OutgoingPower on any row is refused too."""
     ephi = d["ephi"]
     thetas = [float(x) for x in sc["excitation"]["incident_theta_deg"]]
     iw, out, inp, fac = d["rows2"]
@@ -1038,31 +1043,34 @@ def _check_rows_v2(stem, d, sc, recs, sidecar_path):
             raise ValueError(f"BBR012: {stem}_Ephi={ephi}/waveguide.csv, key ({_rep(phi)}, {_rep(theta)}) "
                              f"polarization {ephi}: {what} (sidecar {sidecar_path})")
 
+        if rec is None:
+            bad("the key has no per-key record in the sidecar (angles matched to 1e-9 degree against the declared "
+                "excitation grid)")
+        if o < 0.0:
+            bad(f"OutgoingPower {_rep(o)} is negative; the exit flux is non-negative, so a negative value would "
+                "make the key's transmittance negative")
         if key in first and _far_rel(f, first[key]):
             bad(f"InterceptFactor {_rep(f)} differs from the key's first row, {_rep(first[key])}, by more than "
                 "1e-6 relative: not constant within the key")
-        dark = False
-        if rec is not None:
-            if _far_rel(f, rec["c_k"]):
-                bad(f"InterceptFactor {_rep(f)} differs from the sidecar's transmittance.c_key {_rep(rec['c_k'])} "
-                    "by more than 1e-6 relative")
-            closed = intercept_factor(rec["theta"], thetas)
-            if _far_rel(f, closed):
-                bad(f"InterceptFactor {_rep(f)} differs from {_rep(closed)}, the closed form of the declared grid, "
-                    "by more than 1e-6 relative")
-            dark = rec["dark1"] if ephi else rec["dark0"]
-            if dark and o != 0.0:
-                bad(f"the sidecar declares this basis dark, but OutgoingPower = {_rep(o)}; a dark basis has "
-                    "OutgoingPower exactly 0 on every row of its key (OR-038)")
+        if _far_rel(f, rec["c_k"]):
+            bad(f"InterceptFactor {_rep(f)} differs from the sidecar's transmittance.c_key {_rep(rec['c_k'])} "
+                "by more than 1e-6 relative")
+        closed = intercept_factor(rec["theta"], thetas)
+        if _far_rel(f, closed):
+            bad(f"InterceptFactor {_rep(f)} differs from {_rep(closed)}, the closed form of the declared grid, "
+                "by more than 1e-6 relative")
+        dark = rec["dark1"] if ephi else rec["dark0"]
+        if dark and o != 0.0:
+            bad(f"the sidecar declares this basis dark, but OutgoingPower = {_rep(o)}; a dark basis has "
+                "OutgoingPower exactly 0 on every row of its key (OR-038)")
         if key not in first:
             t = o / (i * f) if i * f > 0.0 else 0.0
             first[key] = f
-            if rec is not None:
-                tf = (rec["t_flux1"] if ephi else rec["t_flux0"]) / rec["c_k"]
-                if (t != 0.0 or tf != 0.0) if dark else _far_rel(t, tf):
-                    bad(f"T = OutgoingPower / (IngoingPower * InterceptFactor) = {_rep(t)} but the sidecar's "
-                        f"t_flux / c_k = {_rep(tf)}" + ("; a dark basis has both exactly 0" if dark
-                                                         else ", more than 1e-6 relative apart"))
+            tf = (rec["t_flux1"] if ephi else rec["t_flux0"]) / rec["c_k"]
+            if (t != 0.0 or tf != 0.0) if dark else _far_rel(t, tf):
+                bad(f"T = OutgoingPower / (IngoingPower * InterceptFactor) = {_rep(t)} but the sidecar's "
+                    f"t_flux / c_k = {_rep(tf)}" + ("; a dark basis has both exactly 0" if dark
+                                                     else ", more than 1e-6 relative apart"))
 
 
 def _check_one(stem, d, sc, exempt):
