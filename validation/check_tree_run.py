@@ -342,7 +342,9 @@ def table(rep, tag, tables, stem):
 
 def predict_gun(ds, r):
     """(T, exit-direction weights, outgoing directions) of a gun run: its configured direction
-    folded onto the nearest incidence key, with its polarization, or random."""
+    folded onto the nearest incidence key, with its polarization, or random. The weights are None
+    when T = 0 (a fixed polarization on a dark basis under 2.x): nothing transmits, so there is no
+    outgoing distribution to predict, and the C++ never draws one (CDX-036)."""
     inc = hfss.fold_incidence(r["direction"])
     a = ds[hfss.nearest_key(ds, inc.phi_deg, inc.theta_deg)]
     dirs = hfss.outgoing_directions(a, inc)
@@ -351,7 +353,8 @@ def predict_gun(ds, r):
     else:
         k, p = unit(r["direction"]), np.asarray(r["polarization"], dtype=float)
         et, ep = hfss.polarization_components(unit(p - p.dot(k) * k), inc)
-        t, w = hfss.transmittance(a, et, ep), hfss.direction_weights(a, et, ep)
+        t = hfss.transmittance(a, et, ep)
+        w = hfss.direction_weights(a, et, ep) if t > 0 else None    # T > 0 without outward intensity: BBR027
     return float(t), w, dirs
 
 
@@ -366,6 +369,9 @@ def gun_rows(rep, tag, r, dec, tables, grids):
         return
     t, w, dirs = predict_gun(ds, r)
     n, tx = len(dec), dec[dec["status"] == TRANSMIT]
+    if w is None:    # T = 0 exactly: every entry reflects, and there are no exit directions to compare
+        rep.check(f"{tag} transmittance", len(tx) == 0, f"T 0, {len(tx)} of {n} entries transmitted")
+        return
     rep.stat(f"{tag} transmittance", len(tx), n * t, math.sqrt(n * t * (1.0 - t)), slack=1.0,
              detail=f"T_obs {len(tx) / n:.4f}, T {t:.4f}, N {n}")
     if r["kind"].startswith("probe") or len(tx) <= MIN_TX_MOMENTS:

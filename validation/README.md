@@ -546,7 +546,9 @@ and a run regenerates it.
   grid point against the photon-number spectrum. Each passes within z_max
   standard errors, z_max = max(4, Φ⁻¹(1 − 0.0005/M)) for M statistical rows, so a
   correct run fails any of them with at most 0.1 % chance; counts get one count
-  of slack.
+  of slack. A gun run whose predicted T is exactly 0 (a fixed polarization on a
+  dark 2.x basis) gets an exact transmittance row instead, no entry transmitted,
+  and no exit-direction rows (CDX-036).
 - The physics row: below 0.95 × the sidecar's polarization-filter limit, a
   rectangular crack transmits under 1 % of E along its long side at normal
   incidence, so a swapped pair of `Ephi` directories fails.

@@ -411,6 +411,55 @@ def test_planck_prediction_clamped_s2(checker):
     assert checker.random_polarization_T(b) == pytest.approx(0.45, rel=1e-14)
 
 
+def s2_tables(checker, tmp_path):
+    """The nine-key 2.0 dataset (Ephi=1 dark at (0, 180)) behind a Tables cache, with its grid map."""
+    base = str(tmp_path)
+    stem = fx.write_nine_key_grid2(base)
+    sidecar.write(base, stem, fx.sidecar2())
+    return checker.Tables(base), {"crack": [(500.0, stem)]}, stem
+
+
+# A gun along +x is normal incidence; E along y is the dark Ephi=1 basis of the fixture, E along z the lit one.
+GUN_DARK = {"kind": "gun", "dataset": "crack", "direction": [1.0, 0.0, 0.0], "polarization": [0.0, 1.0, 0.0]}
+
+
+def test_predict_gun_dark_fixed_polarization(checker, tmp_path):
+    """CDX-036: a fixed polarization on a dark basis predicts T = 0 and no direction weights (the C++ never
+    draws it); lit and random polarizations keep their weights, and a transmitting state without any outward
+    far field still raises BBR027."""
+    tables, _, stem = s2_tables(checker, tmp_path)
+    ds = tables.get(stem)
+    t, w, dirs = checker.predict_gun(ds, GUN_DARK)
+    assert t == 0.0 and w is None and len(dirs) > 0
+    t, w, _ = checker.predict_gun(ds, {**GUN_DARK, "polarization": [0.0, 0.0, 1.0]})
+    assert t == pytest.approx(0.6, rel=1e-12) and w.sum() == pytest.approx(1.0, rel=1e-12)
+    t, w, _ = checker.predict_gun(ds, {**GUN_DARK, "polarization": None})
+    assert 0.0 < t < 1.0 and w.sum() == pytest.approx(1.0, rel=1e-12)
+    a = ds[(0.0, 180.0)]
+    a.F0_theta[:], a.F0_phi[:] = 0, 0       # the lit basis loses its outward far field: still BBR027
+    with pytest.raises(ValueError, match="BBR027"):
+        checker.predict_gun(ds, {**GUN_DARK, "polarization": [0.0, 0.0, 1.0]})
+
+
+def test_gun_rows_dark_fixed_polarization(checker, tmp_path):
+    """CDX-036: the dark gun run passes with no transmission and has no direction-moment rows; a single
+    transmission fails it."""
+    tables, grids, _ = s2_tables(checker, tmp_path)
+
+    def run(n_tx, n=500):
+        dec = frame(*({"hfss_freq_GHz": 500.0, "status": checker.TRANSMIT if i < n_tx else checker.REFLECT,
+                       "px_post": 1.0, "py_post": 0.0, "pz_post": 0.0} for i in range(n)))
+        rep = checker.Report()
+        checker.gun_rows(rep, "r000", GUN_DARK, dec, tables, grids)
+        ok = rep.finish()
+        return ok, {name: status for status, name, _ in rep.rows}
+
+    ok, rows = run(0)
+    assert ok and rows == {"r000 transmittance": "PASS"}
+    ok, rows = run(1)
+    assert not ok and rows == {"r000 transmittance": "FAIL"}
+
+
 def test_manifest_v1_refused(checker, tmp_path):
     root = sidecar_tree(tmp_path / "data", LEGACY)
     run = tmp_path / "run"
