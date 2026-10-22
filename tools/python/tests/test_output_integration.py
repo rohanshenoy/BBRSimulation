@@ -57,8 +57,8 @@ def test_redirected_results_keep_independent_metadata(binaries, tmp_path):
     cracks = {c["dataset_id"]: c for c in meta["data"]["hfss_datasets"]}
     assert len(meta["data"]["hfss_datasets"]) == 2
     assert set(cracks) == {"InfParallelPlate_crack1Rohan", "InfParallelPlate_crack2"}
-    expected = {"InfParallelPlate_crack1Rohan": ([4.0, 10.2, 0.052], {"p": 1.0, "l": 10.0, "g": 0.05}),
-                "InfParallelPlate_crack2": ([4.0, 10.2, 0.102], {"p": 1.5, "l": 10.0, "g": 0.1})}
+    expected = {"InfParallelPlate_crack1Rohan": ([1.0, 10.0, 0.05], {"p": 1.0, "l": 10.0, "g": 0.05}),
+                "InfParallelPlate_crack2": ([1.5, 10.0, 0.1], {"p": 1.5, "l": 10.0, "g": 0.1})}
     for dataset_id, (geant4, hfss) in expected.items():
         crack = cracks[dataset_id]
         assert crack["geant4_extent_mm"] == pytest.approx(geant4, abs=1e-9)

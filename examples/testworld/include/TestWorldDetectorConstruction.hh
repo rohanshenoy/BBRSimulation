@@ -7,8 +7,9 @@
 
 class TestWorldMessenger;
 
-// Test geometry: 50 cm world, 4 mm Cu slab at x=2 mm with two vacuum_wg crack
-// daughters, plus, only with /bbr/testworld/roundGap true, a Cu plate
+// Test geometry: 50 cm world, two touching Cu plates (CuPlateCrack1, 1.0 mm thick, and
+// CuPlateCrack2, 1.5 mm thick) each holding a vacuum_wg crack daughter that equals its HFSS
+// model (OR-020), plus, only with /bbr/testworld/roundGap true, a Cu plate
 // RoundGapPlate holding the straight round gap RoundGap_r50um (a vacuum_wg
 // displaced tube). The Cu material is built from BBRConfigManager's CuRRR /
 // CuStageT_K at Construct() time via BBRMaterials::GetCopper(RRR, T_K).
@@ -27,13 +28,12 @@ class TestWorldDetectorConstruction : public G4VUserDetectorConstruction {
   G4VPhysicalVolume* Construct() override;
   void SetRoundGap(G4bool on) { fRoundGap = on; }
 
-  // The opt-in round gap, after HFSS cylindrical2. The Geant4 radius is the HFSS
-  // radius plus 1 um, so the HFSS exit grid's rim points lie strictly inside the
-  // solid. Construct() builds the geometry from these and the messenger's
+  // The opt-in round gap, after HFSS cylindrical2. The Geant4 radius equals the HFSS
+  // radius (OR-020). Construct() builds the geometry from these and the messenger's
   // guidance prints them.
   static constexpr G4double kRoundGapLength = 0.4 * CLHEP::mm;        // along x, = plate thickness
   static constexpr G4double kRoundGapHfssRadius = 0.050 * CLHEP::mm;
-  static constexpr G4double kRoundGapRadius = 0.051 * CLHEP::mm;      // Geant4 solid
+  static constexpr G4double kRoundGapRadius = kRoundGapHfssRadius;    // Geant4 solid, equal to the HFSS radius
   static constexpr G4double kRoundGapPlateZ = -80. * CLHEP::mm;       // plate centre z
   static constexpr G4double kRoundGapPlateHalfWidth = 5. * CLHEP::mm; // half-extent in y and z
 

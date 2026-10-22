@@ -26,6 +26,7 @@ or library/src/BBRHFSSData.cc; keep them in lock-step.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -61,6 +62,10 @@ class AngleDataset:
     exit_z_m: np.ndarray = None   # waveguide.csv Z of every exit point (exit CS, metres; along phi_f)
     E0: np.ndarray = None         # (M, 3) complex exit field (Ex, Ey, Ez) for Ephi=0 input
     E1: np.ndarray = None         # (M, 3) complex exit field for Ephi=1 input, paired by row with E0
+    schema: int = 1               # schema major of the dataset's sidecar (1 without one): ExitPoint-less twin of fSchema
+    w: np.ndarray = None          # (M,) exit quadrature weights, ExitPoint::w (all ones under 1.x)
+    dark0: bool = False           # BBRKeyRecord::dark0: the Ephi=0 basis is a numerical zero (2.x, OR-038)
+    dark1: bool = False           # BBRKeyRecord::dark1
 
 
 def load_dataset(dir_stem, base_dir=None):
@@ -80,9 +85,23 @@ def load_dataset(dir_stem, base_dir=None):
     transmittance over linear polarizations exceeds 1 has T0 and T1 divided by it;
     a basis polarization with T > 0 needs outward far-field intensity and exit field
     (BBR027).
-    The C++ errors are raised here as ValueError naming the code. No sidecar is
-    read: the Python-side sidecar checks (F1-F13, C1-C5) are bbrsim.sidecar and
-    validation/check_dataset_sidecars.py.
+    The C++ errors are raised here as ValueError naming the code. The Python-side sidecar
+    checks (F1-F13, C1-C5) are bbrsim.sidecar and validation/check_dataset_sidecars.py; this
+    function reads ``<base>/<dir_stem>.dataset.json`` when it exists only to learn the schema
+    major (``BBRHFSSData`` takes ``schemaMajor`` from the sidecar the same way) and, under 2.x,
+    the field-component frame (only hfss_global, BBR025, CDX-035), the exit lattice and the per-key
+    records: before any T is computed or any basis masked it runs ``sidecar.check_rows_v2``, the
+    loader's row checks (BBR012: a negative OutgoingPower, power on a dark basis, an InterceptFactor
+    that is not the key's c_k, the CSV T against the sidecar's t_flux / c_k; CDX-037), so it never
+    returns a state ``BBRHFSSData`` refuses.
+
+    Schema 2.x (OR-034, OR-038, HF-040, HF-042; BBRHFSSData's ``fSchema == 2`` branches):
+    waveguide.csv is read by the 2.0 positions, Ex = (9, 10), Ey = (11, 12), Ez = (13, 14) as
+    (re, im) and InterceptFactor = 15; T_p = OutgoingPower / (IngoingPower * InterceptFactor) from the
+    key's first row, kept above 1 with no eigenvalue rescale (``GetTransmittance`` clamps per photon);
+    each exit point gets the trapezoid weight ``w`` of its lattice node (AssignQuadrature); rho is
+    over (Ex, Ey) with those weights, 0 if either basis is dark. A 2.x CSV never falls back to
+    the 1.0 column map: a 16-column header without a 2.x sidecar is BBR024.
     """
     dataset_id = dir_stem   # local alias: the error messages below name the stem
     base = base_dir or default_base_dir()
@@ -90,11 +109,24 @@ def load_dataset(dir_stem, base_dir=None):
     f_stem = _strtod_full(stem_token[:-3]) if stem_token.endswith("GHz") else None
     if f_stem is None or not f_stem > 0.:
         raise ValueError(f"{dir_stem}: the stem does not end in _<freq>GHz")
+    from . import sidecar   # lazy: bbrsim.sidecar imports this module
+    sc = sidecar.load(base, dir_stem) if os.path.exists(sidecar.path_for(base, dir_stem)) else None
+    major = sidecar.schema_major(sc) if sc is not None else 1   # BBR024 for a version BBRsim does not read
+    v2 = major == 2
+    if v2:   # E_t below is the HFSS-global (Ex, Ey); the C++ refuses another frame at parse (CDX-035)
+        sidecar.check_field_frame(sc, major)
     ff, wg = {}, {}
     for e in (0, 1):
         d = os.path.join(base, f"{dir_stem}_Ephi={e}")
         ff[e] = pd.read_csv(os.path.join(d, "far_field.csv"))
         wg[e] = pd.read_csv(os.path.join(d, "waveguide.csv"))
+        wide = wg[e].shape[1] == len(sidecar.WG_COLUMNS_2)
+        if wide and sc is None:   # never the 1.0 map on a 2.0 table: it would read Re Ex, Im Ex, Im Ey, Re Ez as E_t
+            raise ValueError(f"BBR024: {d}/waveguide.csv has the 16-column schema-2 header but there is no "
+                             f"{dir_stem}.dataset.json beside it; BBRsim reads a 2.x table only with its sidecar")
+        if wide != v2 or (v2 and list(wg[e].columns) != sidecar.WG_COLUMNS_2):   # CheckHeader (C1)
+            raise ValueError(f"BBR013: {d}/waveguide.csv header {list(wg[e].columns)} is not the "
+                             f"{'2.0' if v2 else '1.0'} column list the sidecar declares")
         for name, df in (("far_field.csv", ff[e]), ("waveguide.csv", wg[e])):
             for tok in df["Freq"].astype(str).unique():   # every row (BBR009)
                 f = parse_frequency_GHz(tok)
@@ -105,6 +137,10 @@ def load_dataset(dir_stem, base_dir=None):
             vals = df.drop(columns=["Freq", "Ephi"]).apply(pd.to_numeric, errors="coerce").to_numpy(float)
             if not np.isfinite(vals).all():
                 raise ValueError(f"BBR013: non-numeric or non-finite field in {d}/{name}")
+    if v2:   # LoadWaveguide's 2.x row checks, before any T is computed or any basis masked (CDX-037)
+        recs = sidecar.key_records(sc)
+        for e in (0, 1):
+            sidecar.check_rows_v2(dir_stem, e, sidecar.rows_v2(wg[e]), sc, recs, sidecar.path_for(base, dir_stem))
 
     # Incidence keys, in the order the C++ checks them: an Ephi=1 key without
     # Ephi=0 rows (BBR012, in the loaders), no key at all (BBR000), a key in one
@@ -132,23 +168,47 @@ def load_dataset(dir_stem, base_dir=None):
              for e in (0, 1)}
         if len(w[0]) != len(w[1]) or not _same(w[0], w[1], ("X", "Y", "Z"), 1e-12):
             raise ValueError(f"BBR012: {dataset_id} key {key}: Ephi=0 and Ephi=1 exit points differ")
+        rec = _key_record(sc, (float(phi_i), float(theta_i))) if v2 else None
         T, E = {}, {}
         for e in (0, 1):
             r = w[e].iloc[0]
-            T[e] = float(r.OutgoingPower) / float(r.IngoingPower) if r.IngoingPower > 0 else 0.0
-            E[e] = np.stack([w[e][f"E{c}_real"].to_numpy(float) + 1j * w[e][f"E{c}_imag"].to_numpy(float)
-                             for c in "xyz"], axis=1)
-        # Polarization cross term (BBRHFSSData constructor): the Ephi=1 exit points pair
-        # with the Ephi=0 ones by order; rho = sum E0.E1* / sqrt(sum|E0|^2 sum|E1|^2).
-        p0, p1 = float(np.sum(np.abs(E[0]) ** 2)), float(np.sum(np.abs(E[1]) ** 2))
-        rho = complex(np.sum(E[0] * np.conj(E[1])) / np.sqrt(p0 * p1)) if p0 > 0 and p1 > 0 else 0j
-        # Load-time normalization (BBRHFSSData constructor): the largest T over linear
-        # polarizations, the top eigenvalue of [[T0, c], [c, T1]] with c = sqrt(T0 T1) Re rho,
-        # above 1 (the HFSS port-normalization artefact) divides both T0 and T1.
-        c = np.sqrt(T[0] * T[1]) * rho.real
-        lam = float(0.5 * (T[0] + T[1]) + np.hypot(0.5 * (T[0] - T[1]), c))
-        if lam > 1.0:
-            T = {e: T[e] / lam for e in (0, 1)}
+            if v2:
+                # LoadWaveguide, 2.x: T = Out / (In * InterceptFactor) from the key's first row, kept above 1
+                f = float(r.InterceptFactor)
+                T[e] = float(r.OutgoingPower) / (float(r.IngoingPower) * f) if float(r.IngoingPower) * f > 0 else 0.0
+                # the 2.0 positions Ex = (9, 10), Ey = (11, 12), Ez = (13, 14) as (re, im), by position
+                col = w[e].iloc[:, 9:15].to_numpy(float)
+                E[e] = np.stack([col[:, 0] + 1j * col[:, 1], col[:, 2] + 1j * col[:, 3],
+                                 col[:, 4] + 1j * col[:, 5]], axis=1)
+            else:
+                T[e] = float(r.OutgoingPower) / float(r.IngoingPower) if r.IngoingPower > 0 else 0.0
+                E[e] = np.stack([w[e][f"E{c}_real"].to_numpy(float) + 1j * w[e][f"E{c}_imag"].to_numpy(float)
+                                 for c in "xyz"], axis=1)
+        if v2:
+            wq = _quadrature(sc, w[0], dataset_id, key)
+            dark = (rec["dark0"], rec["dark1"])
+            # Polarization cross term, 2.x (HF-042): rho over the tangential (Ex, Ey) with the quadrature
+            # weights, the sampler's own density; 0 if either basis is dark. No rescale: values above 1 are
+            # kept and transmittance() caps per photon (HF-039(2)).
+            rho = 0j
+            if not any(dark):
+                ta, tb = E[0][:, :2], E[1][:, :2]
+                p0, p1 = float(np.sum(wq[:, None] * np.abs(ta) ** 2)), float(np.sum(wq[:, None] * np.abs(tb) ** 2))
+                if p0 > 0 and p1 > 0:
+                    rho = complex(np.sum(wq[:, None] * ta * np.conj(tb)) / np.sqrt(p0 * p1))
+        else:
+            wq, dark = np.ones(len(w[0])), (False, False)
+            # Polarization cross term (BBRHFSSData constructor): the Ephi=1 exit points pair
+            # with the Ephi=0 ones by order; rho = sum E0.E1* / sqrt(sum|E0|^2 sum|E1|^2).
+            p0, p1 = float(np.sum(np.abs(E[0]) ** 2)), float(np.sum(np.abs(E[1]) ** 2))
+            rho = complex(np.sum(E[0] * np.conj(E[1])) / np.sqrt(p0 * p1)) if p0 > 0 and p1 > 0 else 0j
+            # Load-time normalization (BBRHFSSData constructor): the largest T over linear
+            # polarizations, the top eigenvalue of [[T0, c], [c, T1]] with c = sqrt(T0 T1) Re rho,
+            # above 1 (the HFSS port-normalization artefact) divides both T0 and T1.
+            c = np.sqrt(T[0] * T[1]) * rho.real
+            lam = float(0.5 * (T[0] + T[1]) + np.hypot(0.5 * (T[0] - T[1]), c))
+            if lam > 1.0:
+                T = {e: T[e] / lam for e in (0, 1)}
         # BBR027 (BBRHFSSData constructor): a transmitting basis polarization needs outward far-field
         # intensity and exit field somewhere (CDX-008)
         sinT = np.sin(np.radians(a.Theta.to_numpy(float)))
@@ -157,7 +217,8 @@ def load_dataset(dir_stem, base_dir=None):
             if T[e] > 0:
                 ff_w = float(np.sum((sinT * (f.rEtheta_real ** 2 + f.rEtheta_imag ** 2 + f.rEphi_real ** 2
                                              + f.rEphi_imag ** 2).to_numpy(float))[outward]))
-                ex_w = float(np.sum(np.abs(E[e]) ** 2))
+                # exit density: 1.x |E|^2 over (Ex, Ey, Ez); 2.x w |E_t|^2 over (Ex, Ey)
+                ex_w = float(np.sum(wq[:, None] * np.abs(E[e][:, :2]) ** 2)) if v2 else float(np.sum(np.abs(E[e]) ** 2))
                 if not ff_w > 0 or not ex_w > 0:
                     what = "exit field is zero at every exit point" if ff_w > 0 else "far field has no outward intensity"
                     raise ValueError(f"BBR027: {dataset_id} key {key}: T{e} = {T[e]!r} > 0, but its {what}")
@@ -170,7 +231,56 @@ def load_dataset(dir_stem, base_dir=None):
             b.rEphi_real.to_numpy(float) + 1j * b.rEphi_imag.to_numpy(float),
             rho,
             w[0].Y.to_numpy(float), w[0].Z.to_numpy(float), E[0], E[1],
+            major, wq, bool(dark[0]), bool(dark[1]),
         )
+    return out
+
+
+def _key_record(sc, key):
+    """The 2.x per-key record of the CSV key ``key`` = (raw IWavePhi, raw IWaveTheta): matched on the raw
+    angles at 1e-9 degree, BBRDatasetSidecar::Key's rule and the one LoadWaveguide applies per row, not on
+    the 0.01 degree rounded group key (which C2 uses). A key without a record is BBR012."""
+    from . import sidecar
+    for r in sidecar.key_records(sc):
+        if abs(r["phi"] - key[0]) <= sidecar.KEY_TOL and abs(r["theta"] - key[1]) <= sidecar.KEY_TOL:
+            return r
+    raise ValueError(f"BBR012: key ({key[0]!r}, {key[1]!r}) has no per-key record in the sidecar (angles matched "
+                     "to 1e-9 degree against the declared excitation grid)")
+
+
+def _axis_index(v, axis, name, key):
+    """AxisNode (BBRHFSSData.cc): the index i of the declared node min + i (max - min)/(count - 1) that v
+    matches to 1e-6 of the step, else BBR012."""
+    n, lo, hi = int(axis["count"]), float(axis["min"]), float(axis["max"])
+    if n < 2:
+        raise ValueError(f"BBR024: key {key}: exit_field.grid has count {n} on the {name} axis; a rectangle axis "
+                         "needs at least 2 nodes (count < 2 is refused at parse)")
+    step = (hi - lo) / (n - 1)
+    i = int(math.floor((v - lo) / step + 0.5))   # std::lround
+    if 0 <= i < n and abs(v - (lo + i * step)) <= 1e-6 * step:
+        return i, n
+    raise ValueError(f"BBR012: key {key}: exit coordinate {name} = {v!r} m is not a node of the declared lattice; "
+                     "quadrature weights are assigned on the unclamped lattice")
+
+
+def _quadrature(sc, wg0, dataset_id, key):
+    """ExitPoint::w of every exit point (BBRHFSSData::AssignQuadrature, HF-040): a rectangle's trapezoid by
+    grid index, a factor 1/2 per axis on its first and last node (a corner 1/4); a disc ("uniform_disc") 1.
+    Dimensionless, from the unclamped positions."""
+    ef = sc["exit_field"]
+    if ef["cross_section"]["shape"] != "rectangle":
+        return np.ones(len(wg0))
+    out = np.empty(len(wg0))
+    for j, (y, z) in enumerate(zip(wg0.Y.to_numpy(float), wg0.Z.to_numpy(float))):
+        wy = wz = 1.0
+        for v, name, which in ((y, "Y", "y_e"), (z, "Z", "z_e")):
+            i, n = _axis_index(v, ef["grid"][which], name, key)
+            f = 0.5 if (i == 0 or i == n - 1) else 1.0
+            if which == "y_e":
+                wy = f
+            else:
+                wz = f
+        out[j] = wy * wz
     return out
 
 
@@ -266,7 +376,9 @@ def polarization_components(pol, inc):
 
 def transmittance(ds, E_theta, E_phi):
     """Wang eq. 58 applied to eq. 53 (BBRHFSSData::GetTransmittance): the transmitted power
-    of a mixed polarization includes the cross term 2 Et Ep sqrt(T0 T1) Re rho."""
+    of a mixed polarization includes the cross term 2 Et Ep sqrt(T0 T1) Re rho. Under 2.x T0 and T1
+    are kept above 1 and this clamp is the per-photon cap (HF-039(2)); a dark basis has T = 0 and
+    rho = 0, so it adds nothing (OR-038)."""
     T = (E_theta ** 2 * ds.T0 + E_phi ** 2 * ds.T1
          + 2. * E_theta * E_phi * np.sqrt(ds.T0 * ds.T1) * ds.rho.real)
     return min(1., max(0., T))
@@ -276,12 +388,15 @@ def direction_weights(ds, E_theta, E_phi):
     """Normalised sampling weights over the far-field grid rows.
 
     weight_i = sinT_i * |E_theta F0_i + E_phi F1_i|^2, zero for rows whose
-    direction lies in the exit-face plane (BBRHFSSData::SampleOutgoingDirection).
+    direction lies in the exit-face plane (BBRHFSSData::SampleOutgoingDirection). A dark basis
+    (2.x, OR-038) enters no mixture: its stored far field is numerical residue.
     """
+    cT = 0. if ds.dark0 else E_theta   # cT, cP of SampleOutgoingDirection
+    cP = 0. if ds.dark1 else E_phi
     sinT = np.sin(np.radians(ds.theta_deg))
     cosN = sinT * np.cos(np.radians(ds.phi_deg))
-    Fth = E_theta * ds.F0_theta + E_phi * ds.F1_theta
-    Fph = E_theta * ds.F0_phi + E_phi * ds.F1_phi
+    Fth = cT * ds.F0_theta + cP * ds.F1_theta
+    Fph = cT * ds.F0_phi + cP * ds.F1_phi
     w = sinT * (np.abs(Fth) ** 2 + np.abs(Fph) ** 2)
     w = np.where(cosN < K_MIN_NORMAL_COMPONENT, 0., w)
     s = w.sum()
@@ -298,8 +413,17 @@ def exit_position_weights(ds, E_theta, E_phi):
     of BBRHFSSData::SampleExitPosition; BBR027 when every weight is zero, as the C++
     then refuses to draw. Point j sits at ds.exit_y_m[j] along theta_f and
     ds.exit_z_m[j] along phi_f from the exit-face centre.
+
+    Schema 2.x (HF-040, SampleExitPosition with fSchema == 2): weight_j = w_j |cT E_t0,j + cP E_t1,j|^2
+    over the tangential (Ex, Ey) with the quadrature weight w_j; a dark basis enters no mixture
+    (cT or cP = 0, OR-038).
     """
-    w = np.sum(np.abs(E_theta * ds.E0 + E_phi * ds.E1) ** 2, axis=1)
+    cT = 0. if ds.dark0 else E_theta   # cT, cP of SampleExitPosition
+    cP = 0. if ds.dark1 else E_phi
+    if ds.schema == 2:
+        w = ds.w * np.sum(np.abs(cT * ds.E0[:, :2] + cP * ds.E1[:, :2]) ** 2, axis=1)
+    else:
+        w = np.sum(np.abs(cT * ds.E0 + cP * ds.E1) ** 2, axis=1)
     s = w.sum()
     if not s > 0:
         raise ValueError(f"BBR027: no exit field for (E_theta, E_phi) = ({E_theta}, {E_phi}) at key {ds.key}")
@@ -323,7 +447,9 @@ def random_polarization_mixture(ds, n_psi=360):
     photon of polarization psi transmits with probability T(psi) and then
     samples its exit direction from its own normalised weight table, so the
     transmitted-photon direction distribution is the T-weighted average of the
-    per-psi tables. Returns (mean transmittance, weights over grid rows).
+    per-psi tables. Returns (mean transmittance, weights over grid rows). Each psi's T is the
+    clamped one of GetTransmittance, so under 2.x, where T0 and T1 may exceed 1, the mean is the
+    per-photon-capped one.
     """
     psi = (np.arange(n_psi) + 0.5) / n_psi * 2. * np.pi
     W = np.zeros(len(ds.theta_deg))

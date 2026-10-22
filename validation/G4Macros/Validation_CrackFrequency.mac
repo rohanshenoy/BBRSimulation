@@ -95,7 +95,7 @@
 
 # ---- run 15: broadband Planck at 20 K -------------------------------------
 # A thin slab just off the Cu face (x in [-0.04, -0.02] mm, no overlap with the
-# slab at x = 0): its two large faces are the +-x ones, so most photons head
+# Cu plates at x = 0): its two large faces are the +-x ones, so most photons head
 # straight at the crack aperture and ~24 % enter it.
 /bbr/gun/mode false
 /bbr/thermal/setT 20.0

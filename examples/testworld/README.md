@@ -2,29 +2,38 @@
 
 ## Introduction
 
-`bbrsimTestWorld` is the reference application for the BBRsim library: a copper
-slab with two machining-gap cracks, lit by thermal (Planck) radiation or by a
-fixed photon gun. It exercises the BBR physics the library provides: tabulated
-full-Drude Cu reflectance at the slab, HFSS-tabulated transmission through the
+`bbrsimTestWorld` is the reference application for the BBRsim library: two
+copper plates with a machining-gap crack each, lit by thermal (Planck) radiation
+or by a fixed photon gun. It exercises the BBR physics the library provides:
+tabulated full-Drude Cu reflectance at the plates, HFSS-tabulated transmission through the
 cracks, and the Planck emitter. Most of the validation fixtures run it.
 
 ## Geometry
 
-`TestWorldDetectorConstruction`: a 50 cm vacuum world holding a 4 mm Cu slab
-with its front face at x = 0. The slab material comes from
+`TestWorldDetectorConstruction`: a 50 cm vacuum world holding two touching Cu
+plates, each as thick as its crack, so that every crack volume equals its HFSS
+model exactly. `CuPlateCrack1` is 1.0 mm thick (z from −25 to 1.5 mm) and
+`CuPlateCrack2` is 1.5 mm thick (z from 1.5 to 25 mm); both are 50 mm wide in y
+and have their front faces at x = 0. The plate material comes from
 `BBRMaterials::GetCopper(RRR, T)`, set with `/bbr/det/setCuMaterial`,
 `/bbr/det/setCuRRR` and `/bbr/det/setCuStageT` before `/run/initialize`
-(default OFHC_Cu, RRR 100, 4 K). Two crack daughters of the slab are
-`vacuum_wg` volumes named by their HFSS dataset ID:
-`InfParallelPlate_crack1Rohan` (52 µm gap at z = 0) and
-`InfParallelPlate_crack2` (102 µm gap at z = 3 mm). For each, the library reads
-`<dataDir>/waveguides/<id>_<freq>GHz_Ephi={0,1}`.
+(default OFHC_Cu, RRR 100, 4 K). Each plate holds one crack daughter, a
+`vacuum_wg` volume named by its HFSS dataset ID and filling a slot through the
+plate:
+`InfParallelPlate_crack1Rohan` (1.0 × 10 × 0.050 mm along the propagation,
+long and gap directions, centred at z = 0) and
+`InfParallelPlate_crack2` (1.5 × 10 × 0.100 mm, centred at z = 3 mm). For each,
+the library reads `<dataDir>/waveguides/<id>_<freq>GHz_Ephi={0,1}`. Since
+OR-020 the solids equal the HFSS models in length and section (before, the
+slots were 4 mm long, 10.2 mm wide and 2 µm taller than HFSS); at load, exit
+points that HFSS placed on a wall are clamped 1 nm inside the declared section
+(see *Dataset sidecars* in `validation/README.md`).
 
 Opt-in round gap: `/bbr/testworld/roundGap true` (PreInit only, default
 `false`) also places `RoundGapPlate`, a 0.4 mm Cu plate centred at z = −80 mm
 with its front face at x = 0, holding `RoundGap_r50um`, a straight round
 `vacuum_wg` hole along x (a `G4Tubs` turned onto local x inside a
-`G4DisplacedSolid`; radius 51 µm against the 50 µm HFSS radius). With the
+`G4DisplacedSolid`; radius 50 µm, equal to the HFSS radius). With the
 default `false` the world, and so the pinned regression macros, are unchanged.
 A run with the round gap on needs a data root holding a `RoundGap_r50um`
 dataset, for example the mock written by

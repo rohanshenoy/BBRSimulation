@@ -208,3 +208,85 @@ def test_mock_round_gap_relinks(repo_root, tmp_path, data_root):
     r = run(gen, "--real", other, "--dst", dst, cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert os.readlink(link) == os.path.join(os.path.realpath(other), link.name)
+
+
+def test_mock_schema2_tree(repo_root, tmp_path):
+    # The schema-2 mock tree (OR-028, OR-034, OR-038): the two legacy 500 GHz cracks relabelled to the 2.0
+    # columns plus the round gap written natively in 2.0, so the tree holds every crack the test world places.
+    import pandas as pd
+    real = repo_root / "data" / "waveguides"
+    ids = ["InfParallelPlate_crack1Rohan", "InfParallelPlate_crack2"]
+    dst = tmp_path / "v2"
+    r = run(repo_root / "validation/Scripts/make_mock_schema2.py", "--src", real, "--dst", dst,
+            "--ids", *ids, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    r = run(repo_root / "validation/Scripts/make_mock_round_gap.py", "--schema", 2, "--real", real,
+            "--dst", dst, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    base = str(dst / "waveguides")
+    r = run(repo_root / "validation/check_dataset_sidecars.py", base, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    sets = {i: hfss.load_frequency_set(i, base) for i in ids + ["RoundGap_r50um"]}
+    for i, fs in sets.items():
+        assert list(fs) == [500.0 if i != "RoundGap_r50um" else 2000.0], i
+        assert all(d.schema == 2 for ds in fs.values() for d in ds.values()), i
+
+    for i in ids:
+        stem = f"{i}_500GHz"
+        sc = sidecar.load(base, stem)
+        assert sc["schema_version"] == "2.0"
+        assert sc["provenance"]["mock"] is True and sc["provenance"]["of"] == stem
+        assert sc["provenance"]["scale_rule_holds"] is False and sc["provenance"]["material"] == "vacuum"
+        recs = {(r["phi_deg"], r["theta_deg"]): r for r in sc["transmittance"]["per_key"]}
+        scale = {(r["phi_deg"], r["theta_deg"]): r for r in sc["exit_field"]["scale"]["per_key"]}
+        assert len(recs) == 15
+        for e in (0, 1):
+            src = pd.read_csv(real / f"{stem}_Ephi={e}" / "waveguide.csv")
+            out = pd.read_csv(os.path.join(base, f"{stem}_Ephi={e}", "waveguide.csv"))
+            assert list(out.columns) == sidecar.WG_COLUMNS_2
+            assert len(out) == len(src)
+            # the stored field values are unchanged (they are stored interleaved), position by position
+            assert (out.iloc[:, 9:15].to_numpy() == src.iloc[:, 9:15].to_numpy()).all()
+            assert (out.IngoingPower == src.IngoingPower).all()
+            for (phi, theta), rec in recs.items():
+                sel = (out.IWavePhi == phi) & (out.IWaveTheta == theta)
+                ck = sidecar.intercept_factor(theta, [0.0, 45.0, 90.0, 135.0, 180.0, ])
+                assert (out.InterceptFactor[sel] == ck).all() and rec["c_k"] == ck
+                src_t = float(src.OutgoingPower[sel].iloc[0] / src.IngoingPower[sel].iloc[0])
+                dark = abs(src_t) <= 1e-12
+                assert scale[(phi, theta)][f"dark{e}"] is dark
+                if dark:
+                    assert theta == 0.0
+                    assert (out.OutgoingPower[sel] == 0.0).all()
+                    assert rec["polarizations"][str(e)]["t_flux"] == 0.0
+                else:
+                    assert (out.OutgoingPower[sel] == src.OutgoingPower[sel]).all()
+                    assert rec["polarizations"][str(e)]["t_flux"] == pytest.approx(src_t, rel=1e-12)
+    # the schema-2 loader keeps the raw ratio above 1; the per-photon API applies the cap
+    a = sets["InfParallelPlate_crack1Rohan"][500.0][(0.0, 180.0)]
+    raw = pd.read_csv(real / "InfParallelPlate_crack1Rohan_500GHz_Ephi=0" / "waveguide.csv")
+    raw = raw[(raw.IWavePhi == 0.0) & (raw.IWaveTheta == 180.0)].iloc[0]
+    assert a.T0 == pytest.approx(raw.OutgoingPower / raw.IngoingPower, rel=1e-12)
+    assert a.T0 == pytest.approx(1.0545101717, rel=1e-9) and a.T0 > 1.0
+    assert hfss.transmittance(a, 1.0, 0.0) == 1.0
+    assert sets["InfParallelPlate_crack1Rohan"][500.0][(0.0, 0.0)].dark0 is True
+
+    rg = sets["RoundGap_r50um"][2000.0]
+    assert rg[(0.0, 180.0)].T0 == pytest.approx(0.8) and rg[(0.0, 180.0)].T1 == pytest.approx(0.6)
+    assert rg[(0.0, 90.0)].T0 == pytest.approx(0.1, rel=1e-9)
+    sc = sidecar.load(base, "RoundGap_r50um_2000GHz")
+    assert sc["schema_version"] == "2.0" and sc["provenance"]["material"] == "vacuum"
+    assert sc["transmittance"]["cell_90"] == pytest.approx(sidecar.cell_90([0.0, 45.0, 90.0, 135.0, 180.0]))
+    # the schema-1 round gap is unchanged by the new switch: no 2.x column, 1.0 sidecar
+    r = run(repo_root / "validation/Scripts/make_mock_round_gap.py", "--real", real, "--dst",
+            tmp_path / "rg1", cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert sidecar.load(str(tmp_path / "rg1" / "waveguides"), "RoundGap_r50um_2000GHz")["schema_version"] == "1.0"
+
+
+def test_mock_schema2_refuses_data_tree(repo_root, tmp_path):
+    real = repo_root / "data" / "waveguides"
+    r = run(repo_root / "validation/Scripts/make_mock_schema2.py", "--src", real, "--dst", repo_root / "data" / "v2x",
+            "--ids", "InfParallelPlate_crack2", cwd=tmp_path)
+    assert r.returncode == 2 and "refusing" in r.stdout, r.stdout + r.stderr
+    assert not (repo_root / "data" / "v2x").exists()

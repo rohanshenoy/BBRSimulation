@@ -10,11 +10,16 @@
 
 #include "BBRConfigManager.hh"
 #include "G4GeometryTolerance.hh"
+#include "G4coutDestination.hh"
 #include "G4Material.hh"
 #include "G4MaterialPropertiesTable.hh"
 #include "CLHEP/Random/MixMaxRng.h"
 
+#include <cfloat>
 #include <cmath>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace bbrtest;
 using wrapperworld::EnergyEV;
@@ -27,7 +32,7 @@ const double c45 = std::cos(45 * deg), s45 = std::sin(45 * deg);
 const G4ThreeVector kHitMinusX(-2 * mm, 0, 0);   // centre of the crack's -x face
 const double E500 = EnergyEV(500.);
 
-double Inset() { return 10. * G4GeometryTolerance::GetInstance()->GetSurfaceTolerance(); }
+double Inset() { return 20. * G4GeometryTolerance::GetInstance()->GetSurfaceTolerance(); }
 
 // Writes the dataset as <root>/waveguides/crack_<freq>GHz and points the library at root.
 void UseData(TempDir& d, const hfssfix::Dataset& ds, const std::string& freq = "500") {
@@ -61,6 +66,81 @@ G4ThreeVector FFDir(double P, double T, const G4ThreeVector& n, const G4ThreeVec
   P *= deg; T *= deg;
   return std::sin(T) * std::cos(P) * n + std::sin(T) * std::sin(P) * tf + std::cos(T) * pf;
 }
+
+// --- exit start (CDX-027) -----------------------------------------------------
+// The start on the ray through the sampled exit point pos_out (on the exit plane, whose outward
+// axis is nOut) at the normal inset: its normal distance from the plane is exactly Inset().
+G4ThreeVector ExpectedStart(const G4ThreeVector& pos_out, const G4ThreeVector& dir, const G4ThreeVector& nOut) {
+  return pos_out - (Inset() / dir.dot(nOut)) * dir;
+}
+
+// True if the straight segment from r.pos along r.dir first leaves the box of half-extents half
+// (centred at the origin, unrotated) through the plane x = exitX, with |y| < half.y and |z| < half.z
+// there; the crossing point goes to *crossing.
+bool LeavesThroughExitFace(const wrapperworld::Result& r, const G4ThreeVector& half, double exitX,
+                           G4ThreeVector* crossing = nullptr) {
+  const G4ThreeVector& p = r.pos;
+  const G4ThreeVector& v = r.dir;
+  if (std::abs(p.x()) >= half.x() || std::abs(p.y()) >= half.y() || std::abs(p.z()) >= half.z()) return false;
+  auto tFace = [](double pc, double vc, double h) { return vc > 0 ? (h - pc) / vc : vc < 0 ? (-h - pc) / vc : DBL_MAX; };
+  const double tx = tFace(p.x(), v.x(), half.x()), ty = tFace(p.y(), v.y(), half.y()), tz = tFace(p.z(), v.z(), half.z());
+  if (!(tx < ty && tx < tz)) return false;
+  const G4ThreeVector c = p + tx * v;
+  if (crossing) *crossing = c;
+  return std::abs(c.x() - exitX) < 1e-12 * mm && std::abs(c.y()) < half.y() && std::abs(c.z()) < half.z();
+}
+
+// The same for a cylinder of radius R about the x axis, half-length halfX.
+bool LeavesThroughDiscExitFace(const wrapperworld::Result& r, double R, double halfX, double exitX,
+                               G4ThreeVector* crossing = nullptr) {
+  const G4ThreeVector& p = r.pos;
+  const G4ThreeVector& v = r.dir;
+  if (std::abs(p.x()) >= halfX || std::hypot(p.y(), p.z()) >= R) return false;
+  const double tx = v.x() > 0 ? (halfX - p.x()) / v.x() : v.x() < 0 ? (-halfX - p.x()) / v.x() : DBL_MAX;
+  const double a = v.y() * v.y() + v.z() * v.z(), b = 2 * (p.y() * v.y() + p.z() * v.z()),
+               c = p.y() * p.y() + p.z() * p.z() - R * R;
+  const double tr = a > 0 ? (-b + std::sqrt(b * b - 4 * a * c)) / (2 * a) : DBL_MAX;
+  if (!(tx < tr)) return false;
+  const G4ThreeVector x = p + tx * v;
+  if (crossing) *crossing = x;
+  return std::abs(x.x() - exitX) < 1e-12 * mm && std::hypot(x.y(), x.z()) < R;
+}
+
+// Writes one dataset per frequency label as crack_<label>GHz (relabelled from 500 GHz) and points the
+// library at root. discR > 0: the sidecars declare a disc of that radius (m), outside points omitted.
+void UseGrid(TempDir& d, const std::vector<std::pair<std::string, hfssfix::Dataset>>& sets, double discR = 0.) {
+  for (const auto& [label, ds0] : sets) {
+    const std::string stem = "crack_" + label + "GHz";
+    const hfssfix::Dataset ds = hfssfix::Relabel(ds0, label);
+    const auto wg = hfssfix::WriteDataset(d.path(), stem, ds, discR <= 0.);
+    if (discR > 0.) {
+      auto p = hfssfix::SidecarFrom(stem, ds);
+      p.disc = true; p.radius = discR; p.outsidePoints = "omitted";
+      WriteFile(wg / (stem + ".dataset.json"), hfssfix::SidecarJson(p));
+    }
+  }
+  BBRConfigManager::SetDataDir(d.path().string());
+}
+
+// Far-field (Phi, Theta) [deg] of the outgoing directions n X + s Z (toward the +z wall), n X - s Z
+// (away from it) and n X + s Y (toward the +y wall), s = sqrt(1 - n^2).
+double Deg(double rad) { return rad * 180. / CLHEP::pi; }
+std::pair<double, double> TowardG(double n) { return {0., Deg(std::asin(n))}; }
+std::pair<double, double> AwayG(double n) { return {0., 180. - Deg(std::asin(n))}; }
+std::pair<double, double> TowardL(double n) { return {Deg(std::acos(n)), 90.}; }
+hfssfix::Dataset OnePoint(double y, double z, std::pair<double, double> pt) {
+  return hfssfix::OnePointOneDirection(y, z, pt.first, pt.second);
+}
+
+// The crack equal to the fixtures' declared section (OR-020), so a clamped wall row lies 1 nm from its wall.
+const G4ThreeVector kExact(2 * mm, 4.5 * mm, 0.025 * mm);
+const double kYw = (4.5e-3 - 1e-9) * CLHEP::m, kZw = (2.5e-5 - 1e-9) * CLHEP::m;   // clamped wall rows
+
+// Collects what G4cout receives while installed.
+struct Capture : public G4coutDestination {
+  std::string out;
+  G4int ReceiveG4cout(const G4String& s) override { out += s; return 0; }
+};
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -82,9 +162,198 @@ int main(int argc, char** argv) {
         Script(eng, {0.0, 0.5, 0.5});   // transmit, direction, position
         const auto r = w.Shoot(kHitMinusX - 1 * mm * c.k, c.k, InPlane(c.k), E500, eng);
         CHECK(r.status == S::kBBRDiffractionTransmit);
-        CHECK_VEC(r.pos, G4ThreeVector(2 * mm - Inset(), c.sy * 1 * mm, c.sx * 0.01 * mm), 1e-9);
+        CHECK_VEC(r.pos, ExpectedStart(G4ThreeVector(2 * mm, c.sy * 1 * mm, c.sx * 0.01 * mm),
+                                       FFDir(c.P, c.T, X, c.sy * Y, c.sx * Z), X), 1e-9);
         CHECK_VEC(r.dir, FFDir(c.P, c.T, X, c.sy * Y, c.sx * Z), 1e-9);
       }
+    }},
+    {"exit_start_wall_grazing", [] {
+      // A clamped +z wall row (z = 25 um - 1 nm) leaving at a grazing angle toward that wall: from the
+      // normal inset the segment would meet z = +25 um after ~1 nm, before the exit plane (CDX-027). The
+      // start on the ray through the sampled point leaves through the exit face exactly at that point.
+      TempDir d;
+      const double ns[] = {0.02, 1e-2, 1e-3};
+      const char* labels[] = {"100", "200", "400"};
+      const double freqs[] = {100., 200., 400.};
+      UseGrid(d, {{labels[0], OnePoint(0., 2.5e-5, TowardG(ns[0]))},
+                  {labels[1], OnePoint(0., 2.5e-5, TowardG(ns[1]))},
+                  {labels[2], OnePoint(0., 2.5e-5, TowardG(ns[2]))}});
+      World w(kExact); ScriptedEngine eng;
+      for (int i = 0; i < 3; ++i) {
+        Script(eng, {0.0, 0.5, 0.5});
+        const auto r = w.Shoot({-3 * mm, 0, 0}, X, Z, EnergyEV(freqs[i]), eng);
+        CHECK(r.status == S::kBBRDiffractionTransmit);
+        CHECK_NEAR(r.dir.x(), ns[i], 1e-12);
+        CHECK(r.dir.z() > 0.);
+        G4ThreeVector c;
+        CHECK(LeavesThroughExitFace(r, kExact, 2 * mm, &c));
+        CHECK_VEC(c, G4ThreeVector(2 * mm, 0, kZw), 1e-12 * mm);
+        CHECK_VEC(r.pos, c - (Inset() / r.dir.x()) * r.dir, 1e-12 * mm);
+      }
+      CHECK(w.Process().GetExitStartFallbackCount() == 0);
+    }},
+    {"exit_start_away_from_wall", [] {
+      // The same wall row leaving grazing AWAY from the wall: the back-off along the ray would cross the
+      // wall behind it, so the start is the normal inset, whose ray heads into the crack.
+      TempDir d; UseGrid(d, {{"500", OnePoint(0., 2.5e-5, AwayG(1e-3))}});
+      World w(kExact); ScriptedEngine eng;
+      Script(eng, {0.0, 0.5, 0.5});
+      const auto r = w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng);
+      CHECK(r.status == S::kBBRDiffractionTransmit);
+      CHECK(r.dir.z() < 0.);
+      CHECK_VEC(r.pos, G4ThreeVector(2 * mm - Inset(), 0, kZw), 1e-12 * mm);
+      CHECK(LeavesThroughExitFace(r, kExact, 2 * mm));
+      CHECK(w.Process().GetExitStartFallbackCount() == 0);
+      CHECK(w.Process().GetExitStartNormalCount() == 1);
+    }},
+    {"exit_start_long_wall", [] {
+      // A clamped +y wall row (y = 4.5 mm - 1 nm) leaving grazing toward that wall (T = 90, P = acos n).
+      TempDir d; UseGrid(d, {{"500", OnePoint(4.5e-3, 0., TowardL(1e-3))}});
+      World w(kExact); ScriptedEngine eng;
+      Script(eng, {0.0, 0.5, 0.5});
+      const auto r = w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng);
+      CHECK(r.status == S::kBBRDiffractionTransmit);
+      CHECK(r.dir.y() > 0.);
+      G4ThreeVector c;
+      CHECK(LeavesThroughExitFace(r, kExact, 2 * mm, &c));
+      CHECK_VEC(c, G4ThreeVector(2 * mm, kYw, 0), 1e-12 * mm);
+      CHECK(w.Process().GetExitStartFallbackCount() == 0);
+    }},
+    {"exit_start_folds", [] {
+      // fold_six_azimuths' incidences: the mirrors (sy, sx) carry the wall row and the wall-ward direction
+      // to the same wall, which the photon must still leave beside, through the exit face.
+      TempDir d; UseGrid(d, {{"500", OnePoint(0., 2.5e-5, TowardG(1e-3))}});
+      World w(kExact); ScriptedEngine eng;
+      struct Case { G4ThreeVector k; double sy, sx; };
+      const Case cases[] = {
+        {{c45, -s45, 0}, +1, +1}, {{c45, +s45, 0}, -1, +1}, {{c45, 0, +s45}, +1, +1},
+        {{c45, 0, -s45}, +1, -1}, {{c45, -0.5, 0.5}, +1, +1}, {{c45, 0.5, -0.5}, -1, -1},
+      };
+      for (const auto& c : cases) {
+        Script(eng, {0.0, 0.5, 0.5});
+        const auto r = w.Shoot(kHitMinusX - 1 * mm * c.k, c.k, InPlane(c.k), E500, eng);
+        CHECK(r.status == S::kBBRDiffractionTransmit);
+        CHECK_VEC(r.dir, FFDir(TowardG(1e-3).first, TowardG(1e-3).second, X, c.sy * Y, c.sx * Z), 1e-12);
+        CHECK(LeavesThroughExitFace(r, kExact, 2 * mm));
+        CHECK_VEC(r.pos, ExpectedStart(G4ThreeVector(2 * mm, 0, c.sx * kZw), r.dir, X), 1e-12 * mm);
+      }
+      CHECK(w.Process().GetExitStartFallbackCount() == 0);
+    }},
+    {"exit_start_minus_x_face", [] {
+      // Entry through the +x face: the exit face is x = -2 mm and the same rule holds, mirrored.
+      TempDir d; UseGrid(d, {{"500", OnePoint(0., 2.5e-5, TowardG(1e-3))}});
+      World w(kExact); ScriptedEngine eng;
+      Script(eng, {0.0, 0.5, 0.5});
+      const auto r = w.Shoot({3 * mm, 0, 0}, -X, Z, E500, eng);
+      CHECK(r.status == S::kBBRDiffractionTransmit);
+      CHECK_NEAR(r.dir.x(), -1e-3, 1e-12);
+      G4ThreeVector c;
+      CHECK(LeavesThroughExitFace(r, kExact, -2 * mm, &c));
+      CHECK_VEC(c, G4ThreeVector(-2 * mm, 0, kZw), 1e-12 * mm);
+      CHECK_VEC(r.pos, ExpectedStart(G4ThreeVector(-2 * mm, 0, kZw), r.dir, -X), 1e-12 * mm);
+      CHECK(w.Process().GetExitStartFallbackCount() == 0);
+    }},
+    {"exit_start_guard_limit", [] {
+      // n = 2e-6, just above the samplers' 1e-6 outward guard, toward the +z wall: no exception, and the
+      // photon either leaves through the exit face or is counted as one fallback.
+      TempDir d; UseGrid(d, {{"500", OnePoint(0., 2.5e-5, TowardG(2e-6))}});
+      World w(kExact); ScriptedEngine eng;
+      Script(eng, {0.0, 0.5, 0.5});
+      const auto r = w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng);
+      CHECK(r.status == S::kBBRDiffractionTransmit);
+      CHECK_NEAR(r.dir.x(), 2e-6, 1e-12);
+      const G4int fb = w.Process().GetExitStartFallbackCount();
+      CHECK(fb == 0 || fb == 1);
+      CHECK(LeavesThroughExitFace(r, kExact, 2 * mm) || fb == 1);
+    }},
+    {"exit_start_disc_rim", [] {
+      // The round gap (R = 50 um): the rim node (0, R), clamped to R - 1 nm, leaving at n = 1e-3 radially
+      // outward (B valid; from the normal inset the segment meets the rim) and tangentially (B valid).
+      const double R = 5e-5;
+      TempDir d;
+      UseGrid(d, {{"100", hfssfix::OnePointOneDirectionDisc(R, 0., R, TowardG(1e-3).first, TowardG(1e-3).second)},
+                  {"200", hfssfix::OnePointOneDirectionDisc(R, 0., R, TowardL(1e-3).first, TowardL(1e-3).second)}},
+             R);
+      World w({2 * mm, 1 * mm, 1 * mm}, {}, nullptr, wrapperworld::RoundGapSolid(R * CLHEP::m, 2 * mm));
+      ScriptedEngine eng;
+      const G4ThreeVector rim(2 * mm, 0, (R - 1e-9) * CLHEP::m);
+      for (double f : {100., 200.}) {
+        Script(eng, {0.0, 0.5, 0.5});
+        const auto r = w.Shoot({-3 * mm, 0, 0}, X, Z, EnergyEV(f), eng);
+        CHECK(r.status == S::kBBRDiffractionTransmit);
+        CHECK_NEAR(r.dir.x(), 1e-3, 1e-12);
+        CHECK(f == 100. ? r.dir.z() > 0.9 : r.dir.y() > 0.9);
+        G4ThreeVector c;
+        CHECK(LeavesThroughDiscExitFace(r, R * CLHEP::m, 2 * mm, 2 * mm, &c));
+        CHECK_VEC(c, rim, 1e-12 * mm);
+        CHECK_VEC(r.pos, ExpectedStart(rim, r.dir, X), 1e-12 * mm);
+      }
+      CHECK(w.Process().GetExitStartFallbackCount() == 0);
+    }},
+    {"exit_start_corner", [] {
+      // The corner node (+y wall, +z wall) leaving toward +z and away from +y at n = 1e-3: the ray start
+      // crosses the +y wall and the normal-inset ray meets the +z wall, so the photon keeps the normal inset
+      // and is counted; the count is printed on the diffraction summary line, every hundredth event.
+      const double n = 1e-3, a = std::sqrt(1. - n * n) / std::sqrt(2.);
+      const double T = Deg(std::acos(a)), P = Deg(std::atan2(-a, n));
+      TempDir d; UseGrid(d, {{"500", hfssfix::OnePointOneDirection(4.5e-3, 2.5e-5, P, T)}});
+      World w(kExact); ScriptedEngine eng;
+      Script(eng, {0.0, 0.5, 0.5});
+      const auto r = w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng);
+      CHECK(r.status == S::kBBRDiffractionTransmit);
+      CHECK_VEC(r.dir, G4ThreeVector(n, -a, a), 1e-12);
+      CHECK(w.Process().GetExitStartFallbackCount() == 1);
+      CHECK(w.Process().GetExitStartNormalCount() == 0);
+      CHECK_VEC(r.pos, G4ThreeVector(2 * mm - Inset(), kYw, kZw), 1e-12 * mm);
+      Capture cap;
+      G4iosSetDestination(&cap);
+      for (int i = 0; i < 99; ++i) {
+        Script(eng, {0.0, 0.5, 0.5});
+        w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng);
+      }
+      G4iosSetDestination(nullptr);
+      CHECK(w.Process().GetExitStartFallbackCount() == 100);
+      CHECK(w.Process().GetExitStartNormalCount() == 0);
+      CHECK(cap.out.find("[BBR] diffraction events=100 T_obs=1 exit_start_fallback=99 exit_start_normal=0\n") !=
+            std::string::npos);
+    }},
+    {"run_totals", [] {
+      // Process-wide totals over all threads: HFSS transmissions, exit-start fallbacks and starts at the
+      // normal inset with a valid ray, reset by the run. One grid holds the three cases, one frequency each
+      // (the crack library caches a dataset by ID for the life of the process).
+      using Totals = BBSimOpBoundaryProcess::Totals;
+      const double n = 1e-3, a = std::sqrt(1. - n * n) / std::sqrt(2.);
+      const double T = Deg(std::acos(a)), P = Deg(std::atan2(-a, n));
+      TempDir d;
+      UseGrid(d, {{"100", hfssfix::OnePointOneDirection(4.5e-3, 2.5e-5, P, T)},   // corner: fallback
+                  {"200", OnePoint(0., 2.5e-5, AwayG(1e-3))},                      // normal inset, ray valid
+                  {"400", OnePoint(0., 2.5e-5, TowardG(1e-3))}});                  // ray start
+      World w(kExact); ScriptedEngine eng;
+      BBSimOpBoundaryProcess::ResetRunTotals();
+      CHECK(BBSimOpBoundaryProcess::RunTotals() == (Totals{0, 0, 0}));
+      const double freqs[] = {100., 200., 400.};
+      const Totals expect[] = {{1, 1, 0}, {2, 1, 1}, {3, 1, 1}};
+      for (int i = 0; i < 3; ++i) {
+        Script(eng, {0.0, 0.5, 0.5});
+        CHECK(w.Shoot({-3 * mm, 0, 0}, X, Z, EnergyEV(freqs[i]), eng).status == S::kBBRDiffractionTransmit);
+        CHECK(BBSimOpBoundaryProcess::RunTotals() == expect[i]);
+      }
+      BBSimOpBoundaryProcess::ResetRunTotals();
+      CHECK(BBSimOpBoundaryProcess::RunTotals() == (Totals{0, 0, 0}));
+    }},
+    {"exit_start_summary_zero", [] {
+      // The fallback count is printed when it is 0 too.
+      TempDir d; UseData(d, hfssfix::WrapKeys());
+      World w; ScriptedEngine eng;
+      Capture cap;
+      G4iosSetDestination(&cap);
+      for (int i = 0; i < 100; ++i) {
+        Script(eng, {0.0, 0.5, 0.5});
+        w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng);
+      }
+      G4iosSetDestination(nullptr);
+      CHECK(cap.out.find("[BBR] diffraction events=100 T_obs=1 exit_start_fallback=0 exit_start_normal=0\n") !=
+            std::string::npos);
     }},
     {"polarization_filter", [] {
       TempDir d; UseData(d, hfssfix::WrapKeys());
@@ -145,17 +414,17 @@ int main(int argc, char** argv) {
         const G4ThreeVector k1 = G4ThreeVector(c45, 1e-13, -s45).unit();
         Script(eng, {0.0, 0.5, 0.5});
         CHECK_VEC(w.Shoot(kHitMinusX - 1 * mm * k1, k1, InPlane(k1), E500, eng).pos,
-                  G4ThreeVector(2 * mm - Inset(), 1 * mm, -0.01 * mm), 1e-9);
+                  ExpectedStart(G4ThreeVector(2 * mm, 1 * mm, -0.01 * mm), FFDir(30, 60, X, Y, -Z), X), 1e-9);
         // k_y = +1e-11 is not snapped -> phi_raw = -180 -> sy = -1, sx = -1.
         const G4ThreeVector k2 = G4ThreeVector(c45, 1e-11, -s45).unit();
         Script(eng, {0.0, 0.5, 0.5});
         CHECK_VEC(w.Shoot(kHitMinusX - 1 * mm * k2, k2, InPlane(k2), E500, eng).pos,
-                  G4ThreeVector(2 * mm - Inset(), -1 * mm, -0.01 * mm), 1e-9);
+                  ExpectedStart(G4ThreeVector(2 * mm, -1 * mm, -0.01 * mm), FFDir(30, 60, X, -Y, -Z), X), 1e-9);
         // Entry through the +x face: the normal flips to -x, theta_hat/phi_hat do not.
         Script(eng, {0.0, 0.5, 0.5});
         const auto r = w.Shoot({3 * mm, 0, 0}, -X, Z, E500, eng);
         CHECK(r.status == S::kBBRDiffractionTransmit);
-        CHECK_VEC(r.pos, G4ThreeVector(-2 * mm + Inset(), 1 * mm, 0.01 * mm), 1e-9);
+        CHECK_VEC(r.pos, ExpectedStart(G4ThreeVector(-2 * mm, 1 * mm, 0.01 * mm), -X, -X), 1e-9);
         CHECK_VEC(r.dir, -X, 1e-12);
       }
       {
@@ -165,7 +434,7 @@ int main(int argc, char** argv) {
         Script(eng, {0.999999, 0.5, 0.5});
         const auto r = w.Shoot({-3 * mm, 0, 0}, X, Y, E500, eng);   // world y is across the rotated gap
         CHECK(r.status == S::kBBRDiffractionTransmit);
-        CHECK_VEC(r.pos, G4ThreeVector(2 * mm - Inset(), -0.01 * mm, 1 * mm), 1e-9);
+        CHECK_VEC(r.pos, ExpectedStart(G4ThreeVector(2 * mm, -0.01 * mm, 1 * mm), X, X), 1e-9);
         Script(eng, {1e-9});
         CHECK(w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng).status == S::kBBRDiffractionReflect);
       }
@@ -179,7 +448,7 @@ int main(int argc, char** argv) {
         ExpectG4Exception("BBR005", [&] { w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng); }, "BBSimOpBoundaryProcess");
       }
       {
-        World thin({5e-9 * mm, 5 * mm, 0.026 * mm});   // half-length 5e-9 mm <= inset 1e-8 mm
+        World thin({1.5e-8 * mm, 5 * mm, 0.026 * mm});   // half-length 1.5e-8 mm <= inset 2e-8 mm (it passed at 10x)
         Script(eng, {0.0, 0.5, 0.5});
         ExpectG4Exception("BBR004", [&] { thin.Shoot({-1 * mm, 0, 0}, X, Z, E500, eng); }, "BBSimOpBoundaryProcess");
       }
@@ -239,7 +508,8 @@ int main(int argc, char** argv) {
         CHECK_NEAR(r.hit.y(), 5 * mm, 1e-9);                      // entered through the +y face
         CHECK(r.status == S::kBBRDiffractionTransmit);            // key (90,135), T = 1
         const double sgn = kx > 0 ? 1. : -1.;                     // normal flipped along k
-        CHECK_VEC(r.pos, G4ThreeVector(sgn * (2 * mm - Inset()), 1 * mm, 0.01 * mm), 1e-9);
+        CHECK_VEC(r.pos, ExpectedStart(G4ThreeVector(sgn * 2 * mm, 1 * mm, 0.01 * mm),
+                                       FFDir(60, 90, sgn * X, Y, Z), sgn * X), 1e-9);
       }
     }},
     {"reflectance_decision", [] {

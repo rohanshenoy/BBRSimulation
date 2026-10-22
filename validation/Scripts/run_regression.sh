@@ -27,17 +27,17 @@
 # 2. Builds the mock HFSS tree (each mock frequency with its dataset sidecar)
 #    and the mock round-gap tree when needed, checks that the real
 #    data/waveguides holds only 500 GHz (leak guard), generates the two
-#    real-tree checks (make_tree_check.py over data/ and over the mock tree),
-#    runs the thirteen cases in parallel with a pinned Geant4 thread count
+#    real-tree checks (make_tree_check.py over data/, the mock tree and the schema-2 mock tree),
+#    runs the fourteen cases in parallel with a pinned Geant4 thread count
 #    (BBR_THREADS, default 8), each in BUILD_DIR/regression/<case>/ (BBRSIMDATA
 #    comes from the installed env script): the seven validation/G4Macros
-#    fixtures, the two generated tree checks and four example macros
+#    fixtures, the three generated tree checks (legacy, mock, schema-2 mock) and four example macros
 #    (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
 #    their command lines are pinned by drift_guards.sh). Scans every log for
 #    GeomNav / G4Exception / BBR0xx / LP002 messages, checks that the
 #    frequency case's BBR008 clamp warning fires once per side, and that the
 #    BBR026 cutoff warning tolerated in the Planck cases fires at most once per
-#    dataset and direction.
+#    dataset, direction and mode.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
 #    one PASS/FAIL line per check (with BBR_PIN=1 also the row fixed-seed
 #    numbers: the three fixed-seed numbers against Scripts/numbers.baseline).
@@ -295,6 +295,26 @@ if [ ! -d "$MOCKRG/waveguides" ] || \
 fi
 ln -s "$MOCKRG" "$REG/mock_round_gap"
 
+# Mock schema-2 tree for the tree_v2 case (OR-028): the two legacy 500 GHz cracks relabelled to the 2.0
+# columns plus the round gap written natively in 2.0, so it holds every crack the test world places.
+# Rebuilt when missing or older than the real data, either generator, bbrsim/sidecar.py or bbrsim/hfss.py.
+MOCKV2="$BUILD/mock_v2"
+if [ ! -d "$MOCKV2/waveguides" ] || \
+   [ -n "$(find "$REPO/data/waveguides" "$VAL/Scripts/make_mock_schema2.py" "$VAL/Scripts/make_mock_round_gap.py" \
+            "$REPO/tools/python/bbrsim/sidecar.py" "$REPO/tools/python/bbrsim/hfss.py" \
+            -newer "$MOCKV2/waveguides" -print -quit 2>/dev/null)" ]; then
+  echo "generating mock schema-2 tree in $MOCKV2 ..."
+  rm -rf "$MOCKV2" "$MOCKV2.tmp"
+  if ! $PY "$VAL/Scripts/make_mock_schema2.py" --src "$REPO/data/waveguides" --dst "$MOCKV2.tmp" \
+         --ids InfParallelPlate_crack1Rohan InfParallelPlate_crack2 >"$BUILD/mock_v2.log" 2>&1 \
+     || ! $PY "$VAL/Scripts/make_mock_round_gap.py" --schema 2 --real "$REPO/data/waveguides" \
+         --dst "$MOCKV2.tmp" >>"$BUILD/mock_v2.log" 2>&1 \
+     || ! mv "$MOCKV2.tmp" "$MOCKV2"; then
+    rm -rf "$MOCKV2.tmp"; echo "MOCK SCHEMA-2 GENERATION FAILED:"; tail -5 "$BUILD/mock_v2.log"; exit 2
+  fi
+fi
+ln -s "$MOCKV2" "$REG/mock_v2"
+
 # The real tree must stay single-frequency: catches mock data written into data/.
 # Run with -c: conda run does not forward stdin, so a heredoc would never execute
 # and the guard could never fail. Run from / so the CWD cannot shadow the
@@ -315,6 +335,7 @@ tree_gen() {  # case data-root
 }
 tree_gen tree_legacy "$REPO/data"
 tree_gen tree_mock   "$MOCK"
+tree_gen tree_v2     "$MOCKV2"
 
 run_macro() {  # case executable macro-path
   mkdir -p "$REG/$1" && ( cd "$REG/$1" && "$2" "$3" >run.log 2>&1; echo $? >exit.code )
@@ -342,7 +363,7 @@ scan_log() {  # case-dir [tolerated-codes-ERE]
 }
 # refl, planck, config_mt and lp run the example macros themselves, pinned by the
 # drift guard "regression macros pinned"; the next seven are validation-only fixtures,
-# and the two tree checks run the macros make_tree_check.py generated above.
+# and the three tree checks run the macros make_tree_check.py generated above.
 run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
 run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
 run_macro config_mt "$TESTWORLD" "$REPO/examples/testworld/G4Macros/config_mt.mac"   &
@@ -356,12 +377,14 @@ run_macro lp        "$LIGHTPIPE" "$REPO/examples/lightpipe/G4Macros/lightpipe.ma
 run_macro lp_cad    "$LIGHTPIPE" "$VM/Validation_LightPipeCAD.mac"    &
 run_macro tree_legacy "$TESTWORLD" "$REG/tree_legacy/tree_check.mac"  &
 run_macro tree_mock   "$TESTWORLD" "$REG/tree_mock/tree_check.mac"    &
+run_macro tree_v2     "$TESTWORLD" "$REG/tree_v2/tree_check.mac"      &
 wait
-for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_cad tree_legacy tree_mock; do
+for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_cad tree_legacy tree_mock tree_v2; do
   code=$(cat "$REG/$d/exit.code")
   case "$d" in
     frequency) tol="BBR008|BBR026" ;;               # clamp warnings; Planck photons below the TE10 cutoff
     tree_legacy|tree_mock) tol="BBR008|BBR026" ;;   # check_tree_run.py checks their exact counts
+    tree_v2) tol="BBR008|BBR026|BBR028" ;;          # schema 2: BBR026 per regime mode, BBR028 once per dataset above its limit
     planck|config_mt|transmit) tol="BBR026" ;;      # Planck photons below the cracks' TE10 cutoff (14.99 GHz)
     *) tol="" ;;
   esac
@@ -386,7 +409,7 @@ for side in low high; do
   if [ "$n" -eq 1 ]; then line PASS "clamp warning $side" "[frequency] BBR008 once"; pass=$((pass+1))
   else line FAIL "clamp warning $side" "[frequency] BBR008 count $n, expected 1"; fail=$((fail+1)); fi
 done
-# BBR026 may fire in the Planck cases, at most once per dataset and direction.
+# BBR026 may fire in the Planck cases, at most once per dataset, direction and mode.
 # Counted per case: each case is its own process with its own one-shot flags.
 # Fails closed: every BBR026 banner (the line scan_log subtracts) must have a
 # parsed description line, so a changed message format cannot pass unseen.
@@ -394,12 +417,12 @@ c26=""
 for d in planck config_mt transmit frequency; do
   [ -f "$REG/$d/run.log" ] || { c26="$c26 [$d] no run.log;"; continue; }
   n_ban=$(grep -c "G4Exception : BBR026" "$REG/$d/run.log" || true)
-  n_desc=$(grep -cE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) " "$REG/$d/run.log" || true)
+  n_desc=$(grep -cE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) mode=[A-Za-z0-9_.,-]+ " "$REG/$d/run.log" || true)
   [ "$n_ban" -ne "$n_desc" ] && c26="$c26 [$d] $n_ban BBR026 banners, $n_desc parsed descriptions;"
-  c=$(grep -oE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) " "$REG/$d/run.log" | sort | uniq -c | awk '$1 > 1')
+  c=$(grep -oE "BBR026 dataset=[A-Za-z0-9_.-]+ direction=(below|above) mode=[A-Za-z0-9_.,-]+ " "$REG/$d/run.log" | sort | uniq -c | awk '$1 > 1')
   [ -n "$c" ] && c26="$c26 [$d] $c"
 done
-if [ -z "$c26" ]; then line PASS "cutoff warning once" "BBR026 at most once per dataset and direction per case"; pass=$((pass+1))
+if [ -z "$c26" ]; then line PASS "cutoff warning once" "BBR026 at most once per dataset, direction and mode per case"; pass=$((pass+1))
 else line FAIL "cutoff warning once" "$c26"; fail=$((fail+1)); fi
 
 echo "=== 3. validators ==="
@@ -515,7 +538,7 @@ if [ "$rg_n" -gt 0 ] && [ "$rg_bad" -eq 0 ]; then line PASS "round invariants" "
 else fail=$((fail+rg_bad)); [ "$rg_n" -eq 0 ] && { line FAIL "round invariants" "[round] no per-run files found"; fail=$((fail+1)); }; fi
 # The real-tree checks: each generated run against its own tree (manifest, per-run
 # outputs and log), then check_invariants on every per-run file.
-for t in tree_legacy tree_mock; do
+for t in tree_legacy tree_mock tree_v2; do
   out=$($PY "$VAL/check_tree_run.py" "$REG/$t" --log "$REG/$t/run.log" 2>&1); rc=$?
   res=$(echo "$out" | grep -E "^RESULT" | tail -1)
   if [ $rc -eq 0 ]; then line PASS check_tree_run.py "[$t] $res"; pass=$((pass+1))
@@ -530,9 +553,9 @@ for t in tree_legacy tree_mock; do
   else fail=$((fail+tr_bad)); [ "$tr_n" -eq 0 ] && { line FAIL "$t invariants" "[$t] no per-run files found"; fail=$((fail+1)); }; fi
 done
 check -        check_cu_serov.py
-# Every HFSS dataset, real and mock, carries a valid schema-1 sidecar: checks,
+# Every HFSS dataset, real and mock, carries a valid schema-1 or 2.x sidecar: checks,
 # full mode lists, CSV checksums, C1-C5 (validation/README.md, Dataset sidecars).
-check -        check_dataset_sidecars.py "$REPO/data/waveguides" "$MOCK/waveguides" "$MOCKRG/waveguides"
+check -        check_dataset_sidecars.py "$REPO/data/waveguides" "$MOCK/waveguides" "$MOCKRG/waveguides" "$MOCKV2/waveguides"
 
 # BBR_PIN=1 (for refactors that must not change behaviour): the three fixed-seed
 # numbers must equal the committed Scripts/numbers.baseline exactly.

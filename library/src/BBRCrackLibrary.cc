@@ -215,21 +215,33 @@ const BBRHFSSData& BBRCrackLibrary::Lookup(const G4String& datasetId, G4double n
     }
   }
 
-  // The lowest-mode cutoff (modes.cutoff_ghz): below it a closed guide carries
-  // no propagating mode, so a table from the other side is the wrong physics.
-  const G4double fc = E[k].sidecar->cutoffGHz;
-  if (fc > 0. && ((nu_GHz < fc) != (E[k].freq_GHz < fc))) {
-    const G4bool below = nu_GHz < fc;
-    G4bool& warned = below ? set.warnedBelowCutoff : set.warnedAboveCutoff;
-    if (!warned) {
-      warned = true;
+  // Regime cutoffs (schema 2: modes.regime_cutoffs_ghz, schema 1: the lowest mode): when the
+  // photon and the table serving it lie on opposite sides of one, the table is the wrong
+  // physics (a closed guide below its lowest cutoff carries no propagating mode; across a
+  // higher onset the mode content changes). One warning per (dataset, mode, direction).
+  {
+    const BBRDatasetSidecar& sc = *E[k].sidecar;
+    for (const auto& [mode, fc] : sc.regimeCutoffs) {
+      if (!(fc > 0.) || (nu_GHz < fc) == (E[k].freq_GHz < fc)) continue;
+      const G4bool below = nu_GHz < fc;
+      if (!set.warnedCutoff.insert({mode, below}).second) continue;
       G4ExceptionDescription ed;
       ed << "BBR026 dataset=" << datasetId << " direction=" << (below ? "below" : "above")
-         << " nu_GHz=" << nu_GHz << " grid_GHz=" << E[k].freq_GHz << " cutoff_GHz=" << fc
-         << " (" << E[k].sidecar->lowestMode << ") : the photon and the HFSS dataset serving it lie on "
-         << "opposite sides of the lowest-mode cutoff; the table is used unchanged. Reported once per "
-         << "dataset and direction.";
+         << " mode=" << mode << " nu_GHz=" << nu_GHz << " grid_GHz=" << E[k].freq_GHz
+         << " cutoff_GHz=" << fc << " : the photon and the HFSS dataset serving it lie on "
+         << "opposite sides of the " << mode << " cutoff; the table is used unchanged. Reported once per "
+         << "dataset, mode and direction.";
       G4Exception("BBRCrackLibrary::Lookup", "BBR026", JustWarning, ed);
+    }
+    // The cross term is declared valid only below the polarization-filter limit (schema 2).
+    if (sc.schemaMajor >= 2 && !set.warnedRho && E[k].freq_GHz >= sc.rhoValidBelowGHz) {
+      set.warnedRho = true;
+      G4ExceptionDescription ed;
+      ed << "BBR028 dataset=" << datasetId << " grid_GHz=" << E[k].freq_GHz
+         << " valid_below_GHz=" << sc.rhoValidBelowGHz << " : the polarization cross term is declared "
+         << "valid only below the polarization-filter limit; the table is used unchanged. Reported once "
+         << "per dataset.";
+      G4Exception("BBRCrackLibrary::Lookup", "BBR028", JustWarning, ed);
     }
   }
 

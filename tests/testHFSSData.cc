@@ -6,8 +6,17 @@
 #include "G4coutDestination.hh"
 #include "G4ios.hh"
 #include "Randomize.hh"
+#include "CLHEP/Random/MixMaxRng.h"
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <complex>
+#include <cstdio>
+#include <functional>
+#include <iomanip>
+#include <sstream>
 #include <string>
+#include <utility>
 
 using namespace bbrtest;
 using hfssfix::Dataset;
@@ -63,6 +72,160 @@ std::string ReplaceAll(std::string text, const std::string& from, const std::str
   if (text.find(from) == std::string::npos) throw std::runtime_error("ReplaceAll: '" + from + "' not in the text");
   for (auto p = text.find(from); p != std::string::npos; p = text.find(from, p + to.size())) text.replace(p, from.size(), to);
   return text;
+}
+
+// A complete exit lattice at one key (0,180) with one far-field row and the same field at every exit
+// point (Ey for Ephi=0, Ez for Ephi=1): the exit CDF is uniform, so row j of M is drawn with
+// U = (j + 0.5) / M (the OR-020 clamp tests).
+using YZ = std::pair<double, double>;
+Dataset UniformLattice(const std::vector<YZ>& pts) {
+  const auto num = [](double v) { std::ostringstream o; o << std::setprecision(17) << v; return o.str(); };
+  std::vector<std::string> ex;
+  for (const auto& [y, z] : pts) ex.push_back(num(y) + "," + num(z));
+  return Rows({"0,90"}, ex);
+}
+// Where SampleExitPosition puts row j of M, with the exit face's centre at 0 and the axes (Y, Z).
+G4ThreeVector DrawRow(const BBRHFSSData& h, ScriptedEngine& eng, std::size_t j, std::size_t M) {
+  eng.Push((double(j) + 0.5) / double(M));
+  return h.SampleExitPosition(1, 0, 0, 180, G4ThreeVector(), TH, PH);
+}
+std::size_t Count(const std::string& text, const std::string& what) {
+  std::size_t n = 0;
+  for (auto q = text.find(what); q != std::string::npos; q = text.find(what, q + what.size())) ++n;
+  return n;
+}
+std::string ClampLine(const std::string& stem, int n) {
+  return "[BBR] HFSS " + stem + ": " + std::to_string(n) + " exit point(s) clamped 1 nm inside the declared cross-section\n";
+}
+
+// --- schema 2 (hfssfix::NineKeyGrid2) ----------------------------------------------
+const std::string kS2 = "c_500GHz";
+const double kPi = 3.14159265358979323846;
+
+// The dataset written under <TempDir>/waveguides/c_500GHz with the 2.0 sidecar of p, loaded with it.
+BBRHFSSData LoadV2(TempDir& d, const Dataset& ds, const hfssfix::Schema2Params& p) {
+  const auto wg = hfssfix::WriteDataset2(d.path(), kS2, ds, p);
+  const auto sc = BBRDatasetSidecar::Parse(hfssfix::SidecarJson2(p), "test", "c", kS2, 500.);
+  return BBRHFSSData(wg.string(), kS2, 500., &sc);
+}
+
+// csv with f(fields, row index within the key) applied to every data row of key (phi, theta).
+std::string EditKey(const std::string& csv, double phi, double theta,
+                    const std::function<void(std::vector<std::string>&, int)>& f) {
+  std::istringstream in(csv);
+  std::string line, out;
+  bool header = true;
+  int n = 0;
+  while (std::getline(in, line)) {
+    if (!header && !line.empty()) {
+      std::vector<std::string> v;
+      std::stringstream ss(line);
+      std::string t;
+      while (std::getline(ss, t, ',')) v.push_back(t);
+      if (std::stod(v[2]) == phi && std::stod(v[3]) == theta) {
+        f(v, n++);
+        line.clear();
+        for (std::size_t i = 0; i < v.size(); ++i) line += (i ? "," : "") + v[i];
+      }
+    }
+    header = false;
+    out += line + "\n";
+  }
+  if (n == 0) throw std::runtime_error("EditKey: no row of the key");
+  return out;
+}
+std::string R17(double v) { return hfssfix::detail::Fmt(v); }
+
+// NineKeyGrid2's stored field value of lattice point i (i = 3 iy + iz, y {-1, 0, 1} mm outer,
+// z {-25, 0, 25} um inner) in polarization e, slot f = 0..5 (CSV positions 9..14).
+double F2(int e, int i, int f) { return (e == 0 ? i + 1 + f : i + 6 - f) * 1e-3; }
+// The 2.0 positions: Ex = (9, 10), Ey = (11, 12) as (re, im).
+std::complex<double> Ex2(int e, int i) { return {F2(e, i, 0), F2(e, i, 1)}; }
+std::complex<double> Ey2(int e, int i) { return {F2(e, i, 2), F2(e, i, 3)}; }
+// The trapezoid weight of point i on the 3 x 3 lattice: 1/2 per wall row by index, a corner 1/4.
+double W2(int i) { return (i / 3 == 1 ? 1. : 0.5) * (i % 3 == 1 ? 1. : 0.5); }
+
+using P9 = std::array<double, 9>;
+P9 Normalized(P9 p) {
+  double s = 0.;
+  for (double v : p) s += v;
+  for (double& v : p) v /= s;
+  return p;
+}
+// Predicted exit-point fractions for the mixture (a, b) of the stored fields: w_i |a E_t0 + b E_t1|^2.
+P9 ExitPrediction(double a, double b, bool weighted) {
+  P9 p{};
+  for (int i = 0; i < 9; ++i)
+    p[i] = (weighted ? W2(i) : 1.) * (std::norm(a * Ex2(0, i) + b * Ex2(1, i)) + std::norm(a * Ey2(0, i) + b * Ey2(1, i)));
+  return Normalized(p);
+}
+
+// n exit positions drawn at (phi, theta) for (Et, Ep) with a seeded MixMax engine, counted per
+// lattice point (the drawn position rounded onto the 1 mm x 25 um lattice, so a point clamped
+// 1 nm inside the wall counts as its node). maxAbsZ_mm gets the largest |z| drawn.
+std::array<long, 9> DrawExits(const BBRHFSSData& h, double Et, double Ep, double phi, double theta, long n,
+                              long seed, double* maxAbsZ_mm = nullptr) {
+  G4Random::setTheEngine(new CLHEP::MixMaxRng(seed));
+  std::array<long, 9> c{};
+  double zmax = 0.;
+  for (long k = 0; k < n; ++k) {
+    const auto r = h.SampleExitPosition(Et, Ep, phi, theta, G4ThreeVector(), TH, PH);
+    const long iy = std::lround(r.y() / CLHEP::mm) + 1, iz = std::lround(r.z() / (0.025 * CLHEP::mm)) + 1;
+    if (iy >= 0 && iy < 3 && iz >= 0 && iz < 3) ++c[3 * iy + iz];
+    zmax = std::max(zmax, std::abs(r.z() / CLHEP::mm));
+  }
+  if (maxAbsZ_mm) *maxAbsZ_mm = zmax;
+  return c;
+}
+// (observed fraction - p) / sigma of a binomial count.
+double Zscore(long count, long n, double p) { return (double(count) / n - p) / std::sqrt(p * (1. - p) / n); }
+// Checks every point's count within 4 sigma of p; prints the counts; returns the largest |z|.
+double CheckCounts(const char* what, const std::array<long, 9>& c, long n, const P9& p) {
+  long sum = 0;
+  double zmax = 0.;
+  for (int i = 0; i < 9; ++i) {
+    const double z = Zscore(c[i], n, p[i]);
+    std::printf("%s point %d: %ld of %ld, predicted %.6f, z = %+.3f\n", what, i, c[i], n, p[i], z);
+    CHECK(std::abs(z) <= 4.);
+    zmax = std::max(zmax, std::abs(z));
+    sum += c[i];
+  }
+  CHECK(sum == n);   // every draw landed on a lattice point
+  return zmax;
+}
+
+// NineKeyGrid's far-field row amplitudes (rEphi_re, rEphi_im, rEtheta_re, rEtheta_im) per polarization,
+// on Phi {-40, 10, 60} x Theta {40, 75, 110}; row r = 3 itheta + iphi.
+const double kFFPhi[3] = {-40., 10., 60.}, kFFTheta[3] = {40., 75., 110.};
+std::array<double, 4> FF(int e, int r) {
+  const double phi = kFFPhi[r % 3], theta = kFFTheta[r / 3];
+  if (phi == 10. && theta == 40.) return e ? std::array<double, 4>{0.3, 0.1, 0.8, -0.2} : std::array<double, 4>{0.9, 0.0, 0.1, 0.4};
+  if (phi == -40. && theta == 75.) return e ? std::array<double, 4>{-0.5, 0.2, 0.1, 0.6} : std::array<double, 4>{0.2, -0.3, 0.7, 0.1};
+  if (phi == 60. && theta == 110.) return e ? std::array<double, 4>{0.4, 0.4, -0.3, 0.2} : std::array<double, 4>{0.5, 0.1, -0.6, 0.3};
+  return e ? std::array<double, 4>{0.02, -0.03, 0.04, 0.01} : std::array<double, 4>{0.05, 0.02, 0.03, -0.01};
+}
+P9 DirectionPrediction(double a, double b) {
+  P9 p{};
+  for (int r = 0; r < 9; ++r) {
+    const auto f0 = FF(0, r), f1 = FF(1, r);
+    double s = 0.;
+    for (int k = 0; k < 4; ++k) s += (a * f0[k] + b * f1[k]) * (a * f0[k] + b * f1[k]);
+    p[r] = std::sin(kFFTheta[r / 3] * kPi / 180.) * s;
+  }
+  return Normalized(p);
+}
+std::array<long, 9> DrawDirections(const BBRHFSSData& h, double Et, double Ep, double phi, double theta, long n, long seed) {
+  G4Random::setTheEngine(new CLHEP::MixMaxRng(seed));
+  std::array<long, 9> c{};
+  G4ThreeVector pol;
+  for (long k = 0; k < n; ++k) {
+    const auto dir = h.SampleOutgoingDirection(Et, Ep, phi, theta, PH, TH, N, pol);
+    const double T = std::acos(std::max(-1., std::min(1., dir.z()))) * 180. / kPi;
+    const double P = std::atan2(dir.y(), dir.x()) * 180. / kPi;
+    for (int r = 0; r < 9; ++r)
+      if (std::abs(T - kFFTheta[r / 3]) < 1e-6 && std::abs(P - kFFPhi[r % 3]) < 1e-6) ++c[r];
+  }
+  return c;
 }
 
 }  // namespace
@@ -559,6 +722,226 @@ int main(int argc, char** argv) {
       TempDir d3; ExpectG4Exception("BBR025", [&] { LoadChecked(d3, one, &p); },
                                     "BBRHFSSData", "1 exit point(s) lie outside");
     }},
+    {"exit_clamp_rectangle", [] {
+      // OR-020 (C2, C3): an exit point on a wall of the declared section, or within C5's tolerance
+      // outside it, is moved to 1 nm inside, per axis; every other point is exactly unchanged.
+      const double yw = 4.5e-3, zw = 2.5e-5, d = 1e-9;
+      CHECK(BBRCrossSection::kClampInset_m == d);           // the 1 nm of the log line (OR-020)
+      std::vector<YZ> pts;                                   // Y outer, Z inner: row = 3 iy + iz
+      for (const double y : {-4.5e-3, -2.25e-3, 0., 2.25e-3, 4.5e-3})
+        for (const double z : {-2.5e-5, 0., 2.5e-5}) pts.push_back({y, z});
+      const std::size_t M = pts.size();
+      CHECK(M == 15);
+      const Dataset ds = UniformLattice(pts);
+      const auto clamp1 = [&](double v, double half) { return std::abs(v) > half - d ? std::copysign(half - d, v) : v; };
+      ScriptedEngine eng;
+      G4Random::setTheEngine(&eng);
+
+      auto p = hfssfix::SidecarFrom("c_500GHz", ds);        // widens the section to the lattice: set it after
+      p.yHalf = yw; p.zHalf = zw;
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir dir; auto h = LoadChecked(dir, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(Count(cap.out, "clamped") == 1);
+      CHECK(cap.out.find(ClampLine("c_500GHz", 12)) != std::string::npos);
+
+      std::size_t moved = 0;
+      for (std::size_t j = 0; j < M; ++j) {
+        const auto r = DrawRow(h, eng, j, M);
+        const double y = pts[j].first, z = pts[j].second;
+        if (std::abs(y) == yw || std::abs(z) == zw) {
+          ++moved;
+          CHECK_NEAR(r.y(), clamp1(y, yw) * CLHEP::m, 1e-11);
+          CHECK_NEAR(r.z(), clamp1(z, zw) * CLHEP::m, 1e-11);
+        } else {
+          CHECK(r.y() == y * CLHEP::m);
+          CHECK(r.z() == z * CLHEP::m);
+        }
+      }
+      CHECK(moved == 12);
+      // The corner moves on both axes, a long-wall point on one, the three points between the walls not at all.
+      const auto corner = DrawRow(h, eng, 14, M);           // (+4.5 mm, +25 um)
+      CHECK_NEAR(corner.y(), (yw - d) * CLHEP::m, 1e-11);
+      CHECK_NEAR(corner.z(), (zw - d) * CLHEP::m, 1e-11);
+      const auto end = DrawRow(h, eng, 13, M);              // (+4.5 mm, 0)
+      CHECK_NEAR(end.y(), (yw - d) * CLHEP::m, 1e-11);
+      CHECK(end.z() == 0.);
+      for (const std::size_t j : {std::size_t(4), std::size_t(7), std::size_t(10)}) {   // (-2.25 mm, 0), (0, 0), (+2.25 mm, 0)
+        const auto r = DrawRow(h, eng, j, M);
+        CHECK(r.y() == pts[j].first * CLHEP::m);
+        CHECK(r.z() == 0.);
+      }
+
+      // Past the wall, inside C5's relative 1e-6: the end columns at 4.5 mm lie 5e-7 beyond a section of
+      // y_half = 4.5 mm / (1 + 5e-7) and still land 1 nm inside it.
+      const double yw2 = 4.5e-3 / (1. + 5e-7);
+      p.yHalf = yw2;
+      Capture cap2;
+      G4iosSetDestination(&cap2);
+      TempDir dir2; auto h2 = LoadChecked(dir2, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(cap2.out.find(ClampLine("c_500GHz", 12)) != std::string::npos);
+      for (std::size_t j = 0; j < M; ++j) {
+        const auto r = DrawRow(h2, eng, j, M);
+        CHECK_NEAR(r.y(), clamp1(pts[j].first, yw2) * CLHEP::m, 1e-11);
+        CHECK_NEAR(r.z(), clamp1(pts[j].second, zw) * CLHEP::m, 1e-11);
+      }
+      const auto end2 = DrawRow(h2, eng, 13, M);            // (+4.5 mm, 0)
+      CHECK_NEAR(end2.y(), (yw2 - d) * CLHEP::m, 1e-11);
+      CHECK(end2.z() == 0.);
+
+      // The band (half - 1 nm, half): a point 0.5 nm inside a wall moves out to half - 1 nm, a point exactly
+      // 1 nm inside stays, and so do the columns between. Complete lattice, 5 Y columns by 3 Z columns, from
+      // 1 nm inside the low wall to 0.5 nm inside the high one, on both axes; the sidecar declares yw and zw.
+      const double yLo = -(yw - d), yHi = yw - 0.5e-9, zLo = -(zw - d), zHi = zw - 0.5e-9;
+      const auto node = [](double lo, double hi, int i, int n) { return i == n - 1 ? hi : lo + i * (hi - lo) / (n - 1); };
+      std::vector<YZ> band;
+      for (int iy = 0; iy < 5; ++iy)
+        for (int iz = 0; iz < 3; ++iz) band.push_back({node(yLo, yHi, iy, 5), node(zLo, zHi, iz, 3)});
+      const std::size_t Mb = band.size();
+      const Dataset dsb = UniformLattice(band);
+      auto pb = hfssfix::SidecarFrom("c_500GHz", dsb);
+      pb.yHalf = yw; pb.zHalf = zw;
+      Capture cap3;
+      G4iosSetDestination(&cap3);
+      TempDir dir3; auto h3 = LoadChecked(dir3, dsb, &pb);
+      G4iosSetDestination(nullptr);
+      CHECK(cap3.out.find(ClampLine("c_500GHz", 7)) != std::string::npos);   // Y = high column (3) + Z = high column (5) - the corner
+      for (std::size_t j = 0; j < Mb; ++j) {
+        const auto r = DrawRow(h3, eng, j, Mb);
+        const int iy = int(j) / 3, iz = int(j) % 3;
+        if (iy == 4) CHECK_NEAR(r.y(), (yw - d) * CLHEP::m, 1e-11);   // 0.5 nm inside: out to 1 nm inside
+        else         CHECK(r.y() == band[j].first * CLHEP::m);        // iy = 0 is exactly 1 nm inside: unchanged
+        if (iz == 2) CHECK_NEAR(r.z(), (zw - d) * CLHEP::m, 1e-11);
+        else         CHECK(r.z() == band[j].second * CLHEP::m);
+      }
+      CHECK(eng.Remaining() == 0);
+    }},
+    {"exit_clamp_disc", [] {
+      // The four rim points of a disc land 1 nm inside it, on their own axis; the centre stays.
+      const double R = 5e-5, d = 1e-9;
+      const std::vector<YZ> pts = {{-5e-5, 0.}, {0., -5e-5}, {0., 0.}, {0., 5e-5}, {5e-5, 0.}};   // the lattice {-R, 0, R}^2 inside the disc
+      const std::size_t M = pts.size();
+      const Dataset ds = UniformLattice(pts);
+      ScriptedEngine eng;
+      G4Random::setTheEngine(&eng);
+
+      auto p = hfssfix::SidecarFrom("c_500GHz", ds);        // lattice {-R, 0, R} on both axes, 5 retained points
+      p.disc = true; p.radius = R; p.outsidePoints = "omitted";
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir dir; auto h = LoadChecked(dir, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(Count(cap.out, "clamped") == 1);
+      CHECK(cap.out.find(ClampLine("c_500GHz", 4)) != std::string::npos);
+      for (std::size_t j = 0; j < M; ++j) {
+        const auto r = DrawRow(h, eng, j, M);
+        if (j == 2) {
+          CHECK(r.y() == 0.);
+          CHECK(r.z() == 0.);
+        } else {
+          CHECK_NEAR(r.y(), std::copysign(pts[j].first != 0. ? R - d : 0., pts[j].first) * CLHEP::m, 1e-11);
+          CHECK_NEAR(r.z(), std::copysign(pts[j].second != 0. ? R - d : 0., pts[j].second) * CLHEP::m, 1e-11);
+          CHECK_NEAR(std::hypot(r.y(), r.z()), (R - d) * CLHEP::m, 1e-11);
+        }
+      }
+
+      // A radius that the lattice's rim exceeds by 4e-7 (inside C5's relative 1e-6): the rim is clamped to R2 - 1 nm.
+      const double R2 = R / (1. + 4e-7);
+      p.radius = R2;
+      Capture cap2;
+      G4iosSetDestination(&cap2);
+      TempDir dir2; auto h2 = LoadChecked(dir2, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(cap2.out.find(ClampLine("c_500GHz", 4)) != std::string::npos);
+      const auto rim = DrawRow(h2, eng, 4, M);              // (+R, 0)
+      CHECK_NEAR(rim.y(), (R2 - d) * CLHEP::m, 1e-11);
+      CHECK_NEAR(rim.z(), 0., 1e-11);
+      const auto mid = DrawRow(h2, eng, 2, M);              // (0, 0)
+      CHECK(mid.y() == 0.);
+      CHECK(mid.z() == 0.);
+      CHECK(eng.Remaining() == 0);
+    }},
+    {"exit_clamp_disc_off_axis", [] {
+      // The clamp of a disc runs along the radius: a rim point off the axes, (30, 40) um, moves to
+      // r = R - 1 nm on its own ray, where a per-axis clamp would leave it (each coordinate is far from R - 1 nm).
+      // Lattice: 10 um steps from -50 to 50 um in Y and Z, the 81 nodes inside R = 50 um, 12 of them on the rim.
+      const double R = 5e-5, d = 1e-9, step = 1e-5;
+      std::vector<YZ> pts;
+      std::vector<std::pair<int, int>> ij;
+      std::size_t onRim = 0;
+      for (int iy = -5; iy <= 5; ++iy)
+        for (int iz = -5; iz <= 5; ++iz)
+          if (iy * iy + iz * iz <= 25) {
+            pts.push_back({iy * step, iz * step});
+            ij.push_back({iy, iz});
+            if (iy * iy + iz * iz == 25) ++onRim;
+          }
+      const std::size_t M = pts.size();
+      CHECK(M == 81);
+      CHECK(onRim == 12);
+      const auto row = [&](int iy, int iz) {
+        for (std::size_t j = 0; j < M; ++j) if (ij[j] == std::make_pair(iy, iz)) return j;
+        throw std::runtime_error("no such lattice node");
+      };
+      const Dataset ds = UniformLattice(pts);
+      ScriptedEngine eng;
+      G4Random::setTheEngine(&eng);
+
+      auto p = hfssfix::SidecarFrom("c_500GHz", ds);        // 11 x 11 lattice, 81 retained points
+      p.disc = true; p.radius = R; p.outsidePoints = "omitted";
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir dir; auto h = LoadChecked(dir, ds, &p);
+      G4iosSetDestination(nullptr);
+      CHECK(Count(cap.out, "clamped") == 1);
+      CHECK(cap.out.find(ClampLine("c_500GHz", 12)) != std::string::npos);
+
+      const double tol = 1e-15 * CLHEP::m;
+      std::vector<G4ThreeVector> got;
+      for (std::size_t j = 0; j < M; ++j) got.push_back(DrawRow(h, eng, j, M));
+      for (std::size_t j = 0; j < M; ++j) {
+        const double y = pts[j].first, z = pts[j].second;
+        if (ij[j].first * ij[j].first + ij[j].second * ij[j].second == 25) {   // on the rim: along its radius to R - 1 nm
+          CHECK_NEAR(got[j].y(), y * (R - d) / R * CLHEP::m, tol);
+          CHECK_NEAR(got[j].z(), z * (R - d) / R * CLHEP::m, tol);
+          CHECK_NEAR(std::hypot(got[j].y(), got[j].z()), (R - d) * CLHEP::m, tol);
+        } else {                                                                // inside: exactly unchanged
+          CHECK(got[j].y() == y * CLHEP::m);
+          CHECK(got[j].z() == z * CLHEP::m);
+        }
+      }
+      const auto& off = got[row(3, 4)];                      // (30, 40) um
+      CHECK_NEAR(off.y(), 3e-5 * (R - d) / R * CLHEP::m, tol);
+      CHECK_NEAR(off.z(), 4e-5 * (R - d) / R * CLHEP::m, tol);
+      CHECK_NEAR(std::hypot(off.y(), off.z()), (R - d) * CLHEP::m, tol);
+      CHECK(off.y() < 3e-5 * CLHEP::m);                      // it moved, and not onto an axis value
+      const auto& mid = got[row(1, 2)];                      // (10, 20) um
+      CHECK(mid.y() == pts[row(1, 2)].first * CLHEP::m);
+      CHECK(mid.z() == pts[row(1, 2)].second * CLHEP::m);
+      CHECK(eng.Remaining() == 0);
+    }},
+    {"exit_clamp_needs_sidecar", [] {
+      // The clamp needs the declared section; without a sidecar nothing is moved and nothing is logged.
+      std::vector<YZ> pts;
+      for (const double y : {-4.5e-3, -2.25e-3, 0., 2.25e-3, 4.5e-3})
+        for (const double z : {-2.5e-5, 0., 2.5e-5}) pts.push_back({y, z});
+      const std::size_t M = pts.size();
+      ScriptedEngine eng;
+      G4Random::setTheEngine(&eng);
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir d; auto h = Load(d, UniformLattice(pts));      // direct construction, no sidecar
+      G4iosSetDestination(nullptr);
+      CHECK(cap.out.find("clamped") == std::string::npos);
+      const auto r = DrawRow(h, eng, 13, M);                 // (+4.5 mm, 0)
+      CHECK(r.y() == 4.5e-3 * CLHEP::m);
+      CHECK(r.z() == 0.);
+      const auto c = DrawRow(h, eng, 14, M);                 // (+4.5 mm, +25 um)
+      CHECK(c.y() == 4.5e-3 * CLHEP::m);
+      CHECK(c.z() == 2.5e-5 * CLHEP::m);
+    }},
     {"sidecar_real_data", [] {
       const char* root = std::getenv("BBRSIM_TEST_DATA");
       if (!root) { CHECK(false && "BBRSIM_TEST_DATA not set"); return; }
@@ -568,6 +951,203 @@ int main(int argc, char** argv) {
         BBRHFSSData h(wg, id + "_500GHz", 500., &sc);
         CHECK_NEAR(h.GetFrequencyGHz(), 500., 0);
       }
+    }},
+
+    // --- schema 2 (OR-034, OR-038, HF-040, HF-041, HF-042) -------------------------------
+    {"s2_positions", [] {
+      // The 2.0 positions (Ex = 9,10; Ey = 11,12) times the trapezoid weight; the 1.0 map would
+      // read Ex = (9, 12), Ey = (10, 13). (0, 180) with E_theta = 1 (its Ephi=1 basis is dark).
+      TempDir d; const auto h = LoadV2(d, hfssfix::NineKeyGrid2(), hfssfix::NineKeyParams2(kS2));
+      const long n = 200000;
+      const P9 p2 = ExitPrediction(1., 0., true);
+      P9 p1{};
+      for (int i = 0; i < 9; ++i)
+        p1[i] = W2(i) * (std::pow(F2(0, i, 0), 2) + std::pow(F2(0, i, 3), 2) + std::pow(F2(0, i, 1), 2) + std::pow(F2(0, i, 4), 2));
+      p1 = Normalized(p1);
+      const auto c = DrawExits(h, 1., 0., 0., 180., n, 20261019);
+      CheckCounts("s2_positions", c, n, p2);
+      const double s0 = std::sqrt(p2[0] * (1. - p2[0]) / n);
+      std::printf("s2_positions point 0: 2.0 map %.6f, 1.0 map %.6f, separation %.1f sigma\n", p2[0], p1[0],
+                  std::abs(p1[0] - p2[0]) / s0);
+      CHECK(std::abs(p1[0] - p2[0]) > 10. * s0);                 // the fixture tells the two maps apart
+      CHECK(std::abs(double(c[0]) / n - p1[0]) > 10. * s0);      // and the draws reject the 1.0 map
+    }},
+    {"s2_transmittance", [] {
+      // T = OutgoingPower / (IngoingPower * InterceptFactor), kept above 1 and capped per photon.
+      TempDir d; const auto h = LoadV2(d, hfssfix::NineKeyGrid2(), hfssfix::NineKeyParams2(kS2));
+      CHECK_NEAR(h.GetTransmittance(1, 0, 0, 135), std::min(1., 0.6 / std::cos(kPi / 4)), 1e-12);
+      CHECK_NEAR(h.GetTransmittance(0, 1, 0, 135), 0.3 / std::cos(kPi / 4), 1e-12);   // no rescale at (0, 135)
+      CHECK_NEAR(h.GetTransmittance(1, 0, 0, 180), 0.6, 1e-12);
+      // (0, 90): c_k = cell_90 (0.0838...), so both linear T exceed 1; the cap holds every mixture at or below 1.
+      const double c90 = hfssfix::detail::Cell90F({90., 135., 180.});
+      CHECK(0.6 / c90 > 1. && 0.3 / c90 > 1.);
+      CHECK(h.GetTransmittance(1, 0, 0, 90) == 1.);
+      CHECK(h.GetTransmittance(0, 1, 0, 90) == 1.);   // a load-time rescale would leave T1 below 1
+      for (int psi = 0; psi < 360; ++psi) {
+        const double T = h.GetTransmittance(std::cos(psi * kPi / 180.), std::sin(psi * kPi / 180.), 0, 90);
+        CHECK(T >= 0. && T <= 1.);
+      }
+    }},
+    {"s2_cap_no_rescale", [] {
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir d; const auto h = LoadV2(d, hfssfix::NineKeyGrid2(), hfssfix::NineKeyParams2(kS2));
+      G4iosSetDestination(nullptr);
+      CHECK(cap.out.find("normalized to 1") == std::string::npos);
+      CHECK(Count(cap.out, "clamped") == 1);
+    }},
+    {"s2_intercept_column", [] {
+      const auto p = hfssfix::NineKeyParams2(kS2);
+      const auto scale = [](double f) {
+        return [f](std::vector<std::string>& v, int) { v[15] = R17(std::stod(v[15]) * f); };
+      };
+      // One row (the fifth) of (45, 135) Ephi=0 off by 2e-6: not constant within the key.
+      Dataset one = hfssfix::NineKeyGrid2();
+      one.wg0 = EditKey(one.wg0, 45, 135, [](std::vector<std::string>& v, int r) {
+        if (r == 4) v[15] = R17(std::stod(v[15]) * (1. + 2e-6));
+      });
+      TempDir d1; ExpectG4Exception("BBR012", [&] { LoadV2(d1, one, p); }, "BBRHFSSData", "key (45, 135) polarization 0");
+      TempDir d1b; ExpectG4Exception("BBR012", [&] { LoadV2(d1b, one, p); }, "BBRHFSSData", "not constant within the key");
+      // Every row of the key off by 2e-6: constant, but not the sidecar's c_key.
+      Dataset all = hfssfix::NineKeyGrid2();
+      all.wg1 = EditKey(all.wg1, 45, 135, scale(1. + 2e-6));
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadV2(d2, all, p); }, "BBRHFSSData", "key (45, 135) polarization 1");
+      TempDir d2b; ExpectG4Exception("BBR012", [&] { LoadV2(d2b, all, p); }, "BBRHFSSData", "transmittance.c_key");
+      // Within 1e-6 (5e-7, on one row and on every row of both polarizations): loads.
+      Dataset ok = hfssfix::NineKeyGrid2();
+      ok.wg0 = EditKey(ok.wg0, 45, 135, [](std::vector<std::string>& v, int r) {
+        if (r == 4) v[15] = R17(std::stod(v[15]) * (1. + 5e-7));
+      });
+      ok.wg0 = EditKey(ok.wg0, 90, 90, scale(1. + 5e-7));
+      ok.wg1 = EditKey(ok.wg1, 90, 90, scale(1. + 5e-7));
+      TempDir d3; const auto h = LoadV2(d3, ok, p);
+      CHECK_NEAR(h.GetTransmittance(1, 0, 0, 135), 0.6 / std::cos(kPi / 4), 1e-12);
+    }},
+    {"s2_two_t_sources", [] {
+      // t_flux 0.6 in the sidecar, OutgoingPower 0.61e-9 over IngoingPower 1e-9 in the CSV.
+      Dataset ds = hfssfix::NineKeyGrid2();
+      ds.wg0 = EditKey(ds.wg0, 90, 180, [](std::vector<std::string>& v, int) { v[4] = "6.1e-10"; });
+      TempDir d; ExpectG4Exception("BBR012", [&] { LoadV2(d, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                   "key (90, 180) polarization 0");
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadV2(d2, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                    "t_flux / c_k");
+    }},
+    {"s2_dark_outgoing", [] {
+      // OR-038: a dark basis needs OutgoingPower exactly 0 on every row; 1e-25 on the third row is refused.
+      Dataset ds = hfssfix::NineKeyGrid2();
+      ds.wg1 = EditKey(ds.wg1, 0, 180, [](std::vector<std::string>& v, int r) { if (r == 2) v[4] = "1e-25"; });
+      TempDir d; ExpectG4Exception("BBR012", [&] { LoadV2(d, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                   "key (0, 180) polarization 1");
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadV2(d2, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                    "OutgoingPower = 1e-25");
+    }},
+    {"s2_dark_masking", [] {
+      // (0, 180) Ephi=1 is dark with nonzero stored fields: its mixing coefficient is 0 in both
+      // samplers, so a tiny bright share samples the Ephi=0 fields alone (and raises no BBR027:
+      // any G4Exception fails this case).
+      TempDir d; const auto h = LoadV2(d, hfssfix::NineKeyGrid2(), hfssfix::NineKeyParams2(kS2));
+      CHECK(h.GetTransmittance(0, 1, 0, 180) == 0.);
+      const double a = 0.01, b = 0.99995;
+      CHECK_NEAR(h.GetTransmittance(a, b, 0, 180), a * a * 0.6, 1e-15);
+      const long n = 200000;
+      const P9 pe = ExitPrediction(1., 0., true), pu = ExitPrediction(a, b, true);
+      double sep = 0.;
+      for (int i = 0; i < 9; ++i) sep = std::max(sep, std::abs(pu[i] - pe[i]) / std::sqrt(pe[i] * (1. - pe[i]) / n));
+      std::printf("s2_dark_masking exit: unmasked prediction %.1f sigma away\n", sep);
+      CHECK(sep > 10.);
+      CheckCounts("s2_dark_masking exit", DrawExits(h, a, b, 0., 180., n, 4242), n, pe);
+      const P9 de = DirectionPrediction(1., 0.), du = DirectionPrediction(a, b);
+      sep = 0.;
+      for (int r = 0; r < 9; ++r) sep = std::max(sep, std::abs(du[r] - de[r]) / std::sqrt(de[r] * (1. - de[r]) / n));
+      std::printf("s2_dark_masking direction: unmasked prediction %.1f sigma away\n", sep);
+      CHECK(sep > 10.);
+      CheckCounts("s2_dark_masking direction", DrawDirections(h, a, b, 0., 180., n, 4243), n, de);
+    }},
+    {"s2_rho_weighted", [] {
+      // (45, 135) with t_flux 0.3 / 0.15 in the sidecar and the CSV powers, fields unchanged: the
+      // mixed T stays below the cap, so it shows rho = sum w E_t0.E_t1* / sqrt(sum w|E_t0|^2 sum w|E_t1|^2).
+      Dataset ds = hfssfix::NineKeyGrid2();
+      ds.wg0 = EditKey(ds.wg0, 45, 135, [](std::vector<std::string>& v, int) { v[4] = "3e-10"; });
+      ds.wg1 = EditKey(ds.wg1, 45, 135, [](std::vector<std::string>& v, int) { v[4] = "1.5e-10"; });
+      auto p = hfssfix::NineKeyParams2(kS2);
+      p.tflux[4] = {0.3, 0.15, 0., 0.};   // phi-major: (45, 135) is the fifth key
+      TempDir d; const auto h = LoadV2(d, ds, p);
+      const double c = std::cos(kPi / 4), T0 = 0.3 / c, T1 = 0.15 / c;
+      const auto rho = [](bool weighted) {
+        std::complex<double> x = 0.;
+        double p0 = 0., p1 = 0.;
+        for (int i = 0; i < 9; ++i) {
+          const double w = weighted ? W2(i) : 1.;
+          x += w * (Ex2(0, i) * std::conj(Ex2(1, i)) + Ey2(0, i) * std::conj(Ey2(1, i)));
+          p0 += w * (std::norm(Ex2(0, i)) + std::norm(Ey2(0, i)));
+          p1 += w * (std::norm(Ex2(1, i)) + std::norm(Ey2(1, i)));
+        }
+        return x.real() / std::sqrt(p0 * p1);
+      };
+      const double want = 0.5 * T0 + 0.5 * T1 + std::sqrt(T0 * T1) * rho(true);
+      const double unweighted = 0.5 * T0 + 0.5 * T1 + std::sqrt(T0 * T1) * rho(false);
+      std::printf("s2_rho_weighted: rho %.12f (unweighted %.12f), T %.10f (unweighted %.10f)\n", rho(true), rho(false),
+                  want, unweighted);
+      CHECK(want > 0. && want < 1.);
+      CHECK(std::abs(want - unweighted) > 1e-12);
+      CHECK_NEAR(h.GetTransmittance(1. / std::sqrt(2.), 1. / std::sqrt(2.), 45, 135), want, 1e-12);
+    }},
+    {"s2_weights_before_clamp", [] {
+      // The z = +-25 um rows lie on the declared walls: the load clamps them 1 nm inside, after the
+      // trapezoid weights were taken from the unclamped lattice. (+1 mm, 0) keeps 1/2, the corner
+      // (+1 mm, +25 um) 1/4. (90, 135), E_phi = 1.
+      Capture cap;
+      G4iosSetDestination(&cap);
+      TempDir d; const auto h = LoadV2(d, hfssfix::NineKeyGrid2(), hfssfix::NineKeyParams2(kS2));
+      G4iosSetDestination(nullptr);
+      CHECK(cap.out.find(ClampLine(kS2, 54)) != std::string::npos);   // 6 points per key, 9 keys
+      CHECK(W2(7) == 0.5 && W2(8) == 0.25);
+      const long n = 200000;
+      const P9 p = ExitPrediction(0., 1., true), pu = ExitPrediction(0., 1., false);
+      const double s8 = std::sqrt(p[8] * (1. - p[8]) / n);
+      std::printf("s2_weights_before_clamp corner: weighted %.6f, unweighted %.6f, separation %.1f sigma\n", p[8], pu[8],
+                  std::abs(pu[8] - p[8]) / s8);
+      CHECK(std::abs(pu[8] - p[8]) > 10. * s8);
+      double zmax = 0.;
+      CheckCounts("s2_weights_before_clamp", DrawExits(h, 0., 1., 90., 135., n, 777, &zmax), n, p);
+      CHECK_NEAR(zmax, (2.5e-5 - 1e-9) * CLHEP::m / CLHEP::mm, 1e-12);   // the wall rows were drawn, clamped
+    }},
+    {"s2_key_without_record", [] {
+      // A CSV key off its declared angle by 1e-7 degrees passes C2 (0.01 deg rounding) but has no per-key
+      // record under the sidecar's 1e-9 rule: BBR012 naming the key, not a silent skip of the row checks.
+      Dataset ds = hfssfix::NineKeyGrid2();
+      ds.wg0 = EditKey(ds.wg0, 45, 135, [](std::vector<std::string>& v, int) { v[2] = R17(45. + 1e-7); });
+      TempDir d; ExpectG4Exception("BBR012", [&] { LoadV2(d, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                   "has no per-key record");
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadV2(d2, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                    "polarization 0");
+      // The dark key's CSV angle off by 1e-7 would otherwise skip OR-038 masking: refused too.
+      Dataset dk = hfssfix::NineKeyGrid2();
+      dk.wg1 = EditKey(dk.wg1, 0, 180, [](std::vector<std::string>& v, int) { v[3] = R17(180. - 1e-7); });
+      TempDir d3; ExpectG4Exception("BBR012", [&] { LoadV2(d3, dk, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                    "has no per-key record");
+      // 1e-10 degrees is within the sidecar's 1e-9 rule: loads.
+      Dataset ok = hfssfix::NineKeyGrid2();
+      ok.wg0 = EditKey(ok.wg0, 45, 135, [](std::vector<std::string>& v, int) { v[2] = R17(45. + 1e-10); });
+      TempDir d4; LoadV2(d4, ok, hfssfix::NineKeyParams2(kS2));
+    }},
+    {"s2_negative_outgoing", [] {
+      // A negative OutgoingPower on any row of a 2.x table is refused (BBR012), not stored as a T that turns
+      // sqrt(T0 T1) into NaN and a silent 0 transmittance; the producer stops on negative flux.
+      Dataset ds = hfssfix::NineKeyGrid2();
+      ds.wg0 = EditKey(ds.wg0, 45, 135, [](std::vector<std::string>& v, int r) { if (r == 3) v[4] = "-1e-12"; });
+      TempDir d; ExpectG4Exception("BBR012", [&] { LoadV2(d, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                   "key (45, 135) polarization 0");
+      TempDir d2; ExpectG4Exception("BBR012", [&] { LoadV2(d2, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                    "OutgoingPower -1e-12 is negative");
+    }},
+    {"s2_load_bbr027_density", [] {
+      // A lit key whose tangential field (Ex, Ey) is zero everywhere but Ez is not: the 2.x exit
+      // density w |E_t|^2 is zero, so the load refuses it (BBR027).
+      Dataset ds = hfssfix::NineKeyGrid2();
+      ds.wg0 = EditKey(ds.wg0, 45, 135, [](std::vector<std::string>& v, int) { v[9] = v[10] = v[11] = v[12] = "0"; });
+      TempDir d; ExpectG4Exception("BBR027", [&] { LoadV2(d, ds, hfssfix::NineKeyParams2(kS2)); }, "BBRHFSSData",
+                                   "key (45, 135): T0");
     }},
   });
 }

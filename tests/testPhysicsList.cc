@@ -143,7 +143,7 @@ class CrackWorld : public G4VUserDetectorConstruction {
     auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
     auto* wlv = new G4LogicalVolume(new G4Box("World", 50 * mm, 50 * mm, 50 * mm), gal, "World");
     auto* world = new G4PVPlacement(nullptr, {}, wlv, "World", nullptr, false, 0);
-    auto* clv = new G4LogicalVolume(new G4Box(fName, 2 * mm, 5 * mm, 0.026 * mm),
+    auto* clv = new G4LogicalVolume(new G4Box(fName, 2 * mm, 4.5 * mm, 0.025 * mm),
                                     BBRMaterials::GetVacuumWG(), fName);
     new G4PVPlacement(nullptr, {2 * mm, 0, 0}, clv, fName, wlv, false, 0);
     return world;
@@ -271,13 +271,13 @@ int main(int argc, char** argv) {
     }},
     {"section_wider_than_crack_stops_before_events", [] {
       auto p = hfssfix::SidecarFrom("Wide_500GHz", hfssfix::Mini500());
-      p.zHalf = 3e-5;   // 30 um, beyond the crack's 26 um half-gap
+      p.zHalf = 3e-5;   // 30 um, beyond the crack's 25 um half-gap
       hfssfix::WriteDataset(DataRoot(), "Wide_500GHz", hfssfix::Mini500(), false);
       bbrtest::WriteFile(DataRoot() / "waveguides" / "Wide_500GHz.dataset.json", hfssfix::SidecarJson(p));
       G4RunManager* rm = BuildEventLoop(G4RunManagerType::SerialOnly, "Wide");
       rm->Initialize();
       ExpectG4Exception("BBR025", [&] { rm->BeamOn(1); }, "BBRDatasetSidecar",
-                        "does not fit strictly inside crack volume Wide");
+                        "does not equal crack volume Wide");
       CHECK(G4StateManager::GetStateManager()->GetCurrentState() != G4State_EventProc);
     }},
   });

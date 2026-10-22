@@ -14,12 +14,23 @@ data themselves.
 Exact rows: the tree is unchanged since generation; every output names the data
 root and the placed cracks with the tree's frequencies; hfss_freq_GHz is -1 on
 every row that is not a decided crack entry; every decided entry carries the grid
-frequency the selection rule gives for its recorded energy; per gun run, one entry
-per event on the aimed crack, with the configured direction and energy and the
-expected grid frequency; per Planck run, at most one entry per event; reflections
-are specular; every grid frequency is served by a gun run. With --log: BBR008 and
-BBR026 exactly as the output implies, a clean log, and one startup line per placed
-crack and dataset.
+frequency the selection rule gives for its recorded energy; every transmitted photon (CDX-027)
+leaves its crack along its sampled direction, the next crossing of its track (n_boundary + 1)
+being crack to World with the direction unchanged to 1e-9, never into the crack's plate (the row
+"exit direction", counting wall hits, other volumes, direction mismatches and missing rows, each
+with one example; a crack to plate to World pair whose plate to World row follows at once, at a tolerance-scale
+step the recorder keeps, is a clean exit: see exit_directions); every event_id of a run's
+crossings and abspoints lies in [0, events) (one output once carried a corrupted
+column); per gun run, one entry per event on the aimed crack, with the configured
+direction and energy and the expected grid frequency; per Planck run, at most one entry per event; reflections
+are specular; every grid frequency is served by a gun run. With --log: BBR008, BBR026 and BBR028 exactly as the output implies, a clean log, and one startup line
+per placed crack and dataset. BBR026 is once per dataset, regime mode and direction (the
+manifest's regime cutoffs: a schema-1 dataset's lowest mode, a 2.x dataset's TE10 and gap
+family or TE11, TM01 and TE21); BBR028 is once per 2.x dataset served by a table at or
+above its cross-term limit (an expected warning, whitelisted with BBR008 and BBR026: every
+other BBR0xx line fails the log row). Under 2.x the sidecar row also runs
+bbrsim.sidecar.check_full on each sidecar, because loading the tables runs the 2.x CSV row
+checks but not the sidecar checks, C1-C5 or the checksums.
 Statistical rows: the transmittance of every gun run and probe, exit-direction
 moments, the Planck runs' transmittance and spectrum, each within z_max standard
 errors, z_max = max(4, Phi^-1(1 - 0.0005 / M)) for M statistical rows, so a
@@ -40,13 +51,17 @@ from statistics import NormalDist
 
 import numpy as np
 
-from bbrsim import hfss, io, physics, select
+from bbrsim import hfss, io, physics, select, sidecar
 
-SCHEMA = "bbrsim-tree-check/1"
+SCHEMA = "bbrsim-tree-check/2"
 TRANSMIT, REFLECT = "BBRDiffractionTransmit", "BBRDiffractionReflect"
 DECIDED = (TRANSMIT, REFLECT)
 TOL_DIR = 1e-6            # entry direction against the configured one
 TOL_REFL = 1e-9           # specular reflection
+TOL_EXIT = 1e-9           # direction of a transmitted photon at the crack's exit, against the sampled one
+TOL_COPLANAR_MM = 1e-6    # a crack-plate-World pair this close (a step the recorder kept) is one exit through coplanar faces
+WORLD_VOLUME = "World"
+METAL_PREFIXES = ("Cu_RRR", "BBR_Perfect")
 TOL_ENERGY = 1e-12        # recorded energy against the manifest's, relative
 FAMILY_ALPHA = 1e-3       # chance that a correct run fails any statistical row
 Z_FLOOR = 4.0
@@ -55,7 +70,10 @@ FILTER_MARGIN = 0.95      # physics row: grid points below this fraction of the 
 FILTER_T_MAX = 0.01
 NORMAL, E_LONG = (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)
 PLANCK_GRID_POINTS = 20001
-WARNING = re.compile(r"(BBR008) dataset=(\S+) side=(low|high) |(BBR026) dataset=(\S+) direction=(below|above) ")
+WARNING = re.compile(r"(BBR008) dataset=(\S+) side=(low|high) "
+                     r"|(BBR026) dataset=(\S+) direction=(below|above) mode=(\S+) "
+                     r"|(BBR028) dataset=(\S+) ")
+EXPECTED_CODES = ("BBR008", "BBR026", "BBR028")      # warnings the run is expected to print (OR-024)
 OTHER_CODE = re.compile(r"BBR0\d\d")
 
 
@@ -122,25 +140,34 @@ def unit(v):
     return v / np.linalg.norm(v)
 
 
-def expected_warnings(entries, grids, cutoffs):
-    """{(code, dataset, side or direction): count} the log must hold, from the decided entries
-    (dataset, nu_GHz, grid_GHz) of the whole process: BBR008 once per dataset and side when an
-    entry lies beyond that edge of a grid of more than one point, BBR026 once per dataset and
-    direction when an entry and its grid point lie on opposite sides of the cutoff (the
-    conditions of BBRCrackLibrary::Lookup), otherwise none."""
+def expected_warnings(entries, grids, cutoffs, rho_limits):
+    """{key: count} the log must hold, from the decided entries (dataset, nu_GHz, grid_GHz) of the
+    whole process, by the conditions of BBRCrackLibrary::Lookup:
+      ("BBR008", dataset, "low"|"high"): 1 when an entry lies beyond that edge of a grid of more than
+        one point;
+      ("BBR026", dataset, mode, "below"|"above"): 1 when an entry and its grid point lie on opposite
+        sides of that regime cutoff; cutoffs is {dataset: [(mode, GHz), ...]}, a schema-1 dataset's
+        lowest mode only, a 2.x dataset's every regime cutoff (OR-031);
+      ("BBR028", dataset): 1 when a 2.x dataset's selected table lies at or above its cross-term limit
+        (rho_limits[dataset], None under schema 1), once per dataset however many photons;
+    otherwise 0."""
     want = {}
     for did in grids:
-        want.update({("BBR008", did, "low"): 0, ("BBR008", did, "high"): 0,
-                     ("BBR026", did, "below"): 0, ("BBR026", did, "above"): 0})
+        want.update({("BBR008", did, "low"): 0, ("BBR008", did, "high"): 0, ("BBR028", did): 0})
+        for mode, _ in cutoffs.get(did, []):
+            want.update({("BBR026", did, mode, "below"): 0, ("BBR026", did, mode, "above"): 0})
     for did, nu, f in entries:
         grid = grids[did]
         if len(grid) > 1 and nu < grid[0][0]:
             want[("BBR008", did, "low")] = 1
         if len(grid) > 1 and nu > grid[-1][0]:
             want[("BBR008", did, "high")] = 1
-        fc = cutoffs.get(did, -1.0)
-        if fc > 0.0 and (nu < fc) != (f < fc):
-            want[("BBR026", did, "below" if nu < fc else "above")] = 1
+        for mode, fc in cutoffs.get(did, []):
+            if fc > 0.0 and (nu < fc) != (f < fc):
+                want[("BBR026", did, mode, "below" if nu < fc else "above")] = 1
+        limit = rho_limits.get(did)
+        if limit is not None and f >= limit:
+            want[("BBR028", did)] = 1
     return want
 
 
@@ -148,31 +175,56 @@ def parse_log(text):
     """The warnings, banners, GeomNav lines, other BBR codes and startup lines of a run.log."""
     warnings = {}
     for m in WARNING.finditer(text):
-        key = ("BBR008", m.group(2), m.group(3)) if m.group(1) else ("BBR026", m.group(5), m.group(6))
+        if m.group(1):
+            key = ("BBR008", m.group(2), m.group(3))
+        elif m.group(4):
+            key = ("BBR026", m.group(5), m.group(7), m.group(6))
+        else:
+            key = ("BBR028", m.group(9))
         warnings[key] = warnings.get(key, 0) + 1
     lines = text.splitlines()
     return {"warnings": warnings,
             "banners": sum("G4Exception-START" in ln for ln in lines),
             "geomnav": sum("geomnav" in ln.lower() for ln in lines),
             "other_codes": [ln for ln in lines
-                            if OTHER_CODE.search(ln) and "BBR008" not in ln and "BBR026" not in ln],
+                            if OTHER_CODE.search(ln) and not any(c in ln for c in EXPECTED_CODES)],
             "crack_lines": [ln for ln in lines if "[BBR] crack " in ln],
             "dataset_lines": [ln for ln in lines if "[BBR] HFSS dataset " in ln]}
 
 
 def load_runs(run_dir, man):
-    """[(run, crossings or None, metadata or None, problem or None)] in manifest order."""
+    """[(run, crossings or None, abspoints or None, metadata or None, problem or None)] in
+    manifest order."""
     out = []
     for r in man["runs"]:
         path = os.path.join(run_dir, r["file"])
         if not os.path.exists(path):
-            out.append((r, None, None, f"{path} is missing"))
+            out.append((r, None, None, None, f"{path} is missing"))
             continue
         try:
-            out.append((r, io.load_crossings(path), io.load_metadata(path), None))
+            cr, ab = io.load(path)
+            out.append((r, cr, ab, io.load_metadata(path), None))
         except Exception as err:      # an unreadable output is a FAIL row, not a traceback
-            out.append((r, None, None, f"{path}: {type(err).__name__}: {err}"))
+            out.append((r, None, None, None, f"{path}: {type(err).__name__}: {err}"))
     return out
+
+
+def check_event_ids(rep, name, path, events, **ntuples):
+    """Every event_id of the given ntuples (name=frame) lies in [0, events). One bad value is
+    enough to fail the row, which names the file, the ntuple and the first offender."""
+    for label, frame in ntuples.items():
+        if "event_id" not in frame.columns:
+            rep.check(name, False, f"{path}: the {label} ntuple has no event_id column")
+            return
+        ids = frame["event_id"].to_numpy()
+        bad = (ids < 0) | (ids >= events)
+        if bad.any():
+            first = int(np.flatnonzero(bad)[0])
+            rep.check(name, False, f"{path}: {label} row {first} has event_id {int(ids[first])}, outside "
+                                   f"[0, {events}); {int(bad.sum())} of {len(ids)} {label} rows lie outside")
+            return
+    rep.check(name, True, ", ".join(f"{len(f)} {label}" for label, f in ntuples.items())
+              + f" rows, every event_id in [0, {events})")
 
 
 def run_tag(r):
@@ -209,6 +261,76 @@ def check_reflections(rep, tag, dec):
     rep.check(f"{tag} reflection", dev < TOL_REFL, f"{len(rf)} reflections, max deviation from specular {dev:.1e}")
 
 
+def exit_directions(df):
+    """Follow every transmitted crack entry to the next crossing of its track (n_boundary + 1).
+
+    The entry row (status BBRDiffractionTransmit, mat_post vacuum_wg) holds the sampled direction in
+    (px_post, py_post, pz_post). The next row must be crack to World (mat_pre vacuum_wg, vol_post the
+    World) with the same direction to TOL_EXIT, before and after the interface. Returns (n, bad,
+    coplanar) with n the transmissions, coplanar the count of coplanar exits and bad a dict kind -> (count, example key), kinds "wall hit" (the next
+    crossing enters metal), "other volume", "direction mismatch" and "no following row". A crack to
+    metal row followed at once (positions within TOL_COPLANAR_MM) by a metal to World row is one exit
+    through coplanar faces and is judged on the World row. Rows are one per recorded crossing, so
+    n_boundary rises by exactly 1 within a track. BBRPhotonRecorder drops every crossing whose step is
+    at most half the surface tolerance, so the plate to World row of a pair exists only when its step
+    lies between that and TOL_COPLANAR_MM (the exit inset of 20 times the tolerance keeps the crack to
+    plate step well above it). A true zero-step coplanar exit leaves no plate to World row: the pair
+    then shows as a wall hit, the safe direction. The coplanar branch is kept for the tolerance-scale
+    steps in between, which the recorder keeps."""
+    keys = ["event_id", "track_id", "n_boundary"]
+    tx = df[(df["status"] == TRANSMIT) & (df["mat_post"] == "vacuum_wg")]
+    rows = {tuple(int(v) for v in k): i for i, k in zip(df.index, df[keys].to_numpy())}
+    metal = lambda m: str(m).startswith(METAL_PREFIXES)
+    bad, n_coplanar = {}, 0
+
+    def note(kind, key):
+        count, example = bad.get(kind, (0, None))
+        bad[kind] = (count + 1, example or key)
+
+    for i, ev, tr, nb in zip(tx.index, tx["event_id"], tx["track_id"], tx["n_boundary"]):
+        key = (int(ev), int(tr), int(nb))
+        label = f"event {key[0]} track {key[1]} n_boundary {key[2]}"
+        d_out = tx.loc[i, ["px_post", "py_post", "pz_post"]].to_numpy(float)
+        j = rows.get((key[0], key[1], key[2] + 1))
+        if j is None:
+            note("no following row", label)
+            continue
+        nxt = df.loc[j]
+        if nxt["mat_pre"] == "vacuum_wg" and metal(nxt["mat_post"]):
+            k = rows.get((key[0], key[1], key[2] + 2))
+            after = df.loc[k] if k is not None else None
+            coplanar = (after is not None and metal(after["mat_pre"]) and after["vol_post"] == WORLD_VOLUME
+                        and float(np.linalg.norm(after[["x", "y", "z"]].to_numpy(float)
+                                                 - nxt[["x", "y", "z"]].to_numpy(float))) <= TOL_COPLANAR_MM)
+            if not coplanar:
+                note("wall hit", f"{label}, next crossing {nxt['vol_pre']} to {nxt['vol_post']}")
+                continue
+            nxt, n_coplanar = after, n_coplanar + 1
+        elif nxt["mat_pre"] != "vacuum_wg" or nxt["vol_post"] != WORLD_VOLUME:
+            note("other volume", f"{label}, next crossing {nxt['vol_pre']} to {nxt['vol_post']}")
+            continue
+        post = nxt[["px_post", "py_post", "pz_post"]].to_numpy(float)
+        pre = nxt[["px_pre", "py_pre", "pz_pre"]].to_numpy(float)
+        dev = max(float(np.abs(post - d_out).max()), float(np.abs(pre - d_out).max()))
+        if not dev <= TOL_EXIT:
+            note("direction mismatch", f"{label}, max |k - k_sampled| {dev:.1e}")
+    return len(tx), bad, n_coplanar
+
+
+def check_exit_direction(rep, tag, df):
+    """Row "<tag> exit direction": every transmitted photon leaves its crack along the sampled direction."""
+    n, bad, n_coplanar = exit_directions(df)
+    name = f"{tag} exit direction"
+    if not n:
+        rep.check(name, True, "no transmissions in this run; nothing to follow")
+    elif not bad:
+        rep.check(name, True, f"{n} transmitted photons leave the crack into the {WORLD_VOLUME} along the "
+                              f"sampled direction (to {TOL_EXIT:g}); {n_coplanar} through coplanar plate faces")
+    else:
+        rep.check(name, False, f"of {n} transmitted photons: " + "; ".join(
+            f"{count} {kind} (e.g. {example})" for kind, (count, example) in sorted(bad.items())))
+
+
 def table(rep, tag, tables, stem):
     """The dataset dict of stem, or None after a FAIL row naming the load error."""
     ds = tables.get(stem)
@@ -220,7 +342,9 @@ def table(rep, tag, tables, stem):
 
 def predict_gun(ds, r):
     """(T, exit-direction weights, outgoing directions) of a gun run: its configured direction
-    folded onto the nearest incidence key, with its polarization, or random."""
+    folded onto the nearest incidence key, with its polarization, or random. The weights are None
+    when T = 0 (a fixed polarization on a dark basis under 2.x): nothing transmits, so there is no
+    outgoing distribution to predict, and the C++ never draws one (CDX-036)."""
     inc = hfss.fold_incidence(r["direction"])
     a = ds[hfss.nearest_key(ds, inc.phi_deg, inc.theta_deg)]
     dirs = hfss.outgoing_directions(a, inc)
@@ -229,7 +353,8 @@ def predict_gun(ds, r):
     else:
         k, p = unit(r["direction"]), np.asarray(r["polarization"], dtype=float)
         et, ep = hfss.polarization_components(unit(p - p.dot(k) * k), inc)
-        t, w = hfss.transmittance(a, et, ep), hfss.direction_weights(a, et, ep)
+        t = hfss.transmittance(a, et, ep)
+        w = hfss.direction_weights(a, et, ep) if t > 0 else None    # T > 0 without outward intensity: BBR027
     return float(t), w, dirs
 
 
@@ -244,6 +369,9 @@ def gun_rows(rep, tag, r, dec, tables, grids):
         return
     t, w, dirs = predict_gun(ds, r)
     n, tx = len(dec), dec[dec["status"] == TRANSMIT]
+    if w is None:    # T = 0 exactly: every entry reflects, and there are no exit directions to compare
+        rep.check(f"{tag} transmittance", len(tx) == 0, f"T 0, {len(tx)} of {n} entries transmitted")
+        return
     rep.stat(f"{tag} transmittance", len(tx), n * t, math.sqrt(n * t * (1.0 - t)), slack=1.0,
              detail=f"T_obs {len(tx) / n:.4f}, T {t:.4f}, N {n}")
     if r["kind"].startswith("probe") or len(tx) <= MIN_TX_MOMENTS:
@@ -264,6 +392,16 @@ def gun_rows(rep, tag, r, dec, tables, grids):
         mu = float(w @ x2)
         rep.stat(f"{tag} <p{c}^2>", float((out[:, i] ** 2).mean()), mu,
                  math.sqrt(max(float(w @ x2 ** 2) - mu * mu, 0.0) / n_tx), slack=1e-9)
+
+
+def random_polarization_T(a):
+    """The mean transmittance of one incidence key under uniformly random linear polarization (the
+    Planck source's): (T0 + T1)/2 under schema 1, where the key's polarizations never exceed 1 after
+    normalization and the cross term averages out; under 2.x, T0 and T1 may exceed 1 and each
+    polarization angle's T is clamped (the per-photon cap, CDX-016), so the clamped mixture mean."""
+    if a.schema == 1:
+        return 0.5 * (a.T0 + a.T1)
+    return float(hfss.random_polarization_mixture(a)[0])
 
 
 def planck_fractions(grid_ghz, temp_K, band_eV):
@@ -288,10 +426,13 @@ def planck_rows(rep, tag, r, dec, tables, grids, band_eV):
         if ds is None:
             continue           # the selection rows already fail an unknown frequency
         t = np.empty(len(grp))
+        mean_t = {}            # per incidence key: the 2.x mixture mean costs 360 evaluations
         for j, k in enumerate(grp[["px_pre", "py_pre", "pz_pre"]].to_numpy(float)):
             inc = hfss.fold_incidence(k)
-            a = ds[hfss.nearest_key(ds, inc.phi_deg, inc.theta_deg)]
-            t[j] = 0.5 * (a.T0 + a.T1)    # BBRPrimarySource: uniformly random linear polarization
+            key = hfss.nearest_key(ds, inc.phi_deg, inc.theta_deg)
+            if key not in mean_t:    # BBRPrimarySource: uniformly random linear polarization
+                mean_t[key] = random_polarization_T(ds[key])
+            t[j] = mean_t[key]
         n_tx = int((grp["status"] == TRANSMIT).sum())
         rep.stat(f"{tag} transmittance {did} {f:g} GHz", n_tx, t.sum(), math.sqrt(float((t * (1.0 - t)).sum())),
                  slack=1.0, detail=f"{len(grp)} entries")
@@ -335,23 +476,23 @@ def physics_rows(rep, man, tables, grids):
                       f"T for E along the long side at normal incidence {t:.2e}, limit {FILTER_T_MAX:g}")
 
 
-def check_log(rep, log_path, entries, grids, cutoffs, placed, wg):
+def check_log(rep, log_path, entries, grids, cutoffs, rho_limits, placed, wg):
     try:
         with open(log_path, errors="replace") as fh:
             lg = parse_log(fh.read())
     except OSError as err:
         rep.check("log", False, f"{log_path}: {err}")
         return
-    want = expected_warnings(entries, grids, cutoffs)
-    for (code, did, which), n in sorted(want.items()):
-        got = lg["warnings"].get((code, did, which), 0)
-        rep.check(f"log {code} {did} {which}", got == n, f"{got} in the log, {n} expected from the output")
+    want = expected_warnings(entries, grids, cutoffs, rho_limits)
+    for key, n in sorted(want.items()):
+        got = lg["warnings"].get(key, 0)
+        rep.check("log " + " ".join(key), got == n, f"{got} in the log, {n} expected from the output")
     stray = sorted(k for k in lg["warnings"] if k not in want)
     n_warn = sum(lg["warnings"].values())
     rep.check("log hygiene",
               lg["geomnav"] == 0 and not lg["other_codes"] and not stray and lg["banners"] == n_warn,
               f"GeomNav {lg['geomnav']}, other BBR codes {len(lg['other_codes'])}, "
-              f"G4Exception banners {lg['banners']} for {n_warn} BBR008/BBR026 warnings"
+              f"G4Exception banners {lg['banners']} for {n_warn} BBR008/BBR026/BBR028 warnings"
               + (f", warnings for unknown datasets {stray}" if stray else ""))
     for vol, did in sorted(placed.items()):
         lines = [ln.rstrip() for ln in lg["crack_lines"] if f"[BBR] crack {vol}: " in ln]
@@ -377,6 +518,27 @@ def sidecar_sha256(wg, stem):
         return None
 
 
+def check_sidecars_2x(rep, wg, grids, aimed):
+    """sidecar.check_full on every 2.x sidecar of the aimed datasets: loading the tables
+    (hfss.load_dataset) runs the 2.x CSV row checks (InterceptFactor, the two T sources, a dark basis's
+    OutgoingPower; CDX-037) but not the sidecar checks F1-F13, C1-C5 or the checksums, so a 2.x tree is
+    held to them here. Schema-1 trees add no row; a sidecar that cannot be read as either schema fails it."""
+    n, bad = 0, []
+    for did in aimed:
+        for f, stem in grids[did]:
+            try:
+                if sidecar.schema_major(sidecar.load(wg, stem)) != 2:
+                    continue
+                n += 1
+                sidecar.check_full(wg, did, stem, f)
+            except (OSError, ValueError, KeyError, TypeError) as err:
+                bad.append(f"{stem}: {err}")
+    if bad:
+        rep.check("sidecars 2.x", False, "; ".join(bad[:3]) + (f"; and {len(bad) - 3} more" if len(bad) > 3 else ""))
+    elif n:
+        rep.check("sidecars 2.x", True, f"{n} 2.x sidecar(s) pass check_full")
+
+
 def validate(run_dir, log_path=None, data_root=None, tables=None):
     """Every row for the run in run_dir; returns the Report (finish() judges it)."""
     rep = Report()
@@ -395,7 +557,8 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
     tables = tables or Tables(wg)
     grids = {d: [(float(f), s) for f, s in v["grid"]] for d, v in man["datasets"].items()}
     aimed = sorted(d for d, v in man["datasets"].items() if v["aimed"])
-    cutoffs = {d: float(man["datasets"][d]["cutoff_ghz"]) for d in aimed}
+    cutoffs = {d: [(str(m), float(g)) for m, g in man["datasets"][d]["regime_cutoffs"]] for d in aimed}
+    rho_limits = {d: man["datasets"][d].get("rho_valid_below_ghz") for d in aimed}
     rep.check("manifest", True, f"{man_path}: {len(man['runs'])} runs over {', '.join(aimed)}")
 
     try:
@@ -413,6 +576,7 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
         rep.check("tree unchanged", now == grids and not changed, detail)
     except (OSError, ValueError) as err:
         rep.check("tree unchanged", False, f"{wg}: {err}")
+    check_sidecars_2x(rep, wg, grids, aimed)
     for did in man.get("not_exercised", []):
         rep.skip(f"dataset {did}", "the test world cannot place it; not exercised")
     for s in man.get("skipped", []):
@@ -420,7 +584,7 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
 
     entries, served, placed = [], {d: set() for d in aimed}, None
     n_dec = n_bad_sel = n_bad_sentinel = 0
-    for r, df, meta, problem in load_runs(run_dir, man):
+    for r, df, ab, meta, problem in load_runs(run_dir, man):
         tag = run_tag(r)
         if problem:
             rep.check(f"{tag} output", False, problem)
@@ -439,6 +603,8 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
                   f"data root {data.get('directory')}" + ("" if same_root else f", not {root}")
                   + ("" if labels_ok else "; placed cracks or frequency labels differ from the tree")
                   + ("" if events_ok else f"; {meta.get('events')} events, the manifest asks {r['events']}"))
+        check_event_ids(rep, f"run {r['run']:03d} event_id", os.path.join(run_dir, r["file"]), r["events"],
+                        crossings=df, abspoints=ab)
         if placed is None:
             placed = {v: h["dataset_id"] for v, h in hd.items()}
         if "hfss_freq_GHz" not in df.columns:
@@ -467,6 +633,7 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
                 served[r["dataset"]].update(np.unique(f_rec).tolist())
             gun_rows(rep, tag, r, dec, tables, grids)
         check_reflections(rep, tag, dec)
+        check_exit_direction(rep, tag, df)
 
     rep.check("sentinel", n_bad_sentinel == 0,
               f"{n_bad_sentinel} rows that are not decided crack entries carry a frequency other than -1")
@@ -478,7 +645,7 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
                   "every grid frequency served by a gun run" if not missing else f"no gun run served {missing} GHz")
     physics_rows(rep, man, tables, grids)
     if log_path is not None:
-        check_log(rep, log_path, entries, {d: grids[d] for d in aimed}, cutoffs, placed or {}, wg)
+        check_log(rep, log_path, entries, {d: grids[d] for d in aimed}, cutoffs, rho_limits, placed or {}, wg)
     return rep
 
 

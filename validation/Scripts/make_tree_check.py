@@ -22,7 +22,9 @@ centre:
   normal_random, normal_E_gap, normal_E_long: normal incidence with random
       polarization, E across the gap, E along the long side;
   oblique_random: every declared IWaveTheta strictly between 90 and 180 deg
-      and every declared IWavePhi, random polarization;
+      and every declared IWavePhi, random polarization (the declared grid: a 2.x
+      35-key crack gets 5 x 5 of these; theta = 90 deg, whose cell is floor-
+      dependent, is not aimed at);
   oblique_diagonal_fixed: IWavePhi 45 on each such row, E_theta = E_phi.
 On grids of more than one point the lowest and highest grid frequency run
 0.1 % inside the grid, and probes go to 0.99 and 1.01 times each log midpoint
@@ -30,6 +32,9 @@ and to half the lowest and twice the highest grid frequency. Each dataset gets
 one Planck run from a thin box just in front of its crack. Datasets the test
 world cannot place are listed as not exercised. Keep every event count at or
 above the square of the Geant4 thread count (Geant4 warns, Run10035, otherwise).
+The manifest (schema bbrsim-tree-check/2) records per dataset its schema major, the
+regime cutoffs BBR026 is checked against (schema 1: the lowest mode only) and the
+cross-term limit BBR028 is checked against (null under schema 1).
 Exit code 0 on success, 2 when the tree cannot be checked.
 """
 import argparse
@@ -44,7 +49,7 @@ import numpy as np
 
 from bbrsim import hfss, sidecar
 
-SCHEMA = "bbrsim-tree-check/1"
+SCHEMA = "bbrsim-tree-check/2"
 GUN_X_MM = -20.0
 EMITTER_X_MM = -0.03
 PLANCK_BAND_EV = (4.14e-5, 8.27e-2)        # BBRPrimarySource's fixed emitter band
@@ -105,7 +110,7 @@ def read_tree(root):
     missing = [i for i in ALWAYS_PLACED if i not in grids]
     if missing:
         raise Refusal(f"{wg} has no dataset for {', '.join(missing)}: the test world always places "
-                      "both slab cracks and checks every placed crack at /run/initialize")
+                      "both cracks and checks every placed crack at /run/initialize")
     datasets = {}
     for did, grid in grids.items():
         entry = {"aimed": did in AIM, "grid": [[f, stem] for f, stem in grid],
@@ -113,11 +118,21 @@ def read_tree(root):
         if did in AIM:
             try:
                 sc = [sidecar.load(wg, stem) for _, stem in grid][0]
+                major = sidecar.schema_major(sc)
+                section = sc["exit_field"]["cross_section"]
+                # BBR026's regime cutoffs, by the label the library prints: schema 1 warns for its lowest
+                # mode only, 2.x for every regime cutoff (OR-031); the 2.x list is re-derived from the
+                # declared section, as the reader does (the sidecar checks pin the declared list to it)
+                cutoffs = ([[str(sc["modes"]["mode"]), float(sc["modes"]["cutoff_ghz"])]] if major == 1 else
+                           [[str(c["mode"]), float(c["cutoff_ghz"])] for c in sidecar.regime_cutoffs(section)])
                 # the frequency-independent blocks agree across a grid (check_dataset_sidecars.py)
                 entry.update({
+                    "schema_major": major,
                     "cutoff_ghz": float(sc["modes"]["cutoff_ghz"]),
+                    "regime_cutoffs": cutoffs,
+                    "rho_valid_below_ghz": float(sc["cross_term"]["valid_below_ghz"]) if major == 2 else None,
                     "polarization_filter_limit_ghz": float(sc["modes"]["polarization_filter_limit_ghz"]),
-                    "cross_section": str(sc["exit_field"]["cross_section"]["shape"]),
+                    "cross_section": str(section["shape"]),
                     "incident_phi_deg": [float(x) for x in sc["excitation"]["incident_phi_deg"]],
                     "incident_theta_deg": [float(x) for x in sc["excitation"]["incident_theta_deg"]]})
             except ValueError as err:          # BBR024 from sidecar.load, or a non-number

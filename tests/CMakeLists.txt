@@ -77,21 +77,32 @@ bbrsim_add_test_program(testHFSSData LABEL unit
         sidecar_checks_pass sidecar_c1_header sidecar_c1_bom sidecar_c2_key_off_grid sidecar_c2_key_missing
         sidecar_c3_far_field
         sidecar_c4_exit_rows sidecar_c3_c4_per_key sidecar_c5_outside_section sidecar_c5_zero_outside sidecar_real_data
+        exit_clamp_rectangle exit_clamp_disc exit_clamp_disc_off_axis exit_clamp_needs_sidecar
+        s2_positions s2_transmittance s2_cap_no_rescale s2_intercept_column s2_two_t_sources s2_dark_outgoing
+        s2_dark_masking s2_rho_weighted s2_weights_before_clamp s2_load_bbr027_density
+        s2_key_without_record s2_negative_outgoing
   ENV "BBRSIM_TEST_DATA=${PROJECT_SOURCE_DIR}/data")
 bbrsim_add_test_program(testSidecar LABEL unit
   CASES parses_fixture forward_compatible f1_f3_identity f4_frames f5_f10_conventions f10_boundaries f13_modes
         invariant_physics_only invariant_diff field_types
-        recorded_fields f12_fits_solid)
+        recorded_fields f12_fits_solid f12_equality f12_length f11_extent_section
+        material_vacuum material_null_schema1 material_required_schema2
+        s2_parses_fixture s2_version_gate s2_fixed_strings s2_per_key_lists s2_c_k_and_cell90 s2_dark_tflux s2_negative_tflux
+        s2_emitter s2_grid_step s2_regime_cutoffs s2_dropped_modes_fields s2_cross_term invariant_schema_and_grid)
 
 bbrsim_add_test_program(testCrackLibrary LABEL unit
   CASES selection_grid5 token_verbatim discovery_errors discovery_missing_far_field discovery_missing_waveguide
         dataset_id_of unreadable_root concurrent_first_load
         sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok
-        placed_cracks_json cutoff_warning)
+        placed_cracks_json cutoff_warning cutoff_warning_regime rho_limit_warning)
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
   CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget snap_and_rotation
         fatal_bbr004_bbr005 mirror_equivariance side_face_entry_documented
+        exit_start_wall_grazing exit_start_away_from_wall exit_start_long_wall exit_start_folds
+        exit_start_minus_x_face exit_start_guard_limit exit_start_disc_rim exit_start_corner
+        exit_start_summary_zero
+        run_totals
         reflectance_decision reflectance_specular reflectance_crack_wall reflectance_table_interp)
 
 bbrsim_add_test_program(testPhysicsList LABEL regression NEEDS_ENSDF

@@ -24,7 +24,7 @@ event-by-event footing.
 **Working and validated**
 
 - HFSS crack diffraction at normal incidence and at 45° off normal. Observed
-  transmittance at 500 GHz is 50.0 % / 50.3 % (52 µm / 102 µm gaps), against
+  transmittance at 500 GHz is 50.0 % / 50.3 % (50 µm / 100 µm gaps), against
   the 50 % ideal for unpolarized light on a sub-cutoff gap.
 - Frequency-keyed HFSS lookup: each photon gets the dataset nearest its
   frequency (validated on a mock five-frequency tree).
@@ -53,7 +53,7 @@ are indicative, not quantitative. Oblique incidence is validated only on the
 | Directory | Contents |
 |---|---|
 | `library/` | `libBBRsim` (CMake target `BBRsim::BBRsim`): the boundary-process wrapper, HFSS crack lookup, materials, run configuration and thermal emitter |
-| `examples/testworld/` | `bbrsimTestWorld`: Cu slab with two HFSS crack volumes, Planck emitter or fixed gun |
+| `examples/testworld/` | `bbrsimTestWorld`: two Cu plates holding the HFSS crack volumes at their exact size, Planck emitter or fixed gun |
 | `examples/lightpipe/` | `bbrsimLightPipe`: 4 K → mixing-chamber light pipe, parametric or imported from `.STL` |
 | `validation/` | regression fixtures, PASS/FAIL validators and the regression runner |
 | `tools/` | the `bbrsim` Python package and plot scripts |
@@ -216,9 +216,9 @@ minimal working example.
 
 ## Examples
 
-- **[testworld](examples/testworld/README.md)**, `bbrsimTestWorld`: a 4 mm Cu
-  slab with two HFSS crack volumes in a 50 cm vacuum world, lit by the Planck
-  emitter or a fixed photon gun.
+- **[testworld](examples/testworld/README.md)**, `bbrsimTestWorld`: two Cu
+  plates, each as thick as its HFSS crack volume, in a 50 cm vacuum world, lit
+  by the Planck emitter or a fixed photon gun.
 - **[lightpipe](examples/lightpipe/README.md)**, `bbrsimLightPipe`: a 4 K →
   mixing-chamber light pipe, generated from parameters or imported from an
   ASCII `.STL`.
@@ -271,9 +271,9 @@ validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 
 The runner builds and installs the library with its C++ tests
 (`BUILD_BBRSIM_TESTS=ON`), runs them (CTest), the Python tests (pytest) and
-the env-script test, builds both examples against the install, runs thirteen
-fixed-seed cases in parallel (seven validation fixtures, two real-tree checks
-generated at run time, and four example macros)
+the env-script test, builds both examples against the install, runs fourteen
+fixed-seed cases in parallel (seven validation fixtures, three real-tree checks
+generated at run time, one of them on a schema-2.x mock tree, and four example macros)
 with the Geant4 thread count pinned to 8 (`BBR_THREADS` overrides), scans their
 logs for warnings, and runs the PASS/FAIL validators on their output. Last, it
 runs the examples installed into a separate prefix without the env script, and
@@ -338,7 +338,12 @@ RRR and temperature. Photons reflect specularly or are absorbed.
 `vacuum_wg`, named after its HFSS dataset. When a photon enters one, BBRsim
 samples transmission or reflection, the exit direction, polarization and exit
 position from ANSYS HFSS simulations of that gap. It picks the dataset nearest
-the photon's frequency; there is no interpolation between frequencies.
+the photon's frequency; there is no interpolation between frequencies. Each
+dataset carries a sidecar, schema 1.x or 2.x: under 2.x the transmittance is
+divided by a per-key intercept factor and capped at 1 per photon, and `BBR026`
+(per regime cutoff) and `BBR028` (cross term beyond its limit) warn when a table
+is served across a boundary of its validity (see `validation/README.md`,
+Dataset sidecars).
 
 **Both are handled by one class.** `BBSimOpBoundaryProcess` wraps the stock
 Geant4 `G4OpBoundaryProcess`. It handles photons entering `vacuum_wg` volumes

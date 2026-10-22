@@ -78,10 +78,12 @@ struct G4ExceptionCaught : std::runtime_error {
 class ThrowingExceptionHandler : public G4VExceptionHandler {
  public:
   std::vector<std::string> warnings;
+  std::vector<std::string> descriptions;   // parallel to warnings
   G4bool Notify(const char* origin, const char* code, G4ExceptionSeverity sev,
                 const char* desc) override {
     if (sev == JustWarning) {
       warnings.emplace_back(code ? code : "");
+      descriptions.emplace_back(desc ? desc : "");
       std::fprintf(stdout, "warning %s from %s\n", code ? code : "", origin ? origin : "");
       return false;
     }
@@ -90,6 +92,13 @@ class ThrowingExceptionHandler : public G4VExceptionHandler {
   int CountWarnings(const std::string& code) const {
     int n = 0;
     for (const auto& w : warnings) n += (w == code);
+    return n;
+  }
+  // Warnings of this code whose description contains `part`.
+  int CountWarnings(const std::string& code, const std::string& part) const {
+    int n = 0;
+    for (std::size_t i = 0; i < warnings.size(); ++i)
+      n += (warnings[i] == code && descriptions[i].find(part) != std::string::npos);
     return n;
   }
 };

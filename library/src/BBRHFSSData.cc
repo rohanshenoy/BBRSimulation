@@ -100,13 +100,34 @@ void CheckHeader(std::string header, const std::vector<std::string>& want, const
 
 bool Within(G4double v, G4double lo, G4double hi, G4double tol) { return v >= lo - tol && v <= hi + tol; }
 
+// The shortest text that reads back as the same double, as Python's repr.
+std::string Repr(G4double v)
+{
+  char buf[64];
+  const auto r = std::to_chars(buf, buf + sizeof buf, v, std::chars_format::general);
+  return std::string(buf, r.ptr);
+}
+
+// C4's node rule (CDX-022): the index i of the declared axis node min + i (max - min)/(count - 1)
+// that v matches to 1e-6 of the step (to tol when the axis has one node), else -1.
+long AxisNode(G4double v, const BBRAxisRange& a, G4double tol)
+{
+  if (a.count <= 1) return std::abs(v - a.min) <= tol ? 0 : -1;
+  const G4double step = (a.max - a.min) / (a.count - 1);
+  const long i = std::lround((v - a.min) / step);
+  return (i >= 0 && i < a.count && std::abs(v - (a.min + i * step)) <= 1e-6 * step) ? i : -1;
+}
+
+// a and b differ by more than 1e-6 of the larger magnitude (the 2.x consumer tolerance).
+bool FarRel(G4double a, G4double b) { return std::abs(a - b) > 1e-6 * std::max(std::abs(a), std::abs(b)); }
+
 } // namespace
 
 // ---------------------------------------------------------------------------
 
 BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
                          G4double expectedFreqGHz, const BBRDatasetSidecar* sidecar)
-  : fFreqGHz(expectedFreqGHz)
+  : fFreqGHz(expectedFreqGHz), fSchema(sidecar && sidecar->schemaMajor == 2 ? 2 : 1)
 {
   auto dir0 = baseDir + "/" + dirStem + "_Ephi=0";
   auto dir1 = baseDir + "/" + dirStem + "_Ephi=1";
@@ -133,7 +154,15 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
       G4Exception("BBRHFSSData", "BBR007", FatalException, ed);
     }
   }
-  if (sidecar) CheckAgainstSidecar(*sidecar, dirStem);
+  if (sidecar) {
+    CheckAgainstSidecar(*sidecar, dirStem);
+    // HF-040: the weights come from the unclamped lattice, so the clamp below never moves a
+    // point off its node's weight.
+    if (fSchema == 2) AssignQuadrature(*sidecar);
+    const G4int n = ClampExitPoints(sidecar->crossSection);
+    G4cout << "[BBR] HFSS " << dirStem << ": " << n
+           << " exit point(s) clamped 1 nm inside the declared cross-section" << G4endl;
+  }
 
   // Polarization cross term (Wang eq. 58 applied to eq. 53): the transmitted power of a
   // mixed polarization is |Et E0 + Ep E1|^2 integrated over the exit face, which adds
@@ -141,10 +170,26 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
   //
   // Load-time normalization: the largest transmittance over linear polarizations is
   // the top eigenvalue of [[T0, c], [c, T1]], c = sqrt(T0 T1) Re rho. HFSS port
-  // normalization can put it above 1 (raw T0 = 1.0545 at (0,180) of the 52 um gap;
+  // normalization can put it above 1 (raw T0 = 1.0545 at (0,180) of crack1;
   // T0 + T1 = 1.025 in phase at (45,180)). Such a key has T0 and T1 divided by it, so
   // its maximum is 1 and T1/T0 is kept; a key at or below 1 is left as it is.
+  //
+  // Schema 2.x (HF-042, OR-038): rho from the tangential (Ex, Ey) with the quadrature weights,
+  // the sampler's own density; 0 if either basis is dark. No rescale: values above 1 are kept
+  // and GetTransmittance caps per photon (HF-039(2)), so no "normalized to 1" line.
   for (auto& [key, ds] : fData) {
+    if (fSchema == 2) {
+      ds.rho_re = 0.;
+      if (ds.dark0 || ds.dark1) continue;
+      std::complex<G4double> x(0, 0); G4double p0 = 0, p1 = 0;
+      for (const auto& e : ds.exitPoints) {
+        const std::complex<G4double> a[2] = {{e.Ex_re_0, e.Ex_im_0}, {e.Ey_re_0, e.Ey_im_0}};
+        const std::complex<G4double> b[2] = {{e.Ex_re_1, e.Ex_im_1}, {e.Ey_re_1, e.Ey_im_1}};
+        for (int i = 0; i < 2; ++i) { x += e.w * (a[i] * std::conj(b[i])); p0 += e.w * std::norm(a[i]); p1 += e.w * std::norm(b[i]); }
+      }
+      if (p0 > 0 && p1 > 0) ds.rho_re = (x / std::sqrt(p0 * p1)).real();
+      continue;
+    }
     std::complex<G4double> x(0, 0); G4double p0 = 0, p1 = 0;
     for (const auto& e : ds.exitPoints) {
       const std::complex<G4double> a[3] = {{e.Ex_re_0, e.Ex_im_0}, {e.Ey_re_0, e.Ey_im_0}, {e.Ez_re_0, e.Ez_im_0}};
@@ -166,7 +211,8 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
 
   // A basis polarization that transmits needs somewhere to go: outward far-field intensity (the
   // weight SampleOutgoingDirection draws from) and exit field (SampleExitPosition's). Without
-  // either there is no distribution, and BBRsim does not invent one (BBR027; CDX-008).
+  // either there is no distribution, and BBRsim does not invent one (BBR027; CDX-008). Under 2.x
+  // the exit density is the sampler's, w |E_t|^2 over (Ex, Ey).
   for (const auto& [key, ds] : fData)
     for (const int e : {0, 1}) {
       const G4double T = e ? ds.T_Ephi1 : ds.T_Ephi0;
@@ -180,11 +226,16 @@ BBRHFSSData::BBRHFSSData(const G4String& baseDir, const G4String& dirStem,
                 : sinT * (fp.rEtheta_re_0 * fp.rEtheta_re_0 + fp.rEtheta_im_0 * fp.rEtheta_im_0 +
                           fp.rEphi_re_0 * fp.rEphi_re_0 + fp.rEphi_im_0 * fp.rEphi_im_0);
       }
-      for (const auto& ep : ds.exitPoints)
-        ex += e ? ep.Ex_re_1 * ep.Ex_re_1 + ep.Ex_im_1 * ep.Ex_im_1 + ep.Ey_re_1 * ep.Ey_re_1 + ep.Ey_im_1 * ep.Ey_im_1 +
-                  ep.Ez_re_1 * ep.Ez_re_1 + ep.Ez_im_1 * ep.Ez_im_1
-                : ep.Ex_re_0 * ep.Ex_re_0 + ep.Ex_im_0 * ep.Ex_im_0 + ep.Ey_re_0 * ep.Ey_re_0 + ep.Ey_im_0 * ep.Ey_im_0 +
-                  ep.Ez_re_0 * ep.Ez_re_0 + ep.Ez_im_0 * ep.Ez_im_0;
+      for (const auto& ep : ds.exitPoints) {
+        if (fSchema == 2)
+          ex += ep.w * (e ? ep.Ex_re_1 * ep.Ex_re_1 + ep.Ex_im_1 * ep.Ex_im_1 + ep.Ey_re_1 * ep.Ey_re_1 + ep.Ey_im_1 * ep.Ey_im_1
+                          : ep.Ex_re_0 * ep.Ex_re_0 + ep.Ex_im_0 * ep.Ex_im_0 + ep.Ey_re_0 * ep.Ey_re_0 + ep.Ey_im_0 * ep.Ey_im_0);
+        else
+          ex += e ? ep.Ex_re_1 * ep.Ex_re_1 + ep.Ex_im_1 * ep.Ex_im_1 + ep.Ey_re_1 * ep.Ey_re_1 + ep.Ey_im_1 * ep.Ey_im_1 +
+                    ep.Ez_re_1 * ep.Ez_re_1 + ep.Ez_im_1 * ep.Ez_im_1
+                  : ep.Ex_re_0 * ep.Ex_re_0 + ep.Ex_im_0 * ep.Ex_im_0 + ep.Ey_re_0 * ep.Ey_re_0 + ep.Ey_im_0 * ep.Ey_im_0 +
+                    ep.Ez_re_0 * ep.Ez_re_0 + ep.Ez_im_0 * ep.Ez_im_0;
+      }
       if (!(ff > 0.) || !(ex > 0.)) {
         G4ExceptionDescription ed;
         ed << "Dataset " << dirStem << " key (" << key.first << ", " << key.second << "): T" << e << " = " << T
@@ -321,11 +372,15 @@ void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag, const BBRDat
   }
 }
 
-// waveguide.csv columns:
+// waveguide.csv columns, 1.x:
 //   Freq(0) Ephi(1) IWavePhi(2) IWaveTheta(3) OutgoingPower(4) IngoingPower(5)
 //   X(6) Y(7) Z(8) Ex_real(9) Ey_real(10) Ez_real(11) Ex_imag(12) Ey_imag(13) Ez_imag(14)
+// 2.x (the 2.0 positions; HF-038, HF-041, OR-034):
+//   ... X(6) Y(7) Z(8) Ex_real(9) Ex_imag(10) Ey_real(11) Ey_imag(12) Ez_real(13) Ez_imag(14)
+//   InterceptFactor(15)
 void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDatasetSidecar* sc)
 {
+  const bool v2 = sc && sc->schemaMajor == 2;
   std::ifstream f(path);
   if (!f)
     G4Exception("BBRHFSSData::LoadWaveguide", "BBR002", FatalException,
@@ -339,11 +394,12 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
   // sit at the same (X, Y, Z) (BBR012), as for the far field.
   std::map<std::pair<G4double,G4double>, std::size_t> rowIdx;
   std::map<std::pair<G4double,G4double>, bool>         tSet;
+  std::map<std::pair<G4double,G4double>, G4double>     firstFactor;   // 2.x: the key's first InterceptFactor
 
   while (std::getline(f, line)) {
     auto v = SplitCSV(line);
     if (v.empty()) continue;                    // a blank line (also a bare CRLF)
-    if (!FieldCountOK(v, 15, path)) continue;
+    if (!FieldCountOK(v, v2 ? 16 : 15, path)) continue;
     CheckFrequencyColumn(path, v[0]);
 
     G4double iwPhi  = Num(v[2], path, "IWavePhi");
@@ -353,21 +409,83 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
     G4double x      = Num(v[6], path, "X");
     G4double y      = Num(v[7], path, "Y");
     G4double z      = Num(v[8], path, "Z");
-    G4double Ex_re  = Num(v[9], path, "Ex_real");
-    G4double Ey_re  = Num(v[10], path, "Ey_real");
-    G4double Ez_re  = Num(v[11], path, "Ez_real");
-    G4double Ex_im  = Num(v[12], path, "Ex_imag");
-    G4double Ey_im  = Num(v[13], path, "Ey_imag");
-    G4double Ez_im  = Num(v[14], path, "Ez_imag");
+    G4double Ex_re, Ey_re, Ez_re, Ex_im, Ey_im, Ez_im;
+    if (v2) {   // never the 1.0 map: under 2.0 it would read Re Ex, Im Ex, Im Ey, Re Ez as E_t
+      Ex_re = Num(v[9], path, "Ex_real");
+      Ex_im = Num(v[10], path, "Ex_imag");
+      Ey_re = Num(v[11], path, "Ey_real");
+      Ey_im = Num(v[12], path, "Ey_imag");
+      Ez_re = Num(v[13], path, "Ez_real");
+      Ez_im = Num(v[14], path, "Ez_imag");
+    } else {
+      Ex_re = Num(v[9], path, "Ex_real");
+      Ey_re = Num(v[10], path, "Ey_real");
+      Ez_re = Num(v[11], path, "Ez_real");
+      Ex_im = Num(v[12], path, "Ex_imag");
+      Ey_im = Num(v[13], path, "Ey_imag");
+      Ez_im = Num(v[14], path, "Ez_imag");
+    }
 
     auto key = MakeKey(iwPhi, iwThe);
     auto& ds = fData[key];
 
+    // 2.x row checks against the key's sidecar record (BBR012, naming key, polarization and
+    // value). The record is looked up with the row's raw angles, the sidecar's own 1e-9 degree rule;
+    // C2 matches keys after rounding to 0.01 degree, so a key without a record is not left to it:
+    // it would skip every check below and the OR-038 dark masking.
+    G4double factor = 1.;
+    const BBRKeyRecord* rec = v2 ? sc->Key(iwPhi, iwThe) : nullptr;
+    auto bad = [&](const std::string& what) {
+      G4ExceptionDescription ed;
+      ed << path << ", key (" << Repr(iwPhi) << ", " << Repr(iwThe) << ") polarization " << ephi_flag << ": " << what
+         << " (sidecar " << sc->path << ")";
+      G4Exception("BBRHFSSData::LoadWaveguide", "BBR012", FatalException, ed);
+    };
+    if (v2 && !rec)
+      bad("the key has no per-key record in the sidecar (angles matched to 1e-9 degree against the declared "
+          "excitation grid)");
+    if (v2) {
+      factor = Num(v[15], path, "InterceptFactor");
+      if (outPow < 0.)
+        bad("OutgoingPower " + Repr(outPow) + " is negative; the exit flux is non-negative, so a negative value would "
+            "make the key's transmittance negative");
+      if (tSet[key] && FarRel(factor, firstFactor[key]))
+        bad("InterceptFactor " + Repr(factor) + " differs from the key's first row, " + Repr(firstFactor[key]) +
+            ", by more than 1e-6 relative: not constant within the key");
+      if (rec) {
+        if (FarRel(factor, rec->cK))
+          bad("InterceptFactor " + Repr(factor) + " differs from the sidecar's transmittance.c_key " + Repr(rec->cK) +
+              " by more than 1e-6 relative");
+        const G4double closed = BBRDatasetSidecar::InterceptFactor(rec->thetaDeg, sc->incidentThetaDeg);
+        if (FarRel(factor, closed))
+          bad("InterceptFactor " + Repr(factor) + " differs from " + Repr(closed) +
+              ", the closed form of the declared grid, by more than 1e-6 relative");
+        if ((ephi_flag ? rec->dark1 : rec->dark0) && outPow != 0.)
+          bad("the sidecar declares this basis dark, but OutgoingPower = " + Repr(outPow) +
+              "; a dark basis has OutgoingPower exactly 0 on every row of its key (OR-038)");
+      }
+    }
+
     // Transmittance is constant per (IWavePhi, IWaveTheta): read from first row.
-    // The raw ratio can exceed 1 (HFSS port normalization); the constructor
-    // normalizes each key once rho is known.
+    // 1.x: the raw ratio can exceed 1 (HFSS port normalization); the constructor
+    // normalizes each key once rho is known. 2.x: Out / (In * InterceptFactor), kept
+    // above 1 (the per-photon cap), and equal to the sidecar's t_flux / c_k.
     if (!tSet[key]) {
-      const G4double T = (inPow > 0.) ? outPow / inPow : 0.;
+      G4double T;
+      if (v2) {
+        T = (inPow * factor > 0.) ? outPow / (inPow * factor) : 0.;
+        firstFactor[key] = factor;
+        if (rec) {
+          const G4bool dark = ephi_flag ? rec->dark1 : rec->dark0;
+          const G4double tf = (ephi_flag ? rec->tFlux1 : rec->tFlux0) / rec->cK;
+          if (dark ? (T != 0. || tf != 0.) : FarRel(T, tf))
+            bad("T = OutgoingPower / (IngoingPower * InterceptFactor) = " + Repr(T) + " but the sidecar's t_flux / c_k = " +
+                Repr(tf) + (dark ? "; a dark basis has both exactly 0" : ", more than 1e-6 relative apart"));
+          (ephi_flag ? ds.dark1 : ds.dark0) = dark;
+        }
+      } else {
+        T = (inPow > 0.) ? outPow / inPow : 0.;
+      }
       if (ephi_flag == 0) ds.T_Ephi0 = T;
       else                ds.T_Ephi1 = T;
       tSet[key] = true;
@@ -532,12 +650,7 @@ void BBRHFSSData::CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4Strin
   // min + i (max - min)/(count - 1), matched to 1e-6 of that step (to the range tolerance when the
   // axis has one node). The dataset-wide counts above cannot see a repeated row, an uneven axis
   // or keys that differ in compensating ways.
-  auto node = [](G4double v, const BBRAxisRange& a, G4double tol) -> long {
-    if (a.count <= 1) return std::abs(v - a.min) <= tol ? 0 : -1;
-    const G4double step = (a.max - a.min) / (a.count - 1);
-    const long i = std::lround((v - a.min) / step);
-    return (i >= 0 && i < a.count && std::abs(v - (a.min + i * step)) <= 1e-6 * step) ? i : -1;
-  };
+  const auto& node = AxisNode;
   auto at = [](const BBRAxisRange& a, long i) { return a.count <= 1 ? a.min : a.min + i * (a.max - a.min) / (a.count - 1); };
   auto axis = [&](const char* name, const BBRAxisRange& a) {
     return std::string(name) + " " + num(a.min) + " to " + num(a.max) + " in " + std::to_string(a.count) + " nodes";
@@ -598,8 +711,10 @@ G4double BBRHFSSData::GetTransmittance(G4double E_theta, G4double E_phi,
                                        G4double iwaveTheta_deg) const
 {
   const auto& ds = FindDataset(iwavePhi_deg, iwaveTheta_deg);
-  // The load-time normalization keeps the largest T over linear polarizations at
+  // 1.x: the load-time normalization keeps the largest T over linear polarizations at
   // or below 1; the clamp guards against rounding and non-unit (E_theta, E_phi).
+  // 2.x: T0 and T1 are kept above 1 and the clamp is the per-photon cap (HF-039(2)); a
+  // dark basis has T = 0 and rho = 0, so it adds nothing (OR-038).
   G4double T = E_theta*E_theta * ds.T_Ephi0 + E_phi*E_phi * ds.T_Ephi1
              + 2.*E_theta*E_phi * std::sqrt(ds.T_Ephi0 * ds.T_Ephi1) * ds.rho_re;
   return std::min(1., std::max(0., T));
@@ -618,6 +733,8 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
   const auto& ds = FindDataset(iwavePhi_deg, iwaveTheta_deg);
   const auto& ff = ds.farField;
   const std::size_t N = ff.size();
+  // OR-038: a dark basis enters no mixture (its stored far field is numerical residue).
+  const G4double cT = ds.dark0 ? 0. : E_theta, cP = ds.dark1 ? 0. : E_phi;
 
   // Runtime CDF: combined power |E_theta·F₀ + E_phi·F₁|² per far-field point,
   // weighted by sinT to account for solid angle dΩ = sinT·dT·dPhi (this also
@@ -631,10 +748,10 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
     G4double sinT   = std::sin(fp.theta_deg * CLHEP::pi / 180.);
     G4double cosN   = sinT * std::cos(fp.phi_deg * CLHEP::pi / 180.);
     if (cosN < kMinNormalComponent) { cdf[i] = sum; continue; }
-    G4double Eth_re = E_theta*fp.rEtheta_re_0 + E_phi*fp.rEtheta_re_1;
-    G4double Eth_im = E_theta*fp.rEtheta_im_0 + E_phi*fp.rEtheta_im_1;
-    G4double Eph_re = E_theta*fp.rEphi_re_0   + E_phi*fp.rEphi_re_1;
-    G4double Eph_im = E_theta*fp.rEphi_im_0   + E_phi*fp.rEphi_im_1;
+    G4double Eth_re = cT*fp.rEtheta_re_0 + cP*fp.rEtheta_re_1;
+    G4double Eth_im = cT*fp.rEtheta_im_0 + cP*fp.rEtheta_im_1;
+    G4double Eph_re = cT*fp.rEphi_re_0   + cP*fp.rEphi_re_1;
+    G4double Eph_im = cT*fp.rEphi_im_0   + cP*fp.rEphi_im_1;
     sum    += sinT * (Eth_re*Eth_re + Eth_im*Eth_im + Eph_re*Eph_re + Eph_im*Eph_im);
     cdf[i]  = sum;
   }
@@ -671,10 +788,10 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
   // polarization ellipse: |Re[(a êθ + b êφ) e^{iψ}]| is maximal at
   // ψ = −arg(a² + b²)/2. (Using only the real parts — the previous behaviour
   // — fails when the amplitudes are predominantly imaginary.)
-  std::complex<G4double> a(E_theta*fp.rEtheta_re_0 + E_phi*fp.rEtheta_re_1,
-                           E_theta*fp.rEtheta_im_0 + E_phi*fp.rEtheta_im_1);
-  std::complex<G4double> b(E_theta*fp.rEphi_re_0   + E_phi*fp.rEphi_re_1,
-                           E_theta*fp.rEphi_im_0   + E_phi*fp.rEphi_im_1);
+  std::complex<G4double> a(cT*fp.rEtheta_re_0 + cP*fp.rEtheta_re_1,
+                           cT*fp.rEtheta_im_0 + cP*fp.rEtheta_im_1);
+  std::complex<G4double> b(cT*fp.rEphi_re_0   + cP*fp.rEphi_re_1,
+                           cT*fp.rEphi_im_0   + cP*fp.rEphi_im_1);
   std::complex<G4double> s = a*a + b*b;
   G4double psi = (std::abs(s) > 0.) ? -0.5 * std::arg(s) : 0.;
   std::complex<G4double> rot = std::polar(1., psi);
@@ -687,6 +804,53 @@ G4ThreeVector BBRHFSSData::SampleOutgoingDirection(
 
 // ---------------------------------------------------------------------------
 
+// HF-040: the trapezoid by grid index, a factor 1/2 per axis on its first and last node (wall rows
+// by index; a corner 1/4), the index from C4's node rule on the declared lattice, which every exit
+// point has passed in CheckAgainstSidecar; a disc ("uniform_disc") keeps w = 1. Dimensionless: the
+// area h_y h_z enters only the producer's scale integral. Runs on the unclamped positions: a point
+// the OR-020 clamp had moved 1 nm off its node would no longer match it, so that is fatal here.
+void BBRHFSSData::AssignQuadrature(const BBRDatasetSidecar& sc)
+{
+  if (sc.crossSection.shape != BBRCrossSection::kRectangle) return;
+  auto factor = [&](G4double v, const BBRAxisRange& a, const char* axis) {
+    if (a.count < 2) return 1.;   // refused at parse under 2.x (BBR024)
+    const long i = AxisNode(v, a, 0.);
+    if (i < 0) {
+      G4ExceptionDescription ed;
+      ed << "Exit coordinate " << axis << " = " << Repr(v) << " m is not a node of the lattice declared in " << sc.path
+         << "; quadrature weights are assigned on the unclamped lattice, before the OR-020 clamp.";
+      G4Exception("BBRHFSSData::AssignQuadrature", "BBR012", FatalException, ed);
+    }
+    return (i == 0 || i == a.count - 1) ? 0.5 : 1.;
+  };
+  for (auto& [key, ds] : fData)
+    for (auto& ep : ds.exitPoints) ep.w = factor(ep.y, sc.exitY, "Y") * factor(ep.z, sc.exitZ, "Z");
+}
+
+// OR-020: an exit point on (or, within C5's tolerance, past) a wall is moved to
+// kClampInset_m inside the declared section, so it lies strictly inside a solid of exactly that
+// section. A clamp, not a shift: points already that far inside do not move. Weights and the
+// Ephi pairing are untouched (both polarizations share one ExitPoint).
+G4int BBRHFSSData::ClampExitPoints(const BBRCrossSection& cs)
+{
+  const G4double d = BBRCrossSection::kClampInset_m;
+  G4int n = 0;
+  for (auto& [key, ds] : fData)
+    for (auto& ep : ds.exitPoints) {
+      const G4double y0 = ep.y, z0 = ep.z;
+      if (cs.shape == BBRCrossSection::kRectangle) {
+        const G4double ym = cs.yHalf_m - d, zm = cs.zHalf_m - d;
+        if (std::abs(ep.y) > ym) ep.y = std::copysign(ym, ep.y);
+        if (std::abs(ep.z) > zm) ep.z = std::copysign(zm, ep.z);
+      } else {
+        const G4double r = std::hypot(ep.y, ep.z), rm = cs.radius_m - d;
+        if (r > rm) { ep.y *= rm / r; ep.z *= rm / r; }
+      }
+      if (ep.y != y0 || ep.z != z0) ++n;
+    }
+  return n;
+}
+
 G4ThreeVector BBRHFSSData::SampleExitPosition(
     G4double E_theta, G4double E_phi,
     G4double iwavePhi_deg, G4double iwaveTheta_deg,
@@ -698,19 +862,26 @@ G4ThreeVector BBRHFSSData::SampleExitPosition(
   const auto& eps = ds.exitPoints;
   const std::size_t M = eps.size();
 
-  // Runtime CDF: combined |E_theta·E₀(x,y) + E_phi·E₁(x,y)|² per exit point.
+  // Runtime CDF: combined |E_theta·E₀(x,y) + E_phi·E₁(x,y)|² per exit point (1.x), or
+  // w·|E_theta·E_t0 + E_phi·E_t1|² over the tangential (Ex, Ey) with the quadrature weight
+  // (2.x, HF-040). A dark basis enters no mixture (OR-038; never under 1.x).
+  const G4double cT = ds.dark0 ? 0. : E_theta, cP = ds.dark1 ? 0. : E_phi;
   std::vector<G4double> cdf(M);
   G4double sum = 0.;
   for (std::size_t j = 0; j < M; ++j) {
     const auto& ep = eps[j];
-    G4double px_re = E_theta*ep.Ex_re_0 + E_phi*ep.Ex_re_1;
-    G4double px_im = E_theta*ep.Ex_im_0 + E_phi*ep.Ex_im_1;
-    G4double py_re = E_theta*ep.Ey_re_0 + E_phi*ep.Ey_re_1;
-    G4double py_im = E_theta*ep.Ey_im_0 + E_phi*ep.Ey_im_1;
-    G4double pz_re = E_theta*ep.Ez_re_0 + E_phi*ep.Ez_re_1;
-    G4double pz_im = E_theta*ep.Ez_im_0 + E_phi*ep.Ez_im_1;
-    sum    += px_re*px_re + px_im*px_im + py_re*py_re + py_im*py_im
-            + pz_re*pz_re + pz_im*pz_im;
+    G4double px_re = cT*ep.Ex_re_0 + cP*ep.Ex_re_1;
+    G4double px_im = cT*ep.Ex_im_0 + cP*ep.Ex_im_1;
+    G4double py_re = cT*ep.Ey_re_0 + cP*ep.Ey_re_1;
+    G4double py_im = cT*ep.Ey_im_0 + cP*ep.Ey_im_1;
+    if (fSchema == 2) {
+      sum += ep.w * (px_re*px_re + px_im*px_im + py_re*py_re + py_im*py_im);
+    } else {
+      G4double pz_re = cT*ep.Ez_re_0 + cP*ep.Ez_re_1;
+      G4double pz_im = cT*ep.Ez_im_0 + cP*ep.Ez_im_1;
+      sum    += px_re*px_re + px_im*px_im + py_re*py_re + py_im*py_im
+              + pz_re*pz_re + pz_im*pz_im;
+    }
     cdf[j]  = sum;
   }
 

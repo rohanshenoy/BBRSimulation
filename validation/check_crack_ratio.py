@@ -9,7 +9,7 @@ Input: the second run of validation/G4Macros/Validation_CrackTransmit.mac,
 output/bbr_ratio.root (the regression runner reads it from
 <build>/regression/transmit/output/): 200 000 Planck photons at 4 K from a thin
 slab just off the Cu face, centred between the two cracks so both see the same
-illumination, which gives ~640 / ~1290 entries. Any Planck run that
+illumination, which gives 612 / 1266 entries. Any Planck run that
 illuminates both cracks alike works too, e.g. planck_10K.mac (1M events,
 ~70 / ~180); planck.mac gives too few, and a fixed-gun run at one crack has no
 ratio to test.
@@ -28,8 +28,8 @@ from bbrsim import select
 PATH = sys.argv[1] if len(sys.argv) > 1 else "output/bbr.root"
 
 # Aperture areas [mm^2]
-A1 = 2 * 5.1 * 2 * 0.026   # crack1
-A2 = 2 * 5.1 * 2 * 0.051   # crack2
+A1 = 2 * 5.0 * 2 * 0.025   # crack1
+A2 = 2 * 5.0 * 2 * 0.050   # crack2
 expected_ratio = A2 / A1
 
 df = load_crossings(PATH)

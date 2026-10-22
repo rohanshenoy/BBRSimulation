@@ -1,18 +1,21 @@
 """
 check_dataset_sidecars.py
 Every HFSS dataset under the given waveguides directories is complete and has a
-schema-1 sidecar that passes bbrsim.sidecar.check_full. A dataset <stem> =
+schema-1.x or schema-2.x sidecar that passes bbrsim.sidecar.check_full. A dataset <stem> =
 <id>_<freq>GHz is the trio <stem>_Ephi=0/, <stem>_Ephi=1/ and
 <stem>.dataset.json; any other file in the directory (a tree manifest,
 SHA256SUMS) is ignored. Per dataset:
   * all three parts are present (a lone part is a FAIL, so a lost Ephi=0
     directory cannot silently drop a grid frequency);
   * the checks BBRsim's C++ runs (F1-F11, F13; codes BBR024 / BBR025);
-  * the full modes block re-derived from the cross-section;
+  * under 1.x the full modes block re-derived from the cross-section; under 2.x
+    the regime-cutoff list, the per-key records and the fixed strings;
   * the sha256, size and row count of the four CSVs;
-  * the CSV checks C1-C5.
-The frequencies of one ID in one directory must also agree on the
-frequency-independent blocks; a FAIL names the blocks that differ.
+  * the CSV checks C1-C5, and under 2.x the row checks of the loader (the
+    InterceptFactor column, the dark bases, the two T sources).
+The frequencies of one ID in one directory must also agree on the schema major,
+the incidence grid and the frequency-independent blocks; a FAIL names the blocks
+that differ.
 
 Output: one PASS or FAIL line per dataset, a FAIL line for a directory argument
 that cannot be read or holds no dataset, a count, then RESULT: PASS or

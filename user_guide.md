@@ -16,9 +16,11 @@ there, and output goes to `output/` under the directory you run from.
 ./bbrsimTestWorld <macro.mac>     # batch
 ```
 
-The geometry: a 50 cm vacuum world, a 4 mm Cu slab with its front face at
-x = 0, and two `vacuum_wg` crack volumes in the slab (crack1: 52 µm gap at
-z = 0; crack2: 102 µm gap at z = 3 mm).
+The geometry: a 50 cm vacuum world and two touching Cu plates with their front
+faces at x = 0, each as thick as its crack, holding two `vacuum_wg` crack
+volumes that equal the HFSS models (crack1: 1.0 mm long, 10 mm wide, 50 µm gap
+at z = 0, in a 1.0 mm plate; crack2: 1.5 mm long, 10 mm wide, 100 µm gap at
+z = 3 mm, in a 1.5 mm plate).
 
 In the commands below, `./bbrsimTestWorld` runs in `examples/testworld/build/`
 and the `conda run` commands run from the repository root. The light-pipe
@@ -29,7 +31,7 @@ example has its own [README](examples/lightpipe/README.md).
 ### 1. Planck thermal emitter
 
 The default mode. A 1×20×20 mm box at x = −50 mm emits photons with energies
-drawn from the Planck photon-number spectrum (10 GHz–20 THz) toward the slab
+drawn from the Planck photon-number spectrum (10 GHz–20 THz) toward the plates
 and the cracks.
 
 ```bash
@@ -66,8 +68,8 @@ an axial entry. At 500 GHz and normal incidence:
 
 | Crack | Gap | Observed T (40 000 photons) |
 |---|---|---|
-| crack1 | 52 µm | 50.0 ± 0.25 % |
-| crack2 | 102 µm | 50.3 ± 0.25 % |
+| crack1 | 50 µm | 50.0 ± 0.25 % |
+| crack2 | 100 µm | 50.3 ± 0.25 % |
 
 The expected value is exactly 50 %. A parallel-plate gap narrower than λ/2 is
 a perfect polarization filter: only the TEM mode, which has no cutoff,
@@ -77,6 +79,17 @@ the tables load, an incidence key whose largest transmittance over linear
 polarizations exceeds 1 has both polarizations' transmittances divided by it,
 so the maximum is 1 and their ratio is kept; a `[BBR] HFSS ... normalized to 1`
 line reports each such key.
+
+The crack volumes equal the HFSS models, so HFSS exit points that lie on a wall
+sit on the Geant4 wall too. When a frequency's tables load, every exit point
+closer than 1 nm to the declared cross-section's boundary, or past it by at most
+the 1e-6 relative tolerance, is moved to 1 nm inside it, with its weight and
+its Ephi pairing unchanged, and one line reports the count:
+`[BBR] HFSS <id>_<freq>GHz: N exit point(s) clamped 1 nm inside the declared
+cross-section` (4500 for crack1 and 6000 for crack2 at 500 GHz, 15 keys each).
+After an HFSS transmission the photon is placed 2e-8 mm (20 times Geant4's
+surface tolerance) inside the crack's exit face, so Geant4 11.1's boundary
+process does not warn `OpBoun06` on its first step into the world.
 
 To aim the fixed gun at a crack:
 
@@ -104,9 +117,21 @@ sidecars). There is no interpolation between frequencies; a photon beyond the
 grid uses the nearest edge, with one `BBR008` warning per crack and side.
 When a photon's frequency and the dataset serving it lie on opposite sides of
 the guide's lowest-mode cutoff (`modes.cutoff_ghz` in the sidecar: TE10 at
-14.99 GHz for the slab cracks, TE11 at 1757 GHz for the 50 µm round gap),
+14.99 GHz for the slot cracks, TE11 at 1757 GHz for the 50 µm round gap),
 BBRsim warns once with `BBR026`. The 2000 GHz round-gap data are therefore for
-fixed-energy gun runs only until a dataset below cutoff exists.
+fixed-energy gun runs only until a dataset below cutoff exists. A schema-2.x
+sidecar lists every regime cutoff (`modes.regime_cutoffs_ghz`) and the warning
+names the mode it crosses (`mode=<label>`); a 2.x table at or above its
+cross-term limit also raises `BBR028` once.
+
+After a transmission the photon starts just inside the crack on the ray through
+its sampled exit point. `exit_start_normal` in the `[BBR] run <id> ...` line counts
+the transmissions that start beside a wall and graze away from it (the on-ray start
+would cross the wall behind); they never hit a wall, and their exit-plane crossing
+moves inward by at most inset x t/n. Photons grazing toward a wall use the on-ray
+start and are counted by neither counter, and the tree check's `exit direction` row
+proves none of them hits a wall; `exit_start_fallback` counts starts valid in
+neither way (see `validation/README.md`, Dataset sidecars).
 
 ### 3. Copper reflectance
 
@@ -288,7 +313,7 @@ output (default `output/bbr.root` in the current directory) through the
 | `check_crack_frequency.py` | dataset choice per photon on the mock five-frequency tree: 89 checks (`--data-dir`) |
 | `check_round_gap.py` | the opt-in straight round gap at 2000 GHz on its mock dataset: transmittance per polarization, exit positions inside the HFSS radius, the radial exit profile per polarization and the mean exit direction, 49 checks over nine runs, one of them the startup crack line in the run log (`--data-dir`, `--log`) |
 | `check_invariants.py` | no photon ever travels inside a metal, and every photon death is labelled correctly (`--allow-no-crossings` for a run that crosses no boundary) |
-| `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the two mock trees): every dataset is a complete trio with a valid schema-1 sidecar (full mode lists, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
+| `check_dataset_sidecars.py` | reads HFSS data trees, not output (the runner passes `data/waveguides` and the three mock trees): every dataset is a complete trio with a valid schema-1 or 2.x sidecar (the mode lists or regime cutoffs, CSV checksums, C1-C5), and the frequencies of one ID agree on the frequency-independent physics; see [Dataset sidecars](validation/README.md#dataset-sidecars) |
 | `check_tree_run.py` | reads a run that `validation/Scripts/make_tree_check.py` generated for an HFSS data tree: every photon used the right frequency table, and transmission, reflection and exit directions follow it, against `bbrsim.hfss` reading the same tree (`--log`); see [Real-tree check](validation/README.md#real-tree-check) |
 
 **Validator run by hand**, because it needs a large run:
@@ -335,19 +360,58 @@ write one (`bbrsim.sidecar.build_from_csvs`; the mock generators show how),
 then run `conda run -n bbrsim python validation/check_dataset_sidecars.py
 <dir>/waveguides` before the Geant4 run. The message names the absolute
 sidecar path and the field. See [Dataset
-sidecars](validation/README.md#dataset-sidecars).
+sidecars](validation/README.md#dataset-sidecars). A `BBR024` that names
+`geometry.extent_mm.l` or `.g` and the full width of the declared section means
+the sidecar contradicts itself (for a rectangle the two must agree to 1e-6
+relative): regenerate the sidecar from the producer's job, do not edit one number.
+Under schema 1, `provenance.material` must be a string or null; any other type is `BBR024`.
+Under schema 2.x it is required: null, an absent key or no `provenance` is
+`BBR024`, and the type message then reads "must be a string under schema 2.x".
+Other 2.x causes: a `schema_version` that is neither 1.x nor 2.x ("BBRsim reads
+1.x and 2.x"); two frequencies of one ID that differ in schema major or in the
+incidence grid (the message names the block); a malformed or contradictory
+per-key record; a `dark` basis whose `t_flux` is not 0; a rectangle axis with
+fewer than 2 nodes; an `exit_field.grid` step that is not (max - min)/(count - 1);
+a negative per-key `t_flux`; or, in the Python mirror only, a 16-column 2.x
+`waveguide.csv` read without its sidecar. In the C++ library a 16-column table
+loaded without a 2.x sidecar is `BBR013` (wrong field count; through the crack
+library a dataset without any sidecar stops at discovery as `BBR024`).
+
+A 2.x `BBR012` at load that says "has no per-key record" means a CSV key is off
+its declared incidence angle by more than 1e-9 degree (inside the 0.01 degree
+rounding of the key checks): fix the angle in the export, never the sidecar. One
+that says "OutgoingPower ... is negative" means a row holds a negative exit flux;
+the producer stops on that, so the file was altered or came from another tool.
 
 **`BBR025`**: the dataset declares a convention or a geometry BBRsim does not
 implement. The message names the field (a frame, incidence, far-field or
 polarization definition, the boundary model, or the modes block) and the one
 convention the sampler implements; or, at `/run/initialize`, it names the crack volume whose
-solid the declared exit cross-section does not fit strictly inside (make the
-Geant4 section larger than the HFSS one by a recorded margin, as the 52/102 µm
-test-world gaps are, and check that local x is the propagation axis: a bare
-`G4Tubs` has it on z); or, at the first CSV load of a frequency, it counts the
-exit points outside the declared cross-section. A dataset produced outside the
+solid does not equal the declared exit cross-section (the Geant4 section must
+equal the HFSS one to within 1 nm, or 1 nm plus 1e-6 relative where larger, as
+the test-world cracks do since OR-020; check also that local x is the
+propagation axis: a bare `G4Tubs` has it on z); or, at the first CSV load of a
+frequency, it counts the exit points outside the declared cross-section. Two further messages name the
+length and the material. `the crack volume's length ... differs from the HFSS model's ... mm` means the
+solid's extent along local x is not `geometry.extent_mm.p` (within 1 nm, or 1 nm plus 1e-6 relative where
+longer): the Geant4 crack must be exactly as long as the HFSS model, as the test-world plates make it.
+`provenance.material is "..."; the gap must be vacuum` means the dataset was solved with a gap material
+other than vacuum, which the sampler does not model (a null material in a legacy sidecar is accepted). A dataset produced outside the
 canonical pose is rejected, not remapped. See [Dataset
-sidecars](validation/README.md#dataset-sidecars).
+sidecars](validation/README.md#dataset-sidecars). Under schema 2.x it also names a fixed string, a recomputed value
+or a mode the reader's own derivation does not give: `transmittance.cell_90`,
+a `c_k`, `modes.regime_cutoffs_ghz`, `cross_term.valid_below_ghz`,
+`cell_90_assumes` (an emitter other than `uniform_theta`), `exit_field.columns`
+or a `reference.passed` that is not true; a declared theta list without a 90 degree
+entry is refused the same way.
+
+**`BBR012`**: a CSV does not match its sidecar (a far-field grid, exit lattice or row count
+different from the declaration). Under schema 2.x it also reports `InterceptFactor`
+that is not constant within a key or differs from the key's c_k or from the closed
+form of the declared grid; a dark basis with a nonzero `OutgoingPower` on any row; and
+a key whose T, `OutgoingPower` / (`IngoingPower` x `InterceptFactor`), differs from the
+sidecar's `t_flux` / c_k (1e-6 relative). The message names the key, the polarization
+and the value. Regenerate the dataset; BBRsim never resets T to make a row fit.
 
 **`BBR027`**: a dataset gives a transmitting polarization nowhere to go. At
 the first load of a frequency, a key's basis polarization has T > 0 but its
@@ -359,15 +423,25 @@ inconsistent: check it with `check_dataset_sidecars.py` and ask the HFSS side
 for a re-export. See [Dataset sidecars](validation/README.md#dataset-sidecars).
 
 **A `BBR026` banner in a Planck run**: a warning, not an error. A photon's
-frequency and the grid frequency serving it lie on opposite sides of the
-guide's lowest-mode cutoff (`modes.cutoff_ghz`), so the table was computed in
-the other propagation regime; the photon is served unchanged and the warning
-appears once per dataset and direction. Expected in a broadband run on a
+frequency and the grid frequency serving it lie on opposite sides of a regime
+cutoff of the guide (the lowest mode, `modes.cutoff_ghz`, under schema 1; every
+`modes.regime_cutoffs_ghz` entry under 2.x), so the table was computed in the
+other propagation regime; the photon is served unchanged and the warning
+appears once per dataset, mode and direction (`mode=<label>` in the text). Expected in a broadband run on a
 single-frequency grid (the 2000 GHz round gap is above its 1757 GHz cutoff,
 which is why it is for gun runs only); unexpected in a fixed-energy gun run
 whose energy was meant to match the dataset, where it signals the wrong
 dataset or frequency. The runner tolerates it only where it is expected
 ([Dataset sidecars](validation/README.md#dataset-sidecars)).
+
+**A `BBR028` banner**: a warning, not an error, for schema-2.x data only. A table at
+or above the dataset's polarization-filter limit (`cross_term.valid_below_ghz`)
+served a photon, so the polarization cross term, declared valid only below that
+limit, is not trusted for it; the table is used unchanged and the warning appears
+once per dataset. Expected for the 2000 GHz round gap (limit 1757 GHz); in a run
+meant to stay below the limit it means the wrong frequency was served. The
+real-tree check expects it exactly where the manifest implies it
+([Real-tree check](validation/README.md#real-tree-check)).
 
 **No `[BBR] reflectance` lines**: expected with many threads; see
 [Copper reflectance](#3-copper-reflectance).

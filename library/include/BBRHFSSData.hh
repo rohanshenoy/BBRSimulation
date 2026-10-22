@@ -10,6 +10,7 @@
 #include <vector>
 
 struct BBRDatasetSidecar;
+struct BBRCrossSection;
 
 // Loads HFSS far-field and waveguide CSVs and samples the diffraction boundary
 // condition per Wang (2025) eqs. 54-58.
@@ -23,6 +24,18 @@ struct BBRDatasetSidecar;
 // CDFs are built at runtime (not precomputed) so the E_theta×E_phi cross term
 // in |E_theta·F₀ + E_phi·F₁|² is handled exactly.
 //
+// Schema 2.x (the sidecar's schemaMajor; OR-034, OR-038, HF-040 to HF-042): the waveguide
+// CSV has 16 columns read by the 2.0 positions, Ex = (9, 10), Ey = (11, 12), Ez = (13, 14)
+// as (re, im) and InterceptFactor = 15 (never the 1.0 map). T_p = OutgoingPower /
+// (IngoingPower × InterceptFactor) of the key's first row, kept above 1: the clamp in
+// GetTransmittance is the per-photon cap, and there is no load-time rescale. Each exit
+// point carries a quadrature weight w, assigned from the unclamped position by grid index
+// before the OR-020 clamp: a rectangle's trapezoid (1/2 per axis on its first and last
+// node, a corner 1/4), 1 on a disc. The exit sampler draws w·|E_t|² over (Ex, Ey) only,
+// and ρ = Σ w E_t0·E_t1* / √(Σ w|E_t0|² Σ w|E_t1|²). A dark basis (the sidecar's
+// dark0/dark1) has mixing coefficient 0 in both samplers and ρ = 0. Under 1.x every w is 1,
+// the density is |E|² over all three components, and the rescale below applies.
+//
 // Fatal G4Exception codes raised while loading:
 //   BBR000  no incidence key in either CSV
 //   BBR001  far_field.csv cannot be opened
@@ -33,11 +46,19 @@ struct BBRDatasetSidecar;
 //   BBR012  an Ephi=1 row does not match the Ephi=0 row at the same index
 //           (X/Y/Z of an exit point, Phi/Theta of a far-field row), or the
 //           two files have different row counts for a key; with a sidecar,
-//           also C3-C4 (validation/README.md, Dataset sidecars)
+//           also C3-C4 (validation/README.md, Dataset sidecars); under 2.x
+//           also, naming key, polarization and value: InterceptFactor not
+//           constant within a key, or not the sidecar's c_key or the closed
+//           form of the declared grid (1e-6 relative); the CSV T and the
+//           sidecar's t_flux / c_k disagreeing beyond 1e-6 relative on a lit
+//           basis; a dark basis with OutgoingPower other than exactly 0 on any
+//           row of its key (OR-038)
 //   BBR013  a numeric field is not a number or not finite, or a non-empty
-//           row has the wrong number of fields; with a sidecar, also C1
-//           (validation/README.md, Dataset sidecars)
+//           row has the wrong number of fields (15 under 1.x, 16 under 2.x);
+//           with a sidecar, also C1 (validation/README.md, Dataset sidecars)
 //   BBR025  (with a sidecar) an exit point outside the declared cross-section
+//   BBR027  a basis with T > 0 and no outward far-field intensity or no exit
+//           field (under 2.x, w·|E_t|² zero at every exit point)
 class BBRHFSSData
 {
  public:
@@ -72,10 +93,12 @@ class BBRHFSSData
   // Σ E₀·E₁* / √(Σ|E₀|² Σ|E₁|²) of the two basis exit fields: the transmitted
   // power is quadratic in the total exit field, so the two powers add without a
   // cross term only when the basis fields are orthogonal over the exit face.
-  // T₀ and T₁ are OutgoingPower/IngoingPower of the key's first row; where the
-  // largest T over linear polarizations (the top eigenvalue of [[T₀, c], [c, T₁]],
+  // Under 1.x T₀ and T₁ are OutgoingPower/IngoingPower of the key's first row; where
+  // the largest T over linear polarizations (the top eigenvalue of [[T₀, c], [c, T₁]],
   // c = √(T₀T₁)·Re ρ) exceeds 1, an HFSS port-normalization artefact, the load
-  // divides both by it and logs "[BBR] HFSS … normalized to 1".
+  // divides both by it and logs "[BBR] HFSS … normalized to 1". Under 2.x they are
+  // OutgoingPower/(IngoingPower·InterceptFactor), kept as they are; the clamp is the
+  // per-photon cap.
   G4double GetTransmittance(G4double E_theta, G4double E_phi,
                             G4double iwavePhi_deg, G4double iwaveTheta_deg) const;
 
@@ -107,6 +130,7 @@ class BBRHFSSData
 
   struct ExitPoint {
     G4double x, y, z;           // HFSS SI coordinates (meters)
+    G4double w = 1.;            // quadrature weight (2.x; 1 under 1.x), from the unclamped position
     G4double Ex_re_0, Ex_im_0, Ey_re_0, Ey_im_0, Ez_re_0, Ez_im_0;  // Ephi=0
     G4double Ex_re_1, Ex_im_1, Ey_re_1, Ey_im_1, Ez_re_1, Ez_im_1;  // Ephi=1
   };
@@ -116,6 +140,7 @@ class BBRHFSSData
     G4double T_Ephi0 = 0.;   // transmittance, θ-polarised (Ephi=0) input
     G4double T_Ephi1 = 0.;   // transmittance, φ-polarised (Ephi=1) input
     G4double rho_re = 0.;  // Re of the normalized exit-field overlap <E0,E1>, for the polarization cross term
+    G4bool dark0 = false, dark1 = false;   // 2.x: a dark basis, mixing coefficient 0 in both samplers (OR-038)
     std::vector<ExitPoint> exitPoints;
   };
 
@@ -123,6 +148,7 @@ class BBRHFSSData
   std::map<std::pair<G4double, G4double>, AngleDataset> fData;
 
   G4double fFreqGHz = -1.;   // frequency of this dataset [GHz]
+  G4int fSchema = 1;         // the sidecar's schema major (1 without a sidecar)
 
   // Fatal BBR009 if the CSV's Freq column disagrees with fFreqGHz.
   void CheckFrequencyColumn(const G4String& path, const std::string& token) const;
@@ -131,6 +157,12 @@ class BBRHFSSData
   const AngleDataset& FindDataset(G4double iwavePhi_deg, G4double iwaveTheta_deg) const;
 
   void CheckAgainstSidecar(const BBRDatasetSidecar& sc, const G4String& dirStem) const;
+  // OR-020: moves every exit point within kClampInset_m of (or outside, by C5's tolerance) the
+  // declared section to that distance inside it; returns how many points moved.
+  G4int ClampExitPoints(const BBRCrossSection& cs);
+  // HF-040 (2.x): each exit point's quadrature weight from its grid index (C4's node rule) on the
+  // declared lattice: the trapezoid on a rectangle, 1 on a disc. Run before ClampExitPoints.
+  void AssignQuadrature(const BBRDatasetSidecar& sc);
 
   // ephi_flag: 0 = Ephi=0 CSV (fill _0 fields), 1 = Ephi=1 CSV (fill _1 fields).
   void LoadFarField(const G4String& path, int ephi_flag, const BBRDatasetSidecar* sc);

@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <sstream>
 #include <set>
 #include <thread>
 #include <vector>
@@ -31,6 +32,50 @@ void Grid(const std::filesystem::path& root, const std::string& id, std::initial
     };
     ds.ff0 = fix(ds.ff0); ds.ff1 = fix(ds.ff1); ds.wg0 = fix(ds.wg0); ds.wg1 = fix(ds.wg1);
     hfssfix::WriteDataset(root, id + "_" + f, ds);
+  }
+}
+// A dataset on NineKeyGrid2 (schema 2) or NineKeyGrid (schema 1) at one frequency: a crack2-like
+// rectangle (a = 10 mm, b = 100 um) or, for `disc`, a 50 um disc whose exit lattice is scaled into it.
+void GridModes(const std::filesystem::path& root, const std::string& id, int freq, bool disc, bool schema1 = false) {
+  auto d = schema1 ? hfssfix::NineKeyGrid() : hfssfix::NineKeyGrid2();
+  const std::string f = std::to_string(freq) + "GHz";
+  auto fix = [&](const std::string& csv, bool scaleY) {
+    std::istringstream in(csv);
+    std::string line, out;
+    bool header = true;
+    while (std::getline(in, line)) {
+      if (!header) {
+        for (std::size_t p = 0; (p = line.find("500GHz,", p)) != std::string::npos; p += f.size()) line.replace(p, 6, f);
+        if (scaleY) {
+          std::vector<std::string> v;
+          std::stringstream ss(line);
+          std::string t;
+          while (std::getline(ss, t, ',')) v.push_back(t);
+          if (v.size() > 8) {   // a waveguide row; far-field rows have 10 fields and are left alone
+            v[7] = hfssfix::detail::Fmt(std::strtod(v[7].c_str(), nullptr) * 2e-2);
+            line.clear();
+            for (std::size_t i = 0; i < v.size(); ++i) line += (i ? "," : "") + v[i];
+          }
+        }
+      }
+      header = false;
+      out += line + "\n";
+    }
+    return out;
+  };
+  d.ff0 = fix(d.ff0, false); d.ff1 = fix(d.ff1, false);
+  d.wg0 = fix(d.wg0, disc); d.wg1 = fix(d.wg1, disc);
+  const std::string stem = id + "_" + f;
+  hfssfix::Schema2Params p = hfssfix::Schema2From(stem, d);
+  p.tflux.assign(p.base.phis.size() * p.base.thetas.size(), std::array<double, 4>{0.6, 0.3, 0., 0.});
+  p.tflux[2] = {0.6, 0., 0., 1.};
+  if (disc) { p.base.disc = true; p.base.radius = 5e-5; }
+  else { p.base.yHalf = 5e-3; p.base.zHalf = 5e-5; }
+  if (schema1) {
+    const auto wg = hfssfix::WriteDataset(root, stem, d, false);
+    bbrtest::WriteFile(wg / (stem + ".dataset.json"), hfssfix::SidecarJson(p.base));
+  } else {
+    hfssfix::WriteDataset2(root, stem, d, p);
   }
 }
 double Pick(const char* id, double nu) { double chosen = -1; BBRCrackLibrary::Instance().Lookup(id, nu, chosen); return chosen; }
@@ -147,9 +192,9 @@ int main(int argc, char** argv) {
       p.yHalf = 4.0e-3;   // another exit section at one frequency
       bbrtest::WriteFile(d.path() / "waveguides" / "mix_500GHz.dataset.json", hfssfix::SidecarJson(p));
       BBRConfigManager::SetDataDir(d.path().string());
-      // The exit section, and the modes it determines, are named as the differing blocks.
+      // The exit section, the modes and the extent_mm l it determines are named as the differing blocks.
       ExpectG4Exception("BBR024", [] { Pick("mix", 50); }, "BBRCrackLibrary::Discover",
-                        "disagree on their frequency-independent physics, in block(s) modes, cross_section: ");
+                        "disagree on their frequency-independent physics, in block(s) geometry, modes, cross_section: ");
     }},
     {"validate_placed_cracks", [] {
       // Two placements of one id ("gap:1", "gap:2") with different solids: each is checked.
@@ -158,12 +203,12 @@ int main(int argc, char** argv) {
       auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
       auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
       new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
-      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapA");
       auto* thin = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 5 * mm, 0.020 * mm), BBRMaterials::GetVacuumWG(), "gapB");
       new G4PVPlacement(nullptr, {0, 0, -10 * mm}, ok, "gap:1", wlv, false, 0);
       new G4PVPlacement(nullptr, {0, 0, 10 * mm}, thin, "gap:2", wlv, false, 0);
       ExpectG4Exception("BBR025", [] { BBRCrackLibrary::Instance().ValidatePlacedCracks(); }, "BBRDatasetSidecar",
-                        "does not fit strictly inside crack volume gap:2");
+                        "does not equal crack volume gap:2");
     }},
     {"validate_placed_cracks_ok", [] {
       TempDir d; Grid(d.path(), "gap", {"50", "500"});
@@ -171,7 +216,7 @@ int main(int argc, char** argv) {
       auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
       auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
       new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
-      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapA");
       new G4PVPlacement(nullptr, {}, ok, "gap", wlv, false, 0);
       BBRCrackLibrary::Instance().ValidatePlacedCracks();
       // Once per process: the second call is a no-op, so a crack placed since is not checked.
@@ -188,8 +233,8 @@ int main(int argc, char** argv) {
       auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
       auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
       new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
-      auto* a = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 5 * mm, 0.026 * mm), BBRMaterials::GetVacuumWG(), "gapA");
-      auto* b = new G4LogicalVolume(new G4Box("gapB", 2.5 * mm, 5.5 * mm, 0.03 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      auto* a = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapA");
+      auto* b = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapB");
       new G4PVPlacement(nullptr, {0, 0, -10 * mm}, a, "gap:1", wlv, false, 0);
       new G4PVPlacement(nullptr, {0, 0, 10 * mm}, b, "gap:2", wlv, false, 0);
       CHECK(BBRCrackLibrary::Instance().PlacedCracksJson() == "[]");   // not validated yet
@@ -198,14 +243,17 @@ int main(int argc, char** argv) {
       CHECK(arr.is_array() && arr.size() == 2);
       if (!arr.is_array() || arr.size() != 2) return;
       const std::vector<std::pair<std::string, std::vector<double>>> want = {
-          {"gap:1", {4., 10., 0.052}}, {"gap:2", {5., 11., 0.06}}};
+          {"gap:1", {4., 9., 0.05}}, {"gap:2", {4., 9., 0.05}}};   // told apart by name and placement
       for (std::size_t i = 0; i < 2; ++i) {
         const auto& c = arr[i];
         CHECK(c.at("volume") == want[i].first);
         CHECK(c.at("dataset_id") == "gap");
         CHECK(c.at("geant4_extent_mm").is_array() && c.at("geant4_extent_mm").size() == 3);
         for (std::size_t k = 0; k < 3; ++k) CHECK_NEAR(c.at("geant4_extent_mm").at(k).get<double>(), want[i].second[k], 1e-9);
-        CHECK(c.at("hfss_extent_mm") == nlohmann::json::parse("{\"p\": 4, \"l\": 10, \"g\": 0.052}"));
+        const auto& hx = c.at("hfss_extent_mm");
+        CHECK_NEAR(hx.at("p").get<double>(), 4., 1e-12);
+        CHECK_NEAR(hx.at("l").get<double>(), 9., 1e-12);
+        CHECK_NEAR(hx.at("g").get<double>(), 0.05, 1e-12);
         const auto& fs = c.at("frequencies");
         CHECK(fs.is_array() && fs.size() == 2);
         if (!fs.is_array() || fs.size() != 2) continue;
@@ -231,6 +279,39 @@ int main(int argc, char** argv) {
       CHECK_NEAR(Pick("low", 20), 10, 0);     // photon above, served by the 10 GHz point below: warns
       CHECK(Handler().CountWarnings("BBR026") == 2);
       CHECK(Handler().CountWarnings("BBR008") == 0);   // in-grid selections never clamp
+      CHECK(Handler().CountWarnings("BBR026", "direction=below mode=TE10 ") == 1);
+      CHECK(Handler().CountWarnings("BBR026", "direction=above mode=TE10 ") == 1);
+    }},
+    {"cutoff_warning_regime", [] {
+      TempDir d; GridModes(d.path(), "c2", 500, false);
+      BBRConfigManager::SetDataDir(d.path().string());
+      CHECK_NEAR(Pick("c2", 1600), 500, 0);   // above TE01 (1498.96), table below it; TE10 lies below both
+      CHECK(Handler().CountWarnings("BBR026") == 1);
+      CHECK(Handler().CountWarnings("BBR026", "dataset=c2 direction=above mode=TE01 ") == 1);
+      CHECK_NEAR(Pick("c2", 1700), 500, 0);   // the same (mode, direction): silent
+      CHECK(Handler().CountWarnings("BBR026") == 1);
+      CHECK_NEAR(Pick("c2", 10), 500, 0);     // below TE10 (14.99), table above it; TE01 lies above both
+      CHECK(Handler().CountWarnings("BBR026") == 2);
+      CHECK(Handler().CountWarnings("BBR026", "dataset=c2 direction=below mode=TE10 ") == 1);
+      CHECK_NEAR(Pick("c2", 10), 500, 0);
+      CHECK(Handler().CountWarnings("BBR026") == 2);
+    }},
+    {"rho_limit_warning", [] {
+      TempDir d;
+      GridModes(d.path(), "disc2000", 2000, true);
+      GridModes(d.path(), "disc1500", 1500, true);
+      GridModes(d.path(), "disc1x", 2000, true, true);
+      BBRConfigManager::SetDataDir(d.path().string());
+      CHECK(Handler().CountWarnings("BBR028") == 0);
+      CHECK_NEAR(Pick("disc1500", 1500), 1500, 0);   // below the 1756.98 limit
+      CHECK_NEAR(Pick("disc1x", 2000), 2000, 0);     // schema 1: never
+      CHECK(Handler().CountWarnings("BBR028") == 0);
+      CHECK_NEAR(Pick("disc2000", 2000), 2000, 0);
+      CHECK(Handler().CountWarnings("BBR028") == 1);
+      CHECK(Handler().CountWarnings("BBR028", "BBR028 dataset=disc2000 grid_GHz=2000 valid_below_GHz=1756.98") == 1);
+      CHECK_NEAR(Pick("disc2000", 2000), 2000, 0);
+      CHECK(Handler().CountWarnings("BBR028") == 1);   // once per dataset
+      CHECK(Handler().CountWarnings("BBR026") == 0);   // no regime cutoff lies between photon and table
     }},
   });
 }

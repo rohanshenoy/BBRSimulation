@@ -7,11 +7,12 @@
 /vis/viewer/set/autoRefresh false
 /vis/verbose errors
 #
-# Geometry: hide the 50 cm world box; draw the Cu slab translucent and the two
+# Geometry: hide the 50 cm world box; draw the two Cu plates translucent and the two
 # HFSS crack volumes in colour (crack1 blue, crack2 purple).
 /vis/drawVolume
 /vis/geometry/set/visibility logic-World 0 false
-/vis/geometry/set/colour logic-CuSlab 0 0.85 0.45 0.2 0.35
+/vis/geometry/set/colour logic-CuPlateCrack1 0 0.85 0.45 0.2 0.35
+/vis/geometry/set/colour logic-CuPlateCrack2 0 0.85 0.45 0.2 0.35
 /vis/geometry/set/colour InfParallelPlate_crack1Rohan 0 0 0.4 1 1
 /vis/geometry/set/colour InfParallelPlate_crack2 0 0.8 0 0.8 1
 /vis/viewer/set/style surface

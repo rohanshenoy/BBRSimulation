@@ -12,21 +12,38 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from bbrsim import hfss
+from bbrsim import hfss, sidecar
+
+import schema2_fixture as fx
 
 CRACK1, CRACK2, ROUND = "InfParallelPlate_crack1Rohan", "InfParallelPlate_crack2", "RoundGap_r50um"
 GRID_KEYS = {"incident_phi_deg": [0.0, 45.0, 90.0],
              "incident_theta_deg": [0.0, 45.0, 90.0, 135.0, 180.0]}
 # Minimal sidecars: only the fields the generator reads (values from the legacy
 # crack1 sidecar and the round-gap mock).
-SLAB = {"modes": {"cutoff_ghz": 14.9896229, "polarization_filter_limit_ghz": 2997.92458},
+SLAB = {"schema_version": "1.0",
+        "modes": {"mode": "TE10", "cutoff_ghz": 14.9896229, "polarization_filter_limit_ghz": 2997.92458},
         "exit_field": {"cross_section": {"shape": "rectangle", "y_e_half_m": 0.005, "z_e_half_m": 2.5e-05}},
         "excitation": dict(GRID_KEYS)}
-DISC = {"modes": {"cutoff_ghz": 1756.984664434265, "polarization_filter_limit_ghz": 1756.984664434265},
+DISC = {"schema_version": "1.0",
+        "modes": {"mode": "TE11", "cutoff_ghz": 1756.984664434265, "polarization_filter_limit_ghz": 1756.984664434265},
         "exit_field": {"cross_section": {"shape": "disc", "radius_m": 5e-05}},
         "excitation": dict(GRID_KEYS)}
 LEGACY = {CRACK1: ["500"], CRACK2: ["500"]}
 MILESTONE = {CRACK1: ["180", "320", "569", "1010"], CRACK2: ["500"]}
+GRID35 = {"incident_phi_deg": [0.0, 22.5, 45.0, 67.5, 90.0],
+          "incident_theta_deg": [90.0, 105.0, 120.0, 135.0, 150.0, 165.0, 180.0]}
+# Minimal schema-2.0 sidecars: the fields the generator reads (crack2's section, the disc of the round gap).
+SLAB2 = {"schema_version": "2.0",
+         "modes": {"mode": "TE10", "cutoff_ghz": 14.9896229, "polarization_filter_limit_ghz": 1498.96},
+         "cross_term": {"valid_below_ghz": 1498.96},
+         "exit_field": {"cross_section": {"shape": "rectangle", "y_e_half_m": 0.005, "z_e_half_m": 5e-05}},
+         "excitation": dict(GRID35)}
+DISC2 = {"schema_version": "2.0",
+         "modes": {"mode": "TE11", "cutoff_ghz": 1756.984664434265, "polarization_filter_limit_ghz": 1756.984664434265},
+         "cross_term": {"valid_below_ghz": 1756.984664434265},
+         "exit_field": {"cross_section": {"shape": "disc", "radius_m": 5e-05}},
+         "excitation": dict(GRID35)}
 GUN_KINDS = ["normal_random", "normal_E_gap", "normal_E_long", "oblique_random", "oblique_random",
              "oblique_random", "oblique_diagonal_fixed"]
 
@@ -230,6 +247,51 @@ def test_refusals(repo_root, tmp_path, case, message):
     assert not (out / "tree_check.mac").exists() and not (out / "tree_check.json").exists()
 
 
+def test_run_plan_35_keys(repo_root, tmp_path):
+    """OR-036: the plan follows the declared 35-key grid; theta = 90 stays out of the gun runs."""
+    root = sidecar_tree(tmp_path / "data", {CRACK1: ["500"], CRACK2: ["500"]},
+                        {CRACK1: SLAB2, CRACK2: SLAB2})
+    r, man = generate(repo_root, root, tmp_path / "run")
+    assert r.returncode == 0, r.stderr
+    runs = [x for x in man["runs"] if x["dataset"] == CRACK1 and x["kind"] != "planck"]
+    count = lambda k: sum(x["kind"] == k for x in runs)
+    assert (count("normal_random"), count("oblique_random"), count("oblique_diagonal_fixed")) == (1, 25, 5)
+    assert count("normal_E_gap") == 1 and count("normal_E_long") == 1 and len(runs) == 33
+    on_grid = {(p, t) for p in GRID35["incident_phi_deg"] for t in GRID35["incident_theta_deg"]}
+    assert all(tuple(x["incidence_key"]) in on_grid for x in runs)
+    assert not any(x["incidence_key"][1] == 90.0 for x in runs)
+    assert sorted({x["incidence_key"][1] for x in runs if x["kind"] == "oblique_random"}) == \
+        [105.0, 120.0, 135.0, 150.0, 165.0]
+    assert sorted({x["incidence_key"][0] for x in runs if x["kind"] == "oblique_random"}) == \
+        GRID35["incident_phi_deg"]
+    assert [x["incidence_key"] for x in runs if x["kind"] == "oblique_diagonal_fixed"] == \
+        [[45.0, t] for t in (105.0, 120.0, 135.0, 150.0, 165.0)]
+
+
+def test_manifest_v2_fields(repo_root, tmp_path):
+    """The manifest is /2 and records, per dataset, the schema major, the regime cutoffs the log is
+    checked against and the cross-term limit (null under schema 1)."""
+    root = sidecar_tree(tmp_path / "data", {CRACK1: ["500"], CRACK2: ["500"], ROUND: ["2000"]},
+                        {CRACK1: SLAB2, CRACK2: SLAB2, ROUND: DISC2})
+    r, man = generate(repo_root, root, tmp_path / "run")
+    assert r.returncode == 0, r.stderr
+    assert man["schema"] == "bbrsim-tree-check/2"
+    c2 = man["datasets"][CRACK2]
+    assert c2["schema_major"] == 2 and c2["rho_valid_below_ghz"] == pytest.approx(1498.96)
+    modes = [m for m, _ in c2["regime_cutoffs"]]
+    assert modes[0] == "TE10" and "TE01" in modes and len(modes) == 14      # TE10 + the gap family, 0.1 mm
+    assert [g for _, g in c2["regime_cutoffs"]] == sorted(g for _, g in c2["regime_cutoffs"])
+    assert dict(c2["regime_cutoffs"])["TE01"] == pytest.approx(1498.962, rel=1e-6)
+    rg = man["datasets"][ROUND]
+    assert [m for m, _ in rg["regime_cutoffs"]] == ["TE11", "TM01", "TE21"]
+    assert rg["regime_cutoffs"][0][1] == pytest.approx(1756.9847, rel=1e-6) and rg["schema_major"] == 2
+    r, man = generate(repo_root, sidecar_tree(tmp_path / "data1", LEGACY), tmp_path / "run1")
+    assert r.returncode == 0, r.stderr
+    d1 = man["datasets"][CRACK1]
+    assert man["schema"] == "bbrsim-tree-check/2" and d1["schema_major"] == 1 and d1["rho_valid_below_ghz"] is None
+    assert d1["regime_cutoffs"] == [["TE10", pytest.approx(14.9896229)]]    # schema 1: the lowest mode only
+
+
 # --- the validator: pure functions -------------------------------------------------
 @pytest.fixture(scope="module")
 def checker(repo_root):
@@ -241,27 +303,59 @@ def checker(repo_root):
 
 def test_expected_warnings(checker):
     grids = {"a": [(180.0, "a_180GHz"), (320.0, "a_320GHz")], "b": [(500.0, "b_500GHz")]}
-    cutoffs = {"a": 14.9896229, "b": 14.9896229}
-    want = checker.expected_warnings([("a", 200.0, 180.0), ("b", 1e4, 500.0)], grids, cutoffs)
+    cutoffs = {"a": [("TE10", 14.9896229)], "b": [("TE10", 14.9896229)]}
+    none = {"a": None, "b": None}
+    want = checker.expected_warnings([("a", 200.0, 180.0), ("b", 1e4, 500.0)], grids, cutoffs, none)
     assert set(want.values()) == {0}            # inside the grid; a one-point grid never clamps
     want = checker.expected_warnings([("a", 100.0, 180.0), ("a", 2000.0, 320.0), ("a", 12.0, 180.0),
-                                      ("b", 12.0, 500.0)], grids, cutoffs)
+                                      ("b", 12.0, 500.0)], grids, cutoffs, none)
     assert want[("BBR008", "a", "low")] == 1 and want[("BBR008", "a", "high")] == 1
-    assert want[("BBR026", "a", "below")] == 1 and want[("BBR026", "b", "below")] == 1
-    assert want[("BBR008", "b", "low")] == 0 and want[("BBR026", "a", "above")] == 0
+    assert want[("BBR026", "a", "TE10", "below")] == 1 and want[("BBR026", "b", "TE10", "below")] == 1
+    assert want[("BBR008", "b", "low")] == 0 and want[("BBR026", "a", "TE10", "above")] == 0
     # 'above': a photon at or above the cutoff served from a grid point below it
-    disc, fc = {"r": [(1000.0, "r_1000GHz"), (2000.0, "r_2000GHz")]}, 1756.984664434265
-    want = checker.expected_warnings([("r", 1400.0, 1000.0), ("r", fc, 1000.0)], disc, {"r": fc})
-    assert want[("BBR026", "r", "above")] == 1 and want[("BBR026", "r", "below")] == 0
+    fc = 1756.984664434265
+    disc, cut = {"r": [(1000.0, "r_1000GHz"), (2000.0, "r_2000GHz")]}, {"r": [("TE11", fc)]}
+    want = checker.expected_warnings([("r", 1400.0, 1000.0), ("r", fc, 1000.0)], disc, cut, {"r": None})
+    assert want[("BBR026", "r", "TE11", "above")] == 1 and want[("BBR026", "r", "TE11", "below")] == 0
+
+
+def test_expected_warnings_per_mode(checker):
+    d = CRACK2
+    grids = {d: [(500.0, f"{d}_500GHz")]}
+    cutoffs = {d: [("TE10", 14.9896229), ("TE01", 1498.96)]}
+    want = checker.expected_warnings([(d, 10.0, 500.0), (d, 1600.0, 500.0)], grids, cutoffs, {d: None})
+    assert {k: v for k, v in want.items() if k[0] == "BBR026"} == {
+        ("BBR026", d, "TE10", "below"): 1, ("BBR026", d, "TE10", "above"): 0,
+        ("BBR026", d, "TE01", "below"): 0, ("BBR026", d, "TE01", "above"): 1}
+    # a photon between the two cutoffs, served from the 500 GHz table, crosses neither
+    want = checker.expected_warnings([(d, 100.0, 500.0)], grids, cutoffs, {d: None})
+    assert [k for k, v in want.items() if v] == []
+
+
+def test_expected_bbr028(checker):
+    fc = 1756.984664434265
+    grids = {"r": [(2000.0, "r_2000GHz")], "s": [(2000.0, "s_2000GHz")]}
+    cutoffs = {"r": [("TE11", fc)], "s": [("TE11", fc)]}
+    want = checker.expected_warnings([("r", 2000.0, 2000.0), ("r", 1900.0, 2000.0), ("s", 2000.0, 2000.0)],
+                                     grids, cutoffs, {"r": fc, "s": None})
+    assert want[("BBR028", "r")] == 1             # once per dataset, however many entries
+    assert want[("BBR028", "s")] == 0             # a schema-1 dataset never warns
+    below = checker.expected_warnings([("r", 1000.0, 1000.0)], {"r": [(1000.0, "r_1000GHz")]},
+                                      {"r": [("TE11", fc)]}, {"r": fc})
+    assert below[("BBR028", "r")] == 0            # a table below the limit does not warn
+    # the grid point decides, not the photon: a photon below the limit served from a table above it
+    edge = checker.expected_warnings([("r", 1700.0, 2000.0)], {"r": [(2000.0, "r_2000GHz")]},
+                                     {"r": [("TE11", fc)]}, {"r": fc})
+    assert edge[("BBR028", "r")] == 1
 
 
 LOG = """[BBR] HFSS dataset InfParallelPlate_crack1Rohan: 1 frequency grid point(s): 500 GHz (from /t/waveguides)
-[BBR] crack InfParallelPlate_crack1Rohan: HFSS (p, l, g) = (1, 10, 0.05) mm, Geant4 (x, y, z) = (4, 10.2, 0.052) mm; 1 sidecar(s) fit
+[BBR] crack InfParallelPlate_crack1Rohan: HFSS (p, l, g) = (1, 10, 0.05) mm, Geant4 (x, y, z) = (1, 10, 0.05) mm; 1 sidecar(s) fit
 G4WT1 > 
 -------- WWWW ------- G4Exception-START -------- WWWW -------
 *** G4Exception : BBR026
       issued by : BBRCrackLibrary::Lookup
-BBR026 dataset=InfParallelPlate_crack1Rohan direction=below nu_GHz=11.4 grid_GHz=500 cutoff_GHz=14.9896 (TE10) : the photon and the HFSS dataset serving it lie on opposite sides of the lowest-mode cutoff; the table is used unchanged. Reported once per dataset and direction.
+BBR026 dataset=InfParallelPlate_crack1Rohan direction=below mode=TE10 nu_GHz=11.4 grid_GHz=500 cutoff_GHz=14.9896 : the photon and the HFSS dataset serving it lie on opposite sides of a regime cutoff; the table is used unchanged. Reported once per dataset, mode and direction.
 *** This is just a warning message. ***
 -------- WWWW -------- G4Exception-END --------- WWWW -------
 G4WT3 > [BBR] HFSS InfParallelPlate_crack1Rohan_500GHz key (0, 180): max transmittance 1.05451 > 1 (port-normalization artefact), normalized to 1
@@ -270,11 +364,170 @@ G4WT3 > [BBR] HFSS InfParallelPlate_crack1Rohan_500GHz key (0, 180): max transmi
 
 def test_parse_log(checker):
     lg = checker.parse_log(LOG)
-    assert lg["warnings"] == {("BBR026", CRACK1, "below"): 1}
+    assert lg["warnings"] == {("BBR026", CRACK1, "TE10", "below"): 1}
     assert lg["banners"] == 1 and lg["geomnav"] == 0 and lg["other_codes"] == []
     assert len(lg["crack_lines"]) == 1 and len(lg["dataset_lines"]) == 1
     bad = checker.parse_log(LOG + "G4Exception-START\n*** G4Exception : BBR010\nGeomNav1002: stuck track\n")
     assert len(bad["other_codes"]) == 1 and bad["banners"] == 2 and bad["geomnav"] == 1
+
+
+LOG2 = """[BBR] crack RoundGap_r50um: HFSS (p, l, g) = (0.4, 0.1, 0.1) mm, Geant4 (x, y, z) = (0.4, 0.1, 0.1) mm; 1 sidecar(s) fit
+-------- WWWW ------- G4Exception-START -------- WWWW -------
+*** G4Exception : BBR026
+      issued by : BBRCrackLibrary::Lookup
+BBR026 dataset=InfParallelPlate_crack2 direction=above mode=TE01 nu_GHz=1600 grid_GHz=500 cutoff_GHz=1498.96 : the table is used unchanged.
+*** This is just a warning message. ***
+-------- WWWW -------- G4Exception-END --------- WWWW -------
+-------- WWWW ------- G4Exception-START -------- WWWW -------
+*** G4Exception : BBR028
+      issued by : BBRCrackLibrary::Lookup
+BBR028 dataset=RoundGap_r50um grid_GHz=2000 valid_below_GHz=1756.98 : the cross term is not valid above the polarization-filter limit.
+*** This is just a warning message. ***
+-------- WWWW -------- G4Exception-END --------- WWWW -------
+"""
+
+
+def test_parse_log_bbr026_mode_and_bbr028(checker):
+    lg = checker.parse_log(LOG2)
+    assert lg["warnings"] == {("BBR026", CRACK2, "TE01", "above"): 1, ("BBR028", ROUND): 1}
+    assert lg["banners"] == 2 and lg["other_codes"] == []        # OR-024: BBR028 is whitelisted
+    lg = checker.parse_log(LOG2 + "BBR029 something else\n")
+    assert len(lg["other_codes"]) == 1
+
+
+def test_planck_prediction_clamped_s2(checker):
+    """CDX-016: under 2.x the Planck run's per-photon T is the clamped mixture mean, not (T0 + T1)/2."""
+    far = dict(theta_deg=np.array([90.0]), phi_deg=np.array([0.0]), F0_theta=np.array([1 + 0j]),
+               F0_phi=np.array([0j]), F1_theta=np.array([0j]), F1_phi=np.array([1 + 0j]))
+    a = hfss.AngleDataset(key=(0.0, 180.0), T0=1.6, T1=0.2, schema=2, **far)
+    t = checker.random_polarization_T(a)
+    assert t == pytest.approx(hfss.random_polarization_mixture(a)[0], rel=1e-14)
+    assert t < 0.5 * (1.6 + 0.2) - 0.01 and 0.0 < t < 1.0
+    # the closed form: mean over psi of min(1, 1.6 cos^2 + 0.2 sin^2)
+    psi = (np.arange(360) + 0.5) / 360 * 2 * np.pi
+    assert t == pytest.approx(np.minimum(1.0, 1.6 * np.cos(psi) ** 2 + 0.2 * np.sin(psi) ** 2).mean(), rel=1e-12)
+    # schema 1 keeps (T0 + T1)/2 exactly
+    b = hfss.AngleDataset(key=(0.0, 180.0), T0=0.6, T1=0.3, schema=1, **far)
+    assert checker.random_polarization_T(b) == pytest.approx(0.45, rel=1e-14)
+
+
+def s2_tables(checker, tmp_path):
+    """The nine-key 2.0 dataset (Ephi=1 dark at (0, 180)) behind a Tables cache, with its grid map."""
+    base = str(tmp_path)
+    stem = fx.write_nine_key_grid2(base)
+    sidecar.write(base, stem, fx.sidecar2())
+    return checker.Tables(base), {"crack": [(500.0, stem)]}, stem
+
+
+# A gun along +x is normal incidence; E along y is the dark Ephi=1 basis of the fixture, E along z the lit one.
+GUN_DARK = {"kind": "gun", "dataset": "crack", "direction": [1.0, 0.0, 0.0], "polarization": [0.0, 1.0, 0.0]}
+
+
+def test_predict_gun_dark_fixed_polarization(checker, tmp_path):
+    """CDX-036: a fixed polarization on a dark basis predicts T = 0 and no direction weights (the C++ never
+    draws it); lit and random polarizations keep their weights, and a transmitting state without any outward
+    far field still raises BBR027."""
+    tables, _, stem = s2_tables(checker, tmp_path)
+    ds = tables.get(stem)
+    t, w, dirs = checker.predict_gun(ds, GUN_DARK)
+    assert t == 0.0 and w is None and len(dirs) > 0
+    t, w, _ = checker.predict_gun(ds, {**GUN_DARK, "polarization": [0.0, 0.0, 1.0]})
+    assert t == pytest.approx(0.6, rel=1e-12) and w.sum() == pytest.approx(1.0, rel=1e-12)
+    t, w, _ = checker.predict_gun(ds, {**GUN_DARK, "polarization": None})
+    assert 0.0 < t < 1.0 and w.sum() == pytest.approx(1.0, rel=1e-12)
+    a = ds[(0.0, 180.0)]
+    a.F0_theta[:], a.F0_phi[:] = 0, 0       # the lit basis loses its outward far field: still BBR027
+    with pytest.raises(ValueError, match="BBR027"):
+        checker.predict_gun(ds, {**GUN_DARK, "polarization": [0.0, 0.0, 1.0]})
+
+
+def test_gun_rows_dark_fixed_polarization(checker, tmp_path):
+    """CDX-036: the dark gun run passes with no transmission and has no direction-moment rows; a single
+    transmission fails it."""
+    tables, grids, _ = s2_tables(checker, tmp_path)
+
+    def run(n_tx, n=500):
+        dec = frame(*({"hfss_freq_GHz": 500.0, "status": checker.TRANSMIT if i < n_tx else checker.REFLECT,
+                       "px_post": 1.0, "py_post": 0.0, "pz_post": 0.0} for i in range(n)))
+        rep = checker.Report()
+        checker.gun_rows(rep, "r000", GUN_DARK, dec, tables, grids)
+        ok = rep.finish()
+        return ok, {name: status for status, name, _ in rep.rows}
+
+    ok, rows = run(0)
+    assert ok and rows == {"r000 transmittance": "PASS"}
+    ok, rows = run(1)
+    assert not ok and rows == {"r000 transmittance": "FAIL"}
+
+
+def test_manifest_v1_refused(checker, tmp_path):
+    root = sidecar_tree(tmp_path / "data", LEGACY)
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "tree_check.json").write_text(json.dumps({"schema": "bbrsim-tree-check/1", "data_root": str(root),
+                                                     "datasets": {}, "runs": []}))
+    rows = checker.validate(str(run)).rows
+    assert rows[0][0] == "FAIL" and rows[0][1] == "manifest" and "bbrsim-tree-check/2" in rows[0][2]
+    assert len(rows) == 1
+
+
+def tree_2x(tmp_path):
+    """A one-dataset 2.x tree ('crack', 500 GHz, the nine-key fixture) with a complete sidecar, and its
+    manifest in a run directory."""
+    base = tmp_path / "data" / "waveguides"
+    base.mkdir(parents=True)
+    stem = fx.write_nine_key_grid2(str(base))
+    sc = fx.sidecar2()
+    sc["files"] = sidecar.file_entries(str(base), stem)
+    sidecar.write(str(base), stem, sc)
+    sha = hashlib_sha(base / f"{stem}.dataset.json")
+    man = {"schema": "bbrsim-tree-check/2", "data_root": str(tmp_path / "data"),
+           "datasets": {"crack": {"aimed": True, "grid": [[500.0, stem]], "schema_major": 2,
+                                  "cutoff_ghz": 16.65, "regime_cutoffs": [["TE10", 16.65]],
+                                  "rho_valid_below_ghz": 1000.0, "sidecar_sha256": {stem: sha}}},
+           "not_exercised": [], "skipped": [], "runs": []}
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "tree_check.json").write_text(json.dumps(man))
+    return run, base, stem
+
+
+def hashlib_sha(path):
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_tree_check_runs_check_full_on_2x_sidecars(checker, tmp_path):
+    """The tables of a 2.x tree are loaded by hfss.load_dataset, which does not repeat the 2.x CSV row
+    checks; the sidecar row runs sidecar.check_full (checksums, InterceptFactor, T sources, dark rows)."""
+    run, base, stem = tree_2x(tmp_path)
+    row = next(r for r in checker.validate(str(run)).rows if r[1] == "sidecars 2.x")
+    assert row[0] == "PASS", row
+    # an InterceptFactor edited in one row, checksums refreshed: only check_full sees it
+    path = base / f"{stem}_Ephi=0" / "waveguide.csv"
+    lines = path.read_text().splitlines()
+    v = lines[1].split(",")
+    v[-1] = repr(float(v[-1]) * 1.01)
+    lines[1] = ",".join(v)
+    path.write_text("\n".join(lines) + "\n")
+    sc = sidecar.load(str(base), stem)
+    sc["files"] = sidecar.file_entries(str(base), stem)
+    sidecar.write(str(base), stem, sc)
+    row = next(r for r in checker.validate(str(run)).rows if r[1] == "sidecars 2.x")
+    assert row[0] == "FAIL" and "BBR012" in row[2] and stem in row[2], row
+
+
+def test_no_sidecar_row_under_schema_1(checker, tmp_path):
+    root = sidecar_tree(tmp_path / "data", LEGACY)
+    man = {"schema": "bbrsim-tree-check/2", "data_root": str(root),
+           "datasets": {d: {"aimed": True, "grid": [[500.0, f"{d}_500GHz"]], "schema_major": 1,
+                            "cutoff_ghz": 14.98, "regime_cutoffs": [["TE10", 14.98]],
+                            "rho_valid_below_ghz": None} for d in (CRACK1, CRACK2)},
+           "not_exercised": [], "skipped": [], "runs": []}
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "tree_check.json").write_text(json.dumps(man))
+    assert not any(n.startswith("sidecars") for _, n, _ in checker.validate(str(run)).rows)
 
 
 def test_z_max(checker):
@@ -299,9 +552,10 @@ def test_report_family_wise(checker):
 
 def test_validator_skip_lines(checker, tmp_path):
     root = sidecar_tree(tmp_path / "data", {**LEGACY, "LightPipeSLAC": ["500"]})
-    man = {"schema": "bbrsim-tree-check/1", "data_root": str(root),
+    man = {"schema": "bbrsim-tree-check/2", "data_root": str(root),
            "datasets": {d: {"aimed": d != "LightPipeSLAC", "grid": [[500.0, f"{d}_500GHz"]],
-                            "cutoff_ghz": 14.9896229,
+                            "cutoff_ghz": 14.9896229, "schema_major": 1,
+                            "regime_cutoffs": [["TE10", 14.9896229]], "rho_valid_below_ghz": None,
                             "sidecar_sha256": {f"{d}_500GHz": checker.sidecar_sha256(str(root / "waveguides"),
                                                                                     f"{d}_500GHz")}}
                      for d in (CRACK1, CRACK2, "LightPipeSLAC")},
@@ -335,6 +589,110 @@ def test_tree_rebuilt_with_same_labels(repo_root, checker, tmp_path):
     sc.write_text(sc.read_text().replace("}", ', "rebuilt": true}', 1))
     rows = checker.validate(str(tmp_path / "run")).rows
     assert next(s for s, n, _ in rows if n == "tree unchanged") == "FAIL"
+
+
+# --- the exit-direction row (CDX-027) ---------------------------------------------------
+D_OUT = (0.0010000005, -0.7071067, 0.7071067)
+
+
+def crossing(nb, vol_pre, mat_pre, vol_post, mat_post, d_pre, d_post, status="BBRNone", x=2.0, event=0, track=1):
+    return {"event_id": event, "track_id": track, "n_boundary": nb, "status": status,
+            "vol_pre": vol_pre, "mat_pre": mat_pre, "vol_post": vol_post, "mat_post": mat_post,
+            "px_pre": d_pre[0], "py_pre": d_pre[1], "pz_pre": d_pre[2],
+            "px_post": d_post[0], "py_post": d_post[1], "pz_post": d_post[2], "x": x, "y": 0.0, "z": 0.0}
+
+
+def entry(nb=1, d=D_OUT, **kw):
+    return crossing(nb, "World", "G4_Galactic", "crack1", "vacuum_wg", (1.0, 0.0, 0.0), d,
+                    status="BBRDiffractionTransmit", **kw)
+
+
+def leave(nb=2, d_pre=D_OUT, d_post=D_OUT, **kw):
+    return crossing(nb, "crack1", "vacuum_wg", "World", "G4_Galactic", d_pre, d_post, **kw)
+
+
+def frame(*rows):
+    import pandas as pd
+    return pd.DataFrame(list(rows))
+
+
+def exit_row(checker, *rows):
+    rep = checker.Report()
+    checker.check_exit_direction(rep, "run 000", frame(*rows))
+    (status, name, detail), = rep.rows
+    return status, name, detail
+
+
+def test_exit_direction_clean_pair_passes(checker):
+    status, name, detail = exit_row(checker, entry(), leave())
+    assert (status, name) == ("PASS", "run 000 exit direction"), detail
+    assert detail.startswith("1 transmitted photons")
+
+
+def test_exit_direction_no_transmissions_passes_with_a_note(checker):
+    status, _, detail = exit_row(checker, crossing(1, "World", "G4_Galactic", "CuPlate", "Cu_RRR100_T4K",
+                                                   (1, 0, 0), (-1, 0, 0), status="BBRReflect"))
+    assert status == "PASS" and "no transmissions" in detail
+
+
+def test_exit_direction_wall_hit_fails_even_with_the_pre_direction_intact(checker):
+    # At a wall hit the photon reaches the wall along the sampled direction, so px_pre still equals it;
+    # only the volume and the reflected post direction give the event away.
+    refl = (-D_OUT[0], D_OUT[1], D_OUT[2])
+    status, _, detail = exit_row(checker, entry(), crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K",
+                                                           D_OUT, refl))
+    assert status == "FAIL" and "1 wall hit" in detail and "event 0 track 1 n_boundary 1" in detail
+    assert "direction mismatch" not in detail
+
+
+def test_exit_direction_other_volume_fails(checker):
+    status, _, detail = exit_row(checker, entry(), crossing(2, "crack1", "vacuum_wg", "Detector", "G4_Si",
+                                                           D_OUT, D_OUT))
+    assert status == "FAIL" and "1 other volume" in detail and "wall hit" not in detail
+
+
+def test_exit_direction_direction_tolerance(checker):
+    off = lambda e: (D_OUT[0] + e, D_OUT[1], D_OUT[2])
+    assert exit_row(checker, entry(), leave(d_post=off(1e-12), d_pre=off(1e-12)))[0] == "PASS"
+    for kw in ({"d_post": off(1e-6)}, {"d_pre": off(1e-6)}):
+        status, _, detail = exit_row(checker, entry(), leave(**kw))
+        assert status == "FAIL" and "1 direction mismatch" in detail
+
+
+def test_exit_direction_missing_following_row_fails(checker):
+    status, _, detail = exit_row(checker, entry())
+    assert status == "FAIL" and "1 no following row" in detail
+
+
+def test_exit_direction_follows_by_track_and_counts_kinds(checker):
+    # Two events interleaved, one clean, one wall hit, one more with no row: three kinds counted apart.
+    rows = [entry(event=0), entry(event=1), entry(event=2), leave(event=0),
+            crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, (-D_OUT[0],) + D_OUT[1:], event=1)]
+    status, _, detail = exit_row(checker, *rows)
+    assert status == "FAIL" and "1 wall hit" in detail and "1 no following row" in detail
+    assert "event 1 " in detail and "event 2 " in detail and "of 3 transmitted" in detail
+
+
+def test_exit_direction_coplanar_plate_pair_is_a_clean_exit(checker):
+    # The recorder drops a crossing whose step is at most half the surface tolerance (5e-10 mm), so a
+    # plate to World row exists only at a tolerance-scale step above that: 1e-9 mm here.
+    status, _, detail = exit_row(
+        checker, entry(),
+        crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, D_OUT, x=2.0),
+        crossing(3, "CuPlate1", "Cu_RRR100_T4K", "World", "G4_Galactic", D_OUT, D_OUT, x=2.0 + 1e-9))
+    assert status == "PASS" and "1 through coplanar" in detail
+    # a true zero-step coplanar exit leaves no plate to World row (the recorder drops it): a wall hit,
+    # the safe direction
+    status, _, detail = exit_row(
+        checker, entry(),
+        crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, D_OUT, x=2.0))
+    assert status == "FAIL" and "1 wall hit" in detail
+    # a real passage through the plate (a longer step) is a wall hit
+    status, _, detail = exit_row(
+        checker, entry(),
+        crossing(2, "crack1", "vacuum_wg", "CuPlate1", "Cu_RRR100_T4K", D_OUT, D_OUT, x=2.0),
+        crossing(3, "CuPlate1", "Cu_RRR100_T4K", "World", "G4_Galactic", D_OUT, D_OUT, x=2.5))
+    assert status == "FAIL" and "1 wall hit" in detail
 
 
 # --- the validator end to end: a small real run of the test world --------------------
@@ -377,13 +735,13 @@ def copy_run(run, dst):
     return dst
 
 
-def rewrite_crossings(path, change):
-    """Rewrite the ROOT file at path with change(crossings arrays) applied in place."""
+def rewrite_crossings(path, change, ntuple="crossings"):
+    """Rewrite the ROOT file at path with change(arrays of ntuple) applied in place."""
     import uproot
     with uproot.open(path) as f:
         trees = {name: {k: np.array(v) for k, v in f[name].arrays(library="np").items()}
                  for name in ("crossings", "abspoints")}                 # writable copies
-    change(trees["crossings"])
+    change(trees[ntuple])
     with uproot.recreate(path) as f:
         for name, arrs in trees.items():
             tree = f.mktree(name, {k: v.dtype for k, v in arrs.items()})
@@ -398,7 +756,10 @@ def test_e2e_passes(checker, e2e, e2e_tables):
     names = {n for _, n, _ in rows}
     assert {"tree unchanged", "sentinel", "selection", f"coverage {CRACK1}", f"coverage {CRACK2}",
             f"log startup {CRACK1}", f"log grid {CRACK2}", "log hygiene",
-            f"log BBR008 {CRACK1} low", f"log BBR026 {CRACK2} below"} <= names
+            f"log BBR008 {CRACK1} low", f"log BBR026 {CRACK2} TE10 below"} <= names
+    passing = {n for s, n, _ in rows if s == "PASS"}
+    assert any(n.endswith(" event_id") for n in passing)
+    assert any(n.endswith(" exit direction") for n in passing)
 
 
 def test_e2e_cli(repo_root, e2e):
@@ -419,6 +780,34 @@ def test_e2e_wrong_frequency(checker, e2e, e2e_tables, tmp_path):
     rewrite_crossings(run / "output/tree_r000.root", change)
     ok, rows = rows_of(checker, run, e2e_tables)
     assert not ok and "selection" in failing(rows)
+
+
+def test_e2e_event_id_out_of_range(checker, e2e, e2e_tables, tmp_path):
+    run, man = e2e
+    run = copy_run(run, tmp_path / "run")
+    events = man["runs"][0]["events"]
+
+    def change(cr):
+        cr["event_id"][0] = events          # the first valid id is 0, the last events - 1
+
+    rewrite_crossings(run / "output/tree_r000.root", change)
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and "run 000 event_id" in failing(rows)
+    detail = failing(rows)["run 000 event_id"]
+    assert "tree_r000.root" in detail and "crossings" in detail and str(events) in detail
+    assert not any(n.endswith(" event_id") for n in failing(rows) if n != "run 000 event_id")
+
+
+def test_e2e_event_id_negative_in_abspoints(checker, e2e, e2e_tables, tmp_path):
+    run = copy_run(e2e[0], tmp_path / "run")
+
+    def change(ab):
+        assert len(ab["event_id"]), "run 0 has no abspoints rows to corrupt"
+        ab["event_id"][-1] = -1
+
+    rewrite_crossings(run / "output/tree_r000.root", change, ntuple="abspoints")
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and "abspoints" in failing(rows).get("run 000 event_id", "")
 
 
 def test_e2e_metadata_other_tree(checker, e2e, e2e_tables, tmp_path):

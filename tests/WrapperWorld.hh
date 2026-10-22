@@ -8,7 +8,10 @@
 // Shoot). Crack-local axes: x = the crack axis (entry and exit faces), y = the
 // long dimension, z = the gap. With slabMat the crack is a daughter of a slab of
 // that material, half (crackHalf.x, 20 mm, 20 mm), centred at the origin, so the
-// crack's x faces lie in the slab's x faces as in the test world.
+// crack's x faces lie in the slab's x faces as in the test world. With crackSolid
+// that solid replaces the G4Box (crackHalf then sizes only the slab); RoundGapSolid
+// builds the test world's round gap, a G4Tubs turned Ry(+90 deg) inside a
+// G4DisplacedSolid so its local x is the axis.
 //
 // Navigation rule (the trap that hid the 2026-09-16 wrong-normal bug): placing
 // the navigator AT the hit point is not enough. GetGlobalExitNormal then
@@ -31,6 +34,7 @@
 #include "BBSimOpBoundaryProcess.hh"
 
 #include "G4Box.hh"
+#include "G4DisplacedSolid.hh"
 #include "G4DynamicParticle.hh"
 #include "G4LogicalVolume.hh"
 #include "G4Navigator.hh"
@@ -47,6 +51,7 @@
 #include "G4TouchableHistory.hh"
 #include "G4Track.hh"
 #include "G4Transform3D.hh"
+#include "G4Tubs.hh"
 #include "G4TransportationManager.hh"
 #include "Randomize.hh"
 #include "geomdefs.hh"
@@ -69,7 +74,8 @@ class World {
   // ACTIVE rotation of the crack (G4Transform3D): Rx(+90 deg) puts local y
   // (long) along world +z and local z (gap) along world -y.
   explicit World(G4ThreeVector crackHalf = {2 * mm, 5 * mm, 0.026 * mm},
-                 const G4RotationMatrix& rot = {}, G4Material* slabMat = nullptr) {
+                 const G4RotationMatrix& rot = {}, G4Material* slabMat = nullptr,
+                 G4VSolid* crackSolid = nullptr) {
     auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
     auto* wlv = new G4LogicalVolume(new G4Box("World", 50 * mm, 50 * mm, 50 * mm), gal, "World");
     fWorld = new G4PVPlacement(nullptr, {}, wlv, "World", nullptr, false, 0);
@@ -79,8 +85,8 @@ class World {
       new G4PVPlacement(nullptr, {}, slv, "Slab", wlv, false, 0);
       mother = slv;
     }
-    auto* clv = new G4LogicalVolume(new G4Box("crack", crackHalf.x(), crackHalf.y(), crackHalf.z()),
-                                    BBRMaterials::GetVacuumWG(), "crack");
+    if (!crackSolid) crackSolid = new G4Box("crack", crackHalf.x(), crackHalf.y(), crackHalf.z());
+    auto* clv = new G4LogicalVolume(crackSolid, BBRMaterials::GetVacuumWG(), "crack");
     new G4PVPlacement(G4Transform3D(rot, G4ThreeVector()), clv, "crack", mother, false, 0);
 
     auto* tm = G4TransportationManager::GetTransportationManager();
@@ -151,6 +157,15 @@ class World {
   G4Navigator* fNav = nullptr;
   BBSimOpBoundaryProcess* fProc = nullptr;
 };
+
+// The round gap's interior as TestWorldDetectorConstruction builds it: a G4Tubs of radius R and
+// half-length halfLen turned Ry(+90 deg) inside a G4DisplacedSolid, so local x is the axis.
+inline G4VSolid* RoundGapSolid(G4double R, G4double halfLen) {
+  auto* tube = new G4Tubs("crack-tube", 0., R, halfLen, 0., CLHEP::twopi);
+  G4RotationMatrix ry;
+  ry.rotateY(90. * deg);
+  return new G4DisplacedSolid("crack", tube, G4Transform3D(ry, G4ThreeVector()));
+}
 
 // Photon energy [eV] of frequency nu_GHz.
 inline G4double EnergyEV(G4double nu_GHz) { return CLHEP::h_Planck * nu_GHz * 1e9 * CLHEP::hertz / eV; }

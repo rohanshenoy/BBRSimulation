@@ -1,14 +1,14 @@
 """
 check_crack_wall_reflection.py
 Validate the reflection normal when a photon inside a vacuum_wg crack strikes
-the crack's side wall (crack daughter -> Cu slab mother). Run on the output of
+the crack's side wall (crack daughter -> Cu plate mother). Run on the output of
 Validation_CrackWall.mac (gun inside crack1 heading mostly +z, so every photon hits the
-z-wall at z = +0.026 mm).
+z-wall at z = +0.025 mm).
 
 Expected physics: specular reflection about the WALL normal (z):
     pz_post = -pz_pre,   px_post = px_pre,   py_post = py_pre.
-The break this catches: taking the normal from the entered (slab) solid,
-which for an interior point returns the slab's x-face normal, so px flips
+The break this catches: taking the normal from the entered (plate) solid,
+which for an interior point returns the plate's x-face normal, so px flips
 and pz does not — the photon then continues into the copper.
 
 PASS if every crack->Cu BBRReflect row flips pz and preserves px, py
@@ -46,7 +46,7 @@ px_flipped  = np.abs(wall["px_post"].values + wall["px_pre"].values) < TOL
 print(f"pz flipped (correct, z-wall) : {pz_flipped.sum()}")
 print(f"px preserved                 : {px_kept.sum()}")
 print(f"py preserved                 : {py_kept.sum()}")
-print(f"px flipped (WRONG, slab face): {px_flipped.sum()}")
+print(f"px flipped (WRONG, plate face): {px_flipped.sum()}")
 
 passed = bool(pz_flipped.all() and px_kept.all() and py_kept.all())
 print(f"RESULT: {'PASS' if passed else 'FAIL'}")
