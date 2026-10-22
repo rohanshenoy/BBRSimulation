@@ -393,11 +393,15 @@ def _describe_one(base, stem, ephi, v2=False):
                         "waveguide.csv": sorted(wg.Freq.astype(str).unique())},
         "ff_rows": _rows_by_key(ff, ("Phi", "Theta")),
         "exit_rows": _rows_by_key(wg, ("X", "Y", "Z")),
-        # 2.x, in file order: the raw (IWavePhi, IWaveTheta) of each row, OutgoingPower, IngoingPower and
-        # InterceptFactor, for the row checks of BBRHFSSData::LoadWaveguide
-        "rows2": ((wg[["IWavePhi", "IWaveTheta"]].to_numpy(float), wg.OutgoingPower.to_numpy(float),
-                   wg.IngoingPower.to_numpy(float), wg.InterceptFactor.to_numpy(float)) if v2 else None),
+        "rows2": rows_v2(wg) if v2 else None,
     }
+
+
+def rows_v2(wg):
+    """What the 2.x row checks read from a waveguide table, in file order: the raw (IWavePhi, IWaveTheta) of
+    each row, OutgoingPower, IngoingPower and InterceptFactor (check_rows_v2)."""
+    return (wg[["IWavePhi", "IWaveTheta"]].to_numpy(float), wg.OutgoingPower.to_numpy(float),
+            wg.IngoingPower.to_numpy(float), wg.InterceptFactor.to_numpy(float))
 
 
 def describe_csvs(base, stem, v2=False):
@@ -1026,17 +1030,18 @@ def _far_rel(a, b):
     return abs(a - b) > DIVISOR_REL * max(abs(a), abs(b))
 
 
-def _check_rows_v2(stem, d, sc, recs, sidecar_path):
-    """The row checks of BBRHFSSData::LoadWaveguide under 2.x (BBR012, naming key, polarization and value),
-    in file order: InterceptFactor constant within its key, equal to the key's c_key and to the closed form
-    of the declared grid; OutgoingPower exactly 0 on every row of a dark basis (OR-038); and T = OutgoingPower
-    / (IngoingPower * InterceptFactor) from the key's first row against the sidecar's t_flux / c_k, 1e-6
-    relative on a lit key, both exactly 0 on a dark one. The record is matched on the row's raw angles at KEY_TOL
+def check_rows_v2(stem, ephi, rows, sc, recs, sidecar_path):
+    """The row checks of BBRHFSSData::LoadWaveguide under 2.x (BBR012, naming key, polarization and value) on
+    polarization ephi's rows (rows_v2 of its waveguide table), in file order: InterceptFactor constant within
+    its key, equal to the key's c_key and to the closed form of the declared grid; OutgoingPower exactly 0 on
+    every row of a dark basis (OR-038); and T = OutgoingPower / (IngoingPower * InterceptFactor) from the
+    key's first row against the sidecar's t_flux / c_k, 1e-6 relative on a lit key, both exactly 0 on a dark
+    one. The record is matched on the row's raw angles at KEY_TOL
     (BBRDatasetSidecar::Key); C2 matches after rounding to 0.01 degree, so a key without a record is refused
-    here (BBR012), not skipped. A negative OutgoingPower on any row is refused too."""
-    ephi = d["ephi"]
+    here (BBR012), not skipped. A negative OutgoingPower on any row is refused too. check_csvs and
+    hfss.load_dataset both run it (CDX-037), so the mirror never computes T from rows the loader refuses."""
     thetas = [float(x) for x in sc["excitation"]["incident_theta_deg"]]
-    iw, out, inp, fac = d["rows2"]
+    iw, out, inp, fac = rows
 
     def find(phi, theta):
         for r in recs:
@@ -1196,7 +1201,7 @@ def _check_one(stem, d, sc, exempt):
 def check_csvs(base, stem, sc):
     """C1-C5 on both polarizations, as BBRHFSSData runs them when it is given the sidecar, plus
     the far-field step and the agreement of Ephi=1 with Ephi=0 on keys, grids and per-key counts. Under
-    2.x the tables have 16 columns and the row checks of the loader come first (_check_rows_v2).
+    2.x the tables have 16 columns and the row checks of the loader come first (check_rows_v2).
 
     Precondition: sc has passed check(); its blocks and types are not re-checked here. A missing
     far_field.csv or waveguide.csv raises ValueError starting BBR001 or BBR002, as in BBRHFSSData.
@@ -1207,7 +1212,7 @@ def check_csvs(base, stem, sc):
         recs = key_records(sc)
         for p in (d0, d1):
             _check_freq(stem, p)
-            _check_rows_v2(stem, p, sc, recs, path_for(base, stem))
+            check_rows_v2(stem, p["ephi"], p["rows2"], sc, recs, path_for(base, stem))
     # C5: with outside_points "zero" a point outside the section is allowed when its six field
     # components are exactly zero in both polarizations; with "none" or "omitted" none is.
     exempt = d0["zero_points"] & d1["zero_points"] if sc["exit_field"]["outside_points"] == "zero" else set()

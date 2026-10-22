@@ -89,7 +89,11 @@ def load_dataset(dir_stem, base_dir=None):
     checks (F1-F13, C1-C5) are bbrsim.sidecar and validation/check_dataset_sidecars.py; this
     function reads ``<base>/<dir_stem>.dataset.json`` when it exists only to learn the schema
     major (``BBRHFSSData`` takes ``schemaMajor`` from the sidecar the same way) and, under 2.x,
-    the exit lattice and the per-key dark flags.
+    the field-component frame (only hfss_global, BBR025, CDX-035), the exit lattice and the per-key
+    records: before any T is computed or any basis masked it runs ``sidecar.check_rows_v2``, the
+    loader's row checks (BBR012: a negative OutgoingPower, power on a dark basis, an InterceptFactor
+    that is not the key's c_k, the CSV T against the sidecar's t_flux / c_k; CDX-037), so it never
+    returns a state ``BBRHFSSData`` refuses.
 
     Schema 2.x (OR-034, OR-038, HF-040, HF-042; BBRHFSSData's ``fSchema == 2`` branches):
     waveguide.csv is read by the 2.0 positions, Ex = (9, 10), Ey = (11, 12), Ez = (13, 14) as
@@ -133,6 +137,10 @@ def load_dataset(dir_stem, base_dir=None):
             vals = df.drop(columns=["Freq", "Ephi"]).apply(pd.to_numeric, errors="coerce").to_numpy(float)
             if not np.isfinite(vals).all():
                 raise ValueError(f"BBR013: non-numeric or non-finite field in {d}/{name}")
+    if v2:   # LoadWaveguide's 2.x row checks, before any T is computed or any basis masked (CDX-037)
+        recs = sidecar.key_records(sc)
+        for e in (0, 1):
+            sidecar.check_rows_v2(dir_stem, e, sidecar.rows_v2(wg[e]), sc, recs, sidecar.path_for(base, dir_stem))
 
     # Incidence keys, in the order the C++ checks them: an Ephi=1 key without
     # Ephi=0 rows (BBR012, in the loaders), no key at all (BBR000), a key in one

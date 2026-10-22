@@ -29,8 +29,8 @@ manifest's regime cutoffs: a schema-1 dataset's lowest mode, a 2.x dataset's TE1
 family or TE11, TM01 and TE21); BBR028 is once per 2.x dataset served by a table at or
 above its cross-term limit (an expected warning, whitelisted with BBR008 and BBR026: every
 other BBR0xx line fails the log row). Under 2.x the sidecar row also runs
-bbrsim.sidecar.check_full on each sidecar, because loading the tables does not repeat the
-2.x CSV row checks.
+bbrsim.sidecar.check_full on each sidecar, because loading the tables runs the 2.x CSV row
+checks but not the sidecar checks, C1-C5 or the checksums.
 Statistical rows: the transmittance of every gun run and probe, exit-direction
 moments, the Planck runs' transmittance and spectrum, each within z_max standard
 errors, z_max = max(4, Phi^-1(1 - 0.0005 / M)) for M statistical rows, so a
@@ -520,9 +520,9 @@ def sidecar_sha256(wg, stem):
 
 def check_sidecars_2x(rep, wg, grids, aimed):
     """sidecar.check_full on every 2.x sidecar of the aimed datasets: loading the tables
-    (hfss.load_dataset) does not repeat the 2.x CSV row checks (InterceptFactor, the two T sources, a
-    dark basis's OutgoingPower, the checksums), so a 2.x tree is held to them here. Schema-1 trees add
-    no row; a sidecar that cannot be read as either schema fails it."""
+    (hfss.load_dataset) runs the 2.x CSV row checks (InterceptFactor, the two T sources, a dark basis's
+    OutgoingPower; CDX-037) but not the sidecar checks F1-F13, C1-C5 or the checksums, so a 2.x tree is
+    held to them here. Schema-1 trees add no row; a sidecar that cannot be read as either schema fails it."""
     n, bad = 0, []
     for did in aimed:
         for f, stem in grids[did]:

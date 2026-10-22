@@ -618,6 +618,45 @@ def test_s2_exit_cs_field_frame_refused(tmp_path):
         hfss.load_dataset(stem, base)
 
 
+def set_rows(key, e, col, value, rows=None):
+    """A CSV edit writing `value` into column `col` (4 OutgoingPower, 5 IngoingPower, 15 InterceptFactor) of
+    polarization e's rows of one key: every row, or the rows at the indices in `rows`, counted within the key."""
+    def edit(base, stem):
+        path = os.path.join(base, f"{stem}_Ephi={e}", "waveguide.csv")
+        lines, n = open(path).read().splitlines(), 0
+        for i, line in enumerate(lines[1:], start=1):
+            v = line.split(",")
+            if float(v[2]) == key[0] and float(v[3]) == key[1]:
+                if rows is None or n in rows:
+                    v[col] = value
+                    lines[i] = ",".join(v)
+                n += 1
+        open(path, "w").write("\n".join(lines) + "\n")
+    return edit
+
+
+S2_ROW_EDITS = [   # (id, edit, message): each refused by BBRHFSSData::LoadWaveguide and check_csvs with BBR012
+    ("dark-power-first", set_rows((0, 180), 1, 4, "5e-10", [0]), r"\(0, 180\) polarization 1: the sidecar declares this basis dark"),
+    ("dark-power-later", set_rows((0, 180), 1, 4, "1e-25", [2]), r"\(0, 180\) polarization 1: the sidecar declares this basis dark"),
+    ("negative-first", set_rows((45, 135), 0, 4, "-6e-10", [0]), r"\(45, 135\) polarization 0: OutgoingPower -6e-10 is negative"),
+    ("negative-later", set_rows((45, 135), 1, 4, "-1e-12", [3]), r"\(45, 135\) polarization 1: OutgoingPower -1e-12 is negative"),
+    ("factor-key", set_rows((45, 135), 0, 15, "0.1"), r"\(45, 135\) polarization 0: InterceptFactor 0\.1 differs from the sidecar"),
+    ("factor-later", set_rows((90, 90), 1, 15, "0.0839", [4]), r"\(90, 90\) polarization 1: InterceptFactor 0\.0839 differs from the "
+                                                                r"key's first row"),
+    ("t-vs-sidecar", set_rows((45, 135), 0, 4, "6.6e-10"), r"\(45, 135\) polarization 0: T = .* but the sidecar's t_flux / c_k"),
+    ("ingoing", set_rows((90, 180), 1, 5, "2e-09"), r"\(90, 180\) polarization 1: T = .* but the sidecar's t_flux / c_k"),
+]
+
+
+@pytest.mark.parametrize("edit,message", [x[1:] for x in S2_ROW_EDITS], ids=[x[0] for x in S2_ROW_EDITS])
+def test_s2_rows_refused(tmp_path, edit, message):
+    """CDX-037: the mirror applies the 2.x row checks of the C++ loader before computing T or masking a
+    basis, so it never returns a state the native loader refuses (a dark basis with T > 0, a negative T,
+    a T set by a wrong divisor)."""
+    with pytest.raises(ValueError, match=r"^BBR012: crack_500GHz_Ephi=\d/waveguide\.csv, key " + message):
+        s2_load(tmp_path, edit=edit)
+
+
 def test_s2_axis_count_one_bbr024(tmp_path):
     """load_dataset on an unchecked sidecar with a one-node rectangle axis: BBR024, as the parse rule says
     (count < 2), not a division by zero in the quadrature."""

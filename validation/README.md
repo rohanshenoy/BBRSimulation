@@ -536,9 +536,9 @@ and a run regenerates it.
   whose selected table lies at or above its cross-term limit, so the round gap's
   2000 GHz table warns on a tree that carries it), no other warning, and the startup
   lines. Under 2.x the row `sidecars 2.x` runs `bbrsim.sidecar.check_full` on each 2.x
-  sidecar of the aimed datasets, because loading the tables does not repeat the 2.x CSV
-  row checks (`InterceptFactor`, the two T sources, a dark basis's `OutgoingPower`,
-  the checksums). Predicted transmittance under 2.x is the clamped mixture mean, since
+  sidecar of the aimed datasets, because loading the tables runs the 2.x CSV row
+  checks (`InterceptFactor`, the two T sources, a dark basis's `OutgoingPower`) but not
+  the sidecar checks, C1-C5 or the checksums. Predicted transmittance under 2.x is the clamped mixture mean, since
   T of a basis may exceed 1 and each polarization angle is capped per photon.
 - Statistical rows: transmittance per run and probe; exit direction, the mean of
   each component and the mean square of the transverse ones; per Planck run, the
