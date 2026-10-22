@@ -1,6 +1,7 @@
 #ifndef BBSimOpBoundaryProcess_hh
 #define BBSimOpBoundaryProcess_hh
 
+#include "G4AffineTransform.hh"
 #include "G4OpBoundaryProcess.hh"
 #include "G4ParticleChange.hh"
 #include "G4WrapperProcess.hh"
