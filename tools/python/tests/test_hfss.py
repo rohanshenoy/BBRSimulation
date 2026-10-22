@@ -606,6 +606,18 @@ def test_s2_key_without_record(tmp_path):
     assert ds[(45.0, 135.0)].T0 > 0
 
 
+def test_s2_exit_cs_field_frame_refused(tmp_path):
+    """CDX-035: the mirror refuses exit-CS field components under 2.x before computing anything, as the C++
+    does at sidecar parse; it reads E_t as the HFSS-global (Ex, Ey)."""
+    base = str(tmp_path)
+    stem = fx.write_nine_key_grid2(base)
+    sc = fx.sidecar2()
+    sc["exit_field"].update(field_in_ref_cs=True, field_components_frame="exit_cs")
+    sidecar.write(base, stem, sc)
+    with pytest.raises(ValueError, match=r"^BBR025: exit_field\.field_components_frame is exit_cs"):
+        hfss.load_dataset(stem, base)
+
+
 def test_s2_axis_count_one_bbr024(tmp_path):
     """load_dataset on an unchecked sidecar with a one-node rectangle axis: BBR024, as the parse rule says
     (count < 2), not a division by zero in the quadrature."""

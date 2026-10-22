@@ -803,6 +803,22 @@ def _check_regime_cutoffs(sc, md, section, filter_limit_ghz):
                          f"is {_rep(filter_limit_ghz)} GHz; the cross term is valid below that limit (1e-6 relative)")
 
 
+def check_field_frame(sc, major):
+    """F7's field-component frame, BBRDatasetSidecar::Parse's rule; check() and hfss.load_dataset call it.
+    field_in_ref_cs must agree with field_components_frame. 1.x uses the components only through |E|^2 and
+    the six-real overlap, which a rotation leaves unchanged, so either frame passes; the 2.x norm, cross
+    term and exit sampler take E_t = (Ex, Ey), the tangentials only in HFSS global axes, so 2.x reads only
+    hfss_global (CDX-035)."""
+    xf = _req(sc, "exit_field", "", "dict")
+    in_ref = _req(xf, "field_in_ref_cs", "exit_field.", "bool")
+    if _req(xf, "field_components_frame", "exit_field.", "str") != ("exit_cs" if in_ref else "hfss_global"):
+        raise ValueError("BBR025: exit_field.field_in_ref_cs and field_components_frame contradict each other")
+    if major == 2 and in_ref:
+        raise ValueError("BBR025: exit_field.field_components_frame is exit_cs; schema 2.x reads only hfss_global "
+                         "(field_in_ref_cs false), because its exit sampler, norm and cross term take Ex and Ey as "
+                         "the tangential components")
+
+
 def check(sc, dataset_id, stem, dir_freq_ghz):
     """F1-F11 and F13, as BBRDatasetSidecar::Parse runs them."""
     if not isinstance(sc, dict):
@@ -879,9 +895,7 @@ def check(sc, dataset_id, stem, dir_freq_ghz):
     if not _req(xf, "points_in_si", "exit_field.", "bool"):
         raise ValueError("BBR025: exit_field.points_in_si must be true")
     _expect(_req(xf, "plane", "exit_field.", "str"), "x_e=0", "exit_field.plane")
-    in_ref = _req(xf, "field_in_ref_cs", "exit_field.", "bool")
-    if _req(xf, "field_components_frame", "exit_field.", "str") != ("exit_cs" if in_ref else "hfss_global"):
-        raise ValueError("BBR025: exit_field.field_in_ref_cs and field_components_frame contradict each other")
+    check_field_frame(sc, major)
     grid = _req(xf, "grid", "exit_field.", "dict")
     _axis_range(grid, "y_e", "exit_field.grid.")
     _axis_range(grid, "z_e", "exit_field.grid.")

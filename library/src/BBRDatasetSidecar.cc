@@ -518,6 +518,11 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
   const bool inRef = r.Bool(xf, "field_in_ref_cs", "exit_field.");
   if (r.Str(xf, "field_components_frame", "exit_field.") != (inRef ? "exit_cs" : "hfss_global"))
     Fail("BBR025", path, "exit_field.field_in_ref_cs and field_components_frame contradict each other");
+  // 1.x uses the components only through |E|^2 and the six-real overlap, which a rotation leaves unchanged;
+  // the 2.x norm, cross term and exit sampler take E_t = (Ex, Ey), the tangentials only in HFSS global axes (CDX-035).
+  if (sc.schemaMajor == 2 && inRef)
+    Fail("BBR025", path, "exit_field.field_components_frame is exit_cs; schema 2.x reads only hfss_global (field_in_ref_cs "
+                         "false), because its exit sampler, norm and cross term take Ex and Ey as the tangential components");
   const json& grid = r.At(xf, "grid", "exit_field.");
   sc.exitY = r.Range(grid, "y_e", "exit_field.grid.");
   sc.exitZ = r.Range(grid, "z_e", "exit_field.grid.");

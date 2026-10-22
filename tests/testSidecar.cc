@@ -137,6 +137,9 @@ int main(int argc, char** argv) {
                         "excitation.incidence_convention is \"propagation_direction\"; BBRsim implements only \"arrival_direction\"");
       ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"field_components_frame\": \"hfss_global\"", "\"field_components_frame\": \"exit_cs\"")); }, "BBRDatasetSidecar",
                         "exit_field.field_in_ref_cs and field_components_frame contradict each other");
+      // Under 1.x exit-CS components declared consistently stay accepted: |E|^2 and the overlap do not depend on the frame.
+      Parse(Edit(Edit(Valid(), "\"field_in_ref_cs\": false", "\"field_in_ref_cs\": true"),
+                 "\"field_components_frame\": \"hfss_global\"", "\"field_components_frame\": \"exit_cs\""));
       ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"shape\": \"rectangle\"", "\"shape\": \"polygon\"")); }, "BBRDatasetSidecar",
                         "cross_section shape polygon is reserved; BBRsim does not support it yet");
       ExpectG4Exception("BBR025", [] { Parse(Edit(Valid(), "\"incoming_includes_cos_theta\": false", "\"incoming_includes_cos_theta\": true")); }, "BBRDatasetSidecar",
@@ -369,6 +372,10 @@ int main(int argc, char** argv) {
       for (const auto& e : edits) {
         ExpectG4Exception("BBR025", [&] { Parse(Mut2([&](json& j) { At(j, e.pointer) = e.value; })); }, "BBRDatasetSidecar", e.field);
       }
+      // Exit-CS field components, declared consistently: refused under 2.x, whose E_t is HFSS-global (Ex, Ey) (CDX-035).
+      ExpectG4Exception("BBR025", [] {
+        Parse(Mut2([](json& j) { j["exit_field"]["field_in_ref_cs"] = true; j["exit_field"]["field_components_frame"] = "exit_cs"; }));
+      }, "BBRDatasetSidecar", "exit_field.field_components_frame is exit_cs");
       // trapezoid is the only quadrature of a rectangle, and uniform_disc of a disc.
       auto pd = hfssfix::NineKeyParams2(kStem);
       pd.base.disc = true; pd.base.radius = 5e-5;

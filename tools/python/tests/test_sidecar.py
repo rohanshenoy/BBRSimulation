@@ -1077,6 +1077,25 @@ def test_s2_fixed_strings():
         check2(mut2(lambda s: s["exit_field"].update(columns=list(sidecar.WG_COLUMNS))))
 
 
+def test_s2_exit_cs_field_frame_refused():
+    """CDX-035: 2.x takes E_t as the HFSS-global (Ex, Ey), so exit-CS field components are refused even when
+    declared consistently."""
+    with pytest.raises(ValueError, match=r"^BBR025: exit_field\.field_components_frame is exit_cs"):
+        check2(mut2(lambda s: s["exit_field"].update(field_in_ref_cs=True, field_components_frame="exit_cs")))
+    with pytest.raises(ValueError, match=r"^BBR025: exit_field\.field_in_ref_cs and field_components_frame contradict"):
+        check2(mut2(lambda s: s["exit_field"].update(field_components_frame="exit_cs")))
+
+
+def test_s1_exit_cs_field_frame_accepted(tmp_path):
+    """Under 1.x exit-CS components declared consistently stay accepted: |E|^2 and the overlap do not depend
+    on the frame (CDX-035 leaves schema 1 as it was)."""
+    base = str(tmp_path)
+    stem = write_tiny(base)
+    sc = tiny_sidecar(base, stem)
+    sc["exit_field"].update(field_in_ref_cs=True, field_components_frame="exit_cs")
+    sidecar.check(sc, "c", stem, 500.0)
+
+
 S2_LISTS = [("transmittance/c_key", "c_k", False), ("transmittance/per_key", "polarizations/0/t_flux", True),
             ("exit_field/scale/per_key", "w0", False), ("far_field/ff_over_flux", "polarizations/0", True)]
 

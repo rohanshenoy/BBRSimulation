@@ -109,6 +109,8 @@ def load_dataset(dir_stem, base_dir=None):
     sc = sidecar.load(base, dir_stem) if os.path.exists(sidecar.path_for(base, dir_stem)) else None
     major = sidecar.schema_major(sc) if sc is not None else 1   # BBR024 for a version BBRsim does not read
     v2 = major == 2
+    if v2:   # E_t below is the HFSS-global (Ex, Ey); the C++ refuses another frame at parse (CDX-035)
+        sidecar.check_field_frame(sc, major)
     ff, wg = {}, {}
     for e in (0, 1):
         d = os.path.join(base, f"{dir_stem}_Ephi={e}")
