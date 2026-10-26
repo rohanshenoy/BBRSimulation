@@ -3,7 +3,7 @@
 Fixed-seed fixtures and PASS/FAIL validators that gate every change to BBRsim.
 
 ```
-G4Macros/Validation_*.mac   the seven validation-only fixtures
+G4Macros/Validation_*.mac   the six validation-only fixtures
 check_*.py                  the 15 validators
 Scripts/run_regression.sh   build + fixtures + validators, one command
 Scripts/drift_guards.sh     source-tree consistency checks (run by the runner, or alone)
@@ -24,22 +24,22 @@ validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 
 The runner builds and installs the library with the C++ tests
 (`BUILD_BBRSIM_TESTS=ON`; prefix `BBR_PREFIX`, default `install/`), sources
-the installed env script, builds both examples, runs the drift guards, the
+the installed env script, builds the example, runs the drift guards, the
 consumer smoke test and the `bbrsim data default` and `version stamp` checks,
 then step 1c: the C++
 tests (`ctest`), the Python tests (`pytest`, from `/` on the installed
 `bbrsim`; pytest must be installed, `pip install -e "tools/python[test]"`) and
-`Scripts/tests/test_env.sh` (`env scripts`). It runs the fourteen cases in parallel,
+`Scripts/tests/test_env.sh` (`env scripts`). It runs the twelve cases in parallel,
 each in `BUILD_DIR/regression/<case>/`, with `G4FORCENUMBEROFTHREADS` pinned to
 8 (`BBR_THREADS` overrides; Geant4 warns when a run has more threads than the
 square root of its events, and the log scan would fail on a many-core machine),
-and runs the validators on their output. Seven cases run the fixtures here, three
+and runs the validators on their output. Six cases run the fixtures here, three
 run the real-tree checks generated at run time (see [Real-tree check](#real-tree-check)),
-and four run example macros directly (see [Regression inputs](#regression-inputs)).
-Last come two rows: `installed examples` (both examples installed into
+and three run example macros directly (see [Regression inputs](#regression-inputs)).
+Last come two rows: `installed examples` (the example installed into
 `BUILD_DIR/expfx`, never the prefix, run without `BBRSIMDATA` or
 `DYLD_LIBRARY_PATH`: `Validation_CrackTransmit.mac` must pass
-`check_crack_transmittance.py`, `lightpipe.mac` must write its output) and
+`check_crack_transmittance.py`) and
 `tools smoke` (the four `tools/plot_*.py` and the notebook's code cells on the
 fixture output, in `BUILD_DIR/tools_smoke`). With `BBR_PIN=1` the runner also
 compares the three fixed-seed numbers (reflectance pull, crack T_obs, Planck
@@ -63,15 +63,13 @@ fingerprint stays fixed; pytest also exercises real redirected output and per-re
 | `oblique` | `Validation_CrackOblique.mac` | `bbrsimTestWorld` | `check_crack_oblique.py` on `output/`; `check_invariants.py` on each of the 16 `bbr_oblique_rNN.root` |
 | `frequency` | `Validation_CrackFrequency.mac` | `bbrsimTestWorld` | `check_crack_frequency.py --data-dir mock_hfss` on `output/`; `check_invariants.py` on each of the 16 `bbr_freq_rNN.root` |
 | `round` | `Validation_RoundGap.mac` | `bbrsimTestWorld` | `check_round_gap.py --data-dir mock_round_gap --log run.log` on `output/`; `check_invariants.py` on each of the 9 `bbr_round_rNN.root` |
-| `lp` | `examples/lightpipe/G4Macros/lightpipe.mac` | `bbrsimLightPipe` | `check_invariants.py` |
-| `lp_cad` | `Validation_LightPipeCAD.mac` | `bbrsimLightPipe` | `check_invariants.py` (cad mode, the bundled `box_sample.stl` through `BBRSIMDATA`) |
 | `tree_legacy` | `tree_check.mac`, generated from `data/` | `bbrsimTestWorld` | `check_tree_run.py --log run.log` on the case directory; `check_invariants.py` on each of the 16 `tree_rNNN.root` |
 | `tree_mock` | `tree_check.mac`, generated from `BUILD_DIR/mock_hfss` | `bbrsimTestWorld` | the same, on its 92 `tree_rNNN.root` |
 | `tree_v2` | `tree_check.mac`, generated from `BUILD_DIR/mock_v2` (the two cracks relabelled to schema 2.0 by `Scripts/make_mock_schema2.py`, the round gap written natively by `Scripts/make_mock_round_gap.py --schema 2`) | `bbrsimTestWorld` | the same, with the 2.x rows of [Real-tree check](#real-tree-check), on its `tree_rNNN.root` |
 | — | (no ROOT input) | — | `check_cu_serov.py` (XFAIL); `check_dataset_sidecars.py` on `data/waveguides`, `BUILD_DIR/mock_hfss/waveguides`, `BUILD_DIR/mock_round_gap/waveguides` and `BUILD_DIR/mock_v2/waveguides` |
 
 A case passes when the binary exits 0, writes its ROOT output, and its log
-holds no `GeomNav`, `G4Exception`, `BBR0xx` or `LP002` line, except two
+holds no `GeomNav`, `G4Exception` or `BBR0xx` line, except two
 tolerated warnings: `BBR008` (frequency case: its clamp warnings, exactly one
 per side required) and `BBR026` (planck, config_mt, transmit and frequency:
 Planck photons below the cracks' TE10 cutoff at 14.99 GHz served by a dataset
@@ -90,7 +88,6 @@ FAIL count; the runner adds its rows to the summary.
 - `notebooks without outputs` — tracked notebooks carry no outputs or execution counts.
 - `markdown links` — every relative link and in-page `#anchor` in the tracked `*.md` resolves (`Scripts/tests/check_links.sh`).
 - `banned names` — no tracked file (outside `ChangeHistory`, `data/` and the guard itself) edits the Python module search path, reads the HFSS data by a relative path instead of through `bbrsim.paths`, or names one of the executables, script paths, property keys or output files the reorganization retired. The list is in the guard; quoting it anywhere else trips it.
-- `action copies identical` — the four `TestWorld*` / `LightPipe*` action classes match once the prefix is normalised, so a fix to one copy reaches the other.
 
 In an installed copy of `validation/` (not the top of a git checkout, no
 `examples/`) the guards that need them report themselves skipped.
@@ -103,7 +100,7 @@ not installed is skipped) and exits with its FAIL count.
 
 - `check_reflectance.py` — the absorbed count is within 5 σ (Poisson) of N·D from the full Drude model.
 - `check_planck_spectrum.py` — two rows, both required: the peak of E/kT of the emitted photons is within [0.65, 1.35] of the photon-number peak 1.5936, and a Kolmogorov-Smirnov test of the first-crossing energies against the photon-number Planck CDF truncated to the emitter band (4.14e-5 to 8.27e-2 eV) gives p > 0.01. The peak row alone passes 10 K data analysed at 9–12 K; the KS row fails a 10 % temperature error (and so a worker that missed the `config_mt` broadcast).
-- `check_nreflect.py` — schema-2 per-track boundary ordinals must be contiguous and unique; cumulative reflection counts must match decoded statuses, and final termination totals must match the crossing rows. Every track must have exactly one termination. Zero-crossing world exits pass with zero totals. Legacy schemas are explicitly unsupported by this check. The plot shows final actual reflections per track, including zero. Runs on the Planck, crack-wall, world-exit and light-pipe fixtures.
+- `check_nreflect.py` — schema-2 per-track boundary ordinals must be contiguous and unique; cumulative reflection counts must match decoded statuses, and final termination totals must match the crossing rows. Every track must have exactly one termination. Zero-crossing world exits pass with zero totals. Legacy schemas are explicitly unsupported by this check. The plot shows final actual reflections per track, including zero. Runs on the Planck, crack-wall, world-exit and crack-transmit fixtures.
 - `check_angle_distribution.py` — first-hit Cu incidence angles below 15° match uniform-in-θ emission (KS p > 0.01). The test is N-sensitive: it is meant for the 10k-event `planck` case (`planck.mac`).
 - `check_crack_wall_reflection.py` — every crack→Cu reflection flips p_z and keeps p_x, p_y to 1e-9.
 - `check_crack_transmittance.py` — T_obs within 3 σ (binomial) of 0.50 and no tangential exits.
@@ -123,11 +120,10 @@ Planck-weighted Drude absorptance, on a run with enough Cu absorptions, such as
 
 ## Regression inputs
 
-Four cases run example macros directly: `refl` runs
+Three cases run example macros directly: `refl` runs
 `examples/testworld/G4Macros/reflectance.mac`, `planck` runs
-`examples/testworld/G4Macros/planck.mac`, `config_mt` runs
-`examples/testworld/G4Macros/config_mt.mac` and `lp` runs
-`examples/lightpipe/G4Macros/lightpipe.mac`. These macros double as regression
+`examples/testworld/G4Macros/planck.mac` and `config_mt` runs
+`examples/testworld/G4Macros/config_mt.mac`. These macros double as regression
 inputs, and their validators rely on the seeds, event counts and settings in
 them. The drift guard `regression macros pinned` records, for each, the sha256
 of its lines with full-line comments and blank lines stripped. It fails, naming
@@ -137,7 +133,7 @@ command, or trailing whitespace, changes the hash although Geant4 ignores it.
 Change such a macro only together with its validators, then update its pin in
 `Scripts/drift_guards.sh`.
 
-The other seven cases run the `Validation_*.mac` fixtures, which exist only
+The other six cases run the `Validation_*.mac` fixtures, which exist only
 here. Their validators rely on the seeds and event counts too, and
 `check_crack_oblique.py`, `check_crack_frequency.py` and `check_round_gap.py`
 index the runs by position, so change a fixture only together with its
@@ -151,7 +147,7 @@ fixtures and are not pinned; their validator reads the run plan from the
 manifest beside the macro.
 
 The library install copies this directory to `<prefix>/validation`
-(`INSTALL_VALIDATION`, on by default). The four example macros are installed
+(`INSTALL_VALIDATION`, on by default). The three example macros are installed
 only with `INSTALL_EXAMPLES`, so without it the installed `drift_guards.sh`
 reports the pin guard as skipped. `cmake --install` never deletes: a file
 removed from `validation/` stays in a `<prefix>/validation` installed before,

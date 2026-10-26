@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Exercise the real example executables with successful and failing batch macros.
+# Exercise the real example executable with successful and failing batch macros.
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-  echo "usage: $0 <bbrsimTestWorld> <bbrsimLightPipe>" >&2
+if [ "$#" -ne 1 ]; then
+  echo "usage: $0 <bbrsimTestWorld>" >&2
   exit 2
 fi
 
@@ -34,4 +34,4 @@ for binary in "$@"; do
   done
 done
 
-echo "PASS: both example binaries report batch macro errors"
+echo "PASS: the example binary reports batch macro errors"

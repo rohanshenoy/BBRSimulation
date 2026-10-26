@@ -54,7 +54,6 @@ are indicative, not quantitative. Oblique incidence is validated only on the
 |---|---|
 | `library/` | `libBBRsim` (CMake target `BBRsim::BBRsim`): the boundary-process wrapper, HFSS crack lookup, materials, run configuration and thermal emitter |
 | `examples/testworld/` | `bbrsimTestWorld`: two Cu plates holding the HFSS crack volumes at their exact size, Planck emitter or fixed gun |
-| `examples/lightpipe/` | `bbrsimLightPipe`: 4 K → mixing-chamber light pipe, parametric or imported from `.STL` |
 | `validation/` | regression fixtures, PASS/FAIL validators and the regression runner |
 | `tools/` | the `bbrsim` Python package and plot scripts |
 | `tests/` | C++ unit, component and regression tests (CTest) |
@@ -125,7 +124,7 @@ different prefix needs a reconfigure
 (`cmake --preset clang-release -DCMAKE_INSTALL_PREFIX=<prefix>`), not only
 `cmake --install --prefix`.
 
-For source-tree development, build both examples with the library in one CMake
+For source-tree development, build the example with the library in one CMake
 tree. This does not require an installed BBRsim library:
 
 ```bash
@@ -163,7 +162,7 @@ check `CMAKE_CXX_COMPILER` in `build/CMakeCache.txt`.
 | `WITH_GEANT4_UIVIS` | `ON` | UI and visualization; `OFF` gives a batch-only build |
 | `BUILD_BBRSIM_TOOLS` | `ON` | Install the `bbrsim` Python package and the plot scripts |
 | `BUILD_BBRSIM_TESTS` | `OFF` | Build the C++ tests in `tests/` and register them with CTest (`ctest --test-dir build`); the regression runner turns it on |
-| `BUILD_BBRSIM_EXAMPLES` | `OFF` | Build both examples against the source-tree library target |
+| `BUILD_BBRSIM_EXAMPLES` | `OFF` | Build the example against the source-tree library target |
 | `INSTALL_VALIDATION` | `ON` | Copy `validation/` into the prefix |
 | `INSTALL_EXAMPLES` | `OFF` | Copy `examples/` into the prefix |
 
@@ -219,11 +218,9 @@ minimal working example.
 - **[testworld](examples/testworld/README.md)**, `bbrsimTestWorld`: two Cu
   plates, each as thick as its HFSS crack volume, in a 50 cm vacuum world, lit
   by the Planck emitter or a fixed photon gun.
-- **[lightpipe](examples/lightpipe/README.md)**, `bbrsimLightPipe`: a 4 K →
-  mixing-chamber light pipe, generated from parameters or imported from an
-  ASCII `.STL`.
+The light pipe application moved out of this repository on 2026-10-26; BBRSimulation keeps the test world.
 
-Each example is a standalone CMake project built against the installed
+The example is a standalone CMake project built against the installed
 library, with its own `clang-release` preset. Its macros are copied beside the
 binary, so it runs from its build directory. With no argument the binary opens
 an interactive session and runs `vis.mac`. Output goes to `output/bbr.root` and
@@ -271,12 +268,12 @@ validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 
 The runner builds and installs the library with its C++ tests
 (`BUILD_BBRSIM_TESTS=ON`), runs them (CTest), the Python tests (pytest) and
-the env-script test, builds both examples against the install, runs fourteen
-fixed-seed cases in parallel (seven validation fixtures, three real-tree checks
-generated at run time, one of them on a schema-2.x mock tree, and four example macros)
+the env-script test, builds the example against the install, runs twelve
+fixed-seed cases in parallel (six validation fixtures, three real-tree checks
+generated at run time, one of them on a schema-2.x mock tree, and three example macros)
 with the Geant4 thread count pinned to 8 (`BBR_THREADS` overrides), scans their
 logs for warnings, and runs the PASS/FAIL validators on their output. Last, it
-runs the examples installed into a separate prefix without the env script, and
+runs the example installed into a separate prefix without the env script, and
 the plot scripts and the notebook's code on the fixture output. Compiler
 warnings count as failures. The exit code is the number of unexpected
 failures; a green run has `fail=0  xfail=1  xpass=0`. The runner also tests

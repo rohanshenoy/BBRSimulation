@@ -23,8 +23,9 @@ at z = 0, in a 1.0 mm plate; crack2: 1.5 mm long, 10 mm wide, 100 µm gap at
 z = 3 mm, in a 1.5 mm plate).
 
 In the commands below, `./bbrsimTestWorld` runs in `examples/testworld/build/`
-and the `conda run` commands run from the repository root. The light-pipe
-example has its own [README](examples/lightpipe/README.md).
+and the `conda run` commands run from the repository root. The light pipe
+application moved out of this repository on 2026-10-26; BBRSimulation keeps the
+test world.
 
 ## Test cases
 
@@ -234,8 +235,7 @@ compares it with Serov (2016).
 | `/bbr/thermal/emitterSize` | full extents Wx Wy Wz + unit | `1 20 20 mm` |
 
 The emitter is a box radiating outward from all six faces. The default suits
-the test world; other geometries need their own. The light pipe uses
-`-51 0 0 mm` / `1 7 7 mm` to keep the emitter inside its 5 mm bore.
+the test world; other geometries need their own.
 
 Energies follow the Planck photon-number spectrum, ∝ ν²/(e^{hν/kT} − 1), the
 right weighting when each event is one photon. It peaks at hν ≈ 1.59 kT

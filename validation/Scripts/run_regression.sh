@@ -3,16 +3,16 @@
 #
 #   validation/Scripts/run_regression.sh [BUILD_DIR]        (default: build)
 #
-# 1. Refuses a prefix holding an example library (lib/libbbrsim{TestWorld,
-#    LightPipe}.*, left by a cmake --install of an example into it), which the
-#    row installed examples would load instead of its own copy.
+# 1. Refuses a prefix holding an example library (lib/libbbrsim*.*, e.g.
+#    libbbrsimTestWorld, left by a cmake --install of an example into it), which
+#    the row installed examples would load instead of its own copy.
 #    Configures, builds and installs the library with the C++ tests
 #    (BUILD_BBRSIM_TESTS=ON; BUILD_DIR, prefix BBR_PREFIX,
 #    default <repo>/install), stops if the installed data, headers or env
 #    scripts differ from data/, library/include or bbrsim_env.{sh,csh} (cmake
 #    --install never deletes), sources the
-#    installed bbrsim_env.sh, then builds examples/testworld and
-#    examples/lightpipe against it (BUILD_DIR/examples/<name>). Fails on build
+#    installed bbrsim_env.sh, then builds examples/testworld against it
+#    (BUILD_DIR/standalone-examples/testworld). Fails on build
 #    errors; compiler warnings are a FAIL. The builds are incremental, so only
 #    files compiled in this run are seen: use a fresh BUILD_DIR for a full
 #    warnings audit. Release only: a BUILD_DIR already configured with another
@@ -26,23 +26,23 @@
 #    bbrsim) and validation/Scripts/tests/test_env.sh (the env scripts).
 # 2. Builds the mock HFSS tree (each mock frequency with its dataset sidecar)
 #    and the mock round-gap tree when needed, checks that the real
-#    data/waveguides holds only 500 GHz (leak guard), generates the two
+#    data/waveguides holds only 500 GHz (leak guard), generates the three
 #    real-tree checks (make_tree_check.py over data/, the mock tree and the schema-2 mock tree),
-#    runs the fourteen cases in parallel with a pinned Geant4 thread count
+#    runs the twelve cases in parallel with a pinned Geant4 thread count
 #    (BBR_THREADS, default 8), each in BUILD_DIR/regression/<case>/ (BBRSIMDATA
-#    comes from the installed env script): the seven validation/G4Macros
-#    fixtures, the three generated tree checks (legacy, mock, schema-2 mock) and four example macros
-#    (reflectance.mac, planck.mac, config_mt.mac, lightpipe.mac;
+#    comes from the installed env script): the six validation/G4Macros
+#    fixtures, the three generated tree checks (legacy, mock, schema-2 mock) and three example macros
+#    (reflectance.mac, planck.mac, config_mt.mac;
 #    their command lines are pinned by drift_guards.sh). Scans every log for
-#    GeomNav / G4Exception / BBR0xx / LP002 messages, checks that the
+#    GeomNav / G4Exception / BBR0xx messages, checks that the
 #    frequency case's BBR008 clamp warning fires once per side, and that the
 #    BBR026 cutoff warning tolerated in the Planck cases fires at most once per
 #    dataset, direction and mode.
 # 3. Runs every validation/check_*.py validator the fixtures feed and prints
 #    one PASS/FAIL line per check (with BBR_PIN=1 also the row fixed-seed
 #    numbers: the three fixed-seed numbers against Scripts/numbers.baseline).
-#    Then installs both examples into
-#    BUILD_DIR/expfx (never the prefix) and runs the installed binaries from a
+#    Then installs the test world into
+#    BUILD_DIR/expfx (never the prefix) and runs the installed binary from a
 #    foreign directory without BBRSIMDATA or DYLD_*/LD_LIBRARY_PATH (row
 #    installed examples), and runs the plot scripts and the notebook's code
 #    cells on the fixture output (row tools smoke).
@@ -92,7 +92,8 @@ line() { printf '%-6s %-30s %s\n' "$1" "$2" "$3"; }
 # example code: refuse it, as the stale-file loop in step 1 refuses stale installed
 # data, headers and env scripts.
 stale_ex=0
-for f in "$PREFIX"/lib/libbbrsimTestWorld.* "$PREFIX"/lib/libbbrsimLightPipe.*; do
+for f in "$PREFIX"/lib/libbbrsim*.*; do
+  case "${f##*/}" in libBBRsim*) continue ;; esac   # the library itself (case-insensitive filesystems)
   if [ -e "$f" ] || [ -L "$f" ]; then
     echo "ERROR: $f is an example library installed into the prefix; the installed examples' RPATH finds it before BUILD_DIR/expfx/lib, so they would run it instead of this build. Remove it and rerun."
     stale_ex=1
@@ -149,16 +150,16 @@ unset DYLD_LIBRARY_PATH LD_LIBRARY_PATH
 # An example/consumer build dir configured against another prefix keeps its cached
 # BBRsim_DIR (a new CMAKE_PREFIX_PATH is ignored), so it would keep the old prefix's
 # headers, link line and RPATH: start it fresh.
-for d in "$EXB/testworld" "$EXB/lightpipe" "$BUILD/consumer_smoke"; do
+for d in "$EXB/testworld" "$BUILD/consumer_smoke"; do
   if [ -f "$d/CMakeCache.txt" ] && ! grep -qxF "BBRsim_DIR:PATH=$PREFIX/lib/cmake/BBRsim" "$d/CMakeCache.txt"; then
     rm -rf "$d"
   fi
 done
 # NO_SYSTEM_FROM_IMPORTED passes imported include dirs as -I, not -isystem. As
 # -isystem, BBRsim::BBRsim's would hide warnings in header-only library code that
-# only the examples compile (BBRMaterials.hh, CADMesh.hh), so they would escape the
+# only the example compiles (BBRMaterials.hh), so they would escape the
 # zero-warnings gate. Geant4's dirs become -I too; its headers compile clean.
-for ex in testworld lightpipe; do
+for ex in testworld; do
   step "$clog" "configure $ex" cmake -S "$REPO/examples/$ex" -B "$EXB/$ex" "${CLANG[@]}" \
        -DCMAKE_PREFIX_PATH="$PREFIX" -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON
   step "$blog" "build $ex" cmake --build "$EXB/$ex" -j"$JOBS"
@@ -168,7 +169,6 @@ echo "build ok; compiler warnings: $nwarn"
 [ "$nwarn" -eq 0 ] || { grep -i "warning" "$blog" | head -10; fail=$((fail+1)); line FAIL build "compiler warnings: $nwarn"; }
 rm -f "$clog" "$blog"
 TESTWORLD="$EXB/testworld/bbrsimTestWorld"
-LIGHTPIPE="$EXB/lightpipe/bbrsimLightPipe"
 
 echo "=== 1b. drift guards and consumer smoke ==="
 gout=$("$VAL/Scripts/drift_guards.sh" 2>&1); grc=$?; echo "$gout"
@@ -236,7 +236,7 @@ if eout=$(bash "$VAL/Scripts/tests/test_env.sh" "$REPO" "$PREFIX" 2>&1) && echo 
   line PASS "env scripts" "$(echo "$eout" | grep -c '^ok') cases, $(echo "$eout" | grep -c '^SKIP') skipped"; pass=$((pass+1))
 else line FAIL "env scripts" "$(echo "$eout" | grep '^FAIL' | head -3 | tr '\n' ' ')"; fail=$((fail+1)); fi
 
-if bash "$VAL/Scripts/check_batch_cli.sh" "$TESTWORLD" "$LIGHTPIPE" >"$BUILD/batch_cli.log" 2>&1; then
+if bash "$VAL/Scripts/check_batch_cli.sh" "$TESTWORLD" >"$BUILD/batch_cli.log" 2>&1; then
   line PASS "batch failures" "missing, invalid and nested-invalid macros fail"; pass=$((pass+1))
 else line FAIL "batch failures" "see $BUILD/batch_cli.log"; fail=$((fail+1)); fi
 if bash "$VAL/Scripts/check_in_tree_examples.sh" "$REPO" "$BUILD/in-tree-check" "${CLANG[@]}" -DGeant4_DIR="$(sed -n 's/^Geant4_DIR:PATH=//p' "$BUILD/CMakeCache.txt")" >"$BUILD/in-tree.log" 2>&1; then
@@ -349,9 +349,8 @@ run_macro() {  # case executable macro-path
 # separate lines, and threads interleave.
 scan_log() {  # case-dir [tolerated-codes-ERE]
   local log="$REG/$1/run.log" tol="${2:-}"
-  local n_geom n_lp n_start n_bbr n_tol=0
+  local n_geom n_start n_bbr n_tol=0
   n_geom=$(grep -c -i "GeomNav" "$log" || true)
-  n_lp=$(grep -c "LP002" "$log" || true)
   n_start=$(grep -c "G4Exception-START" "$log" || true)
   if [ -n "$tol" ]; then
     n_bbr=$(grep -E "BBR0[0-9][0-9]" "$log" | grep -v -c -E "$tol" || true)
@@ -359,10 +358,10 @@ scan_log() {  # case-dir [tolerated-codes-ERE]
   else
     n_bbr=$(grep -c -E "BBR0[0-9][0-9]" "$log" || true)
   fi
-  echo $(( n_geom + n_lp + (n_start - n_tol) + n_bbr ))
+  echo $(( n_geom + (n_start - n_tol) + n_bbr ))
 }
-# refl, planck, config_mt and lp run the example macros themselves, pinned by the
-# drift guard "regression macros pinned"; the next seven are validation-only fixtures,
+# refl, planck and config_mt run the example macros themselves, pinned by the
+# drift guard "regression macros pinned"; the next six are validation-only fixtures,
 # and the three tree checks run the macros make_tree_check.py generated above.
 run_macro refl      "$TESTWORLD" "$REPO/examples/testworld/G4Macros/reflectance.mac" &
 run_macro planck    "$TESTWORLD" "$REPO/examples/testworld/G4Macros/planck.mac"      &
@@ -373,13 +372,11 @@ run_macro transmit  "$TESTWORLD" "$VM/Validation_CrackTransmit.mac"   &
 run_macro oblique   "$TESTWORLD" "$VM/Validation_CrackOblique.mac"    &
 run_macro frequency "$TESTWORLD" "$VM/Validation_CrackFrequency.mac"  &
 run_macro round     "$TESTWORLD" "$VM/Validation_RoundGap.mac"    &
-run_macro lp        "$LIGHTPIPE" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac"   &
-run_macro lp_cad    "$LIGHTPIPE" "$VM/Validation_LightPipeCAD.mac"    &
 run_macro tree_legacy "$TESTWORLD" "$REG/tree_legacy/tree_check.mac"  &
 run_macro tree_mock   "$TESTWORLD" "$REG/tree_mock/tree_check.mac"    &
 run_macro tree_v2     "$TESTWORLD" "$REG/tree_v2/tree_check.mac"      &
 wait
-for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_cad tree_legacy tree_mock tree_v2; do
+for d in refl planck config_mt wall exit transmit oblique frequency round tree_legacy tree_mock tree_v2; do
   code=$(cat "$REG/$d/exit.code")
   case "$d" in
     frequency) tol="BBR008|BBR026" ;;               # clamp warnings; Planck photons below the TE10 cutoff
@@ -390,14 +387,14 @@ for d in refl planck config_mt wall exit transmit oblique frequency round lp lp_
   esac
   nbad=$(scan_log "$d" "$tol")
   if [ "$code" -eq 0 ] && [ "$nbad" -eq 0 ] && ls "$REG/$d"/output/*.root >/dev/null 2>&1; then
-    line PASS "run:$d" "exit 0, no GeomNav/G4Exception/BBR0xx/LP002${tol:+ (except $tol)}"; pass=$((pass+1))
+    line PASS "run:$d" "exit 0, no GeomNav/G4Exception/BBR0xx${tol:+ (except $tol)}"; pass=$((pass+1))
   else
     line FAIL "run:$d" "exit $code, flagged log lines: $nbad"; fail=$((fail+1))
     # Show the first offenders, not the tolerated codes, which may fill the head.
     if [ -n "$tol" ]; then
-      grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | grep -v -E "$tol" | head -3
+      grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]" "$REG/$d/run.log" | grep -v -E "$tol" | head -3
     else
-      grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]|LP002" "$REG/$d/run.log" | head -3
+      grep -E "GeomNav|G4Exception : |BBR0[0-9][0-9]" "$REG/$d/run.log" | head -3
     fi
   fi
 done
@@ -492,9 +489,6 @@ for f in bbr.root bbr_ratio.root; do
 done
 if [ -z "$trn_bad" ]; then line PASS "transmit invariants" "[transmit] check_invariants on bbr.root and bbr_ratio.root"; pass=$((pass+1))
 else line FAIL "transmit invariants" "[transmit] check_invariants failed on:$trn_bad"; fail=$((fail+1)); fi
-check lp       check_invariants.py
-check lp       check_nreflect.py
-check lp_cad   check_invariants.py
 # the oblique fixture writes one file per run (output/bbr_oblique_rNN.root);
 # check_crack_oblique reads the whole directory, check_invariants runs on every
 # per-run file.
@@ -572,34 +566,29 @@ if [ "${BBR_PIN:-0}" = 1 ]; then
   fi
 fi
 
-# Installed examples: both examples configured for, built and installed into
-# $BUILD/expfx, never $PREFIX. Their RPATH comes from the install prefix at configure
-# time, so the builds in $EXB (configured for $PREFIX) cannot be installed elsewhere.
-# The installed binaries run from their own directories under $BUILD/expfx_run with
+# Installed examples: the test world configured for, built and installed into
+# $BUILD/expfx, never $PREFIX. Its RPATH comes from the install prefix at configure
+# time, so the build in $EXB (configured for $PREFIX) cannot be installed elsewhere.
+# The installed binary runs from its own directory under $BUILD/expfx_run with
 # no BBRSIMDATA and no DYLD_LIBRARY_PATH/LD_LIBRARY_PATH: RPATH and the compiled-in
-# data default must be enough. Their RPATH lists $PREFIX/lib first, which is why the
+# data default must be enough. Its RPATH lists $PREFIX/lib first, which is why the
 # runner refuses, at the start, a prefix that holds an example library.
 EXPFX="$BUILD/expfx"; EXRUN="$BUILD/expfx_run"; exlog="$BUILD/expfx.log"; ex_bad=""
 rm -rf "$EXPFX" "$EXRUN"; : >"$exlog"
-for ex in testworld lightpipe; do
+for ex in testworld; do
   { cmake -S "$REPO/examples/$ex" -B "$BUILD/expfx_build/$ex" "${CLANG[@]}" -DCMAKE_PREFIX_PATH="$PREFIX" \
           -DCMAKE_INSTALL_PREFIX="$EXPFX" && cmake --build "$BUILD/expfx_build/$ex" -j"$JOBS" \
       && cmake --install "$BUILD/expfx_build/$ex"; } >>"$exlog" 2>&1 || ex_bad="$ex_bad build:$ex"
 done
-mkdir -p "$EXRUN/testworld" "$EXRUN/lightpipe"
+mkdir -p "$EXRUN/testworld"
 if ! (cd "$EXRUN/testworld" && env -u BBRSIMDATA -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
         "$EXPFX/bin/bbrsimTestWorld" "$VM/Validation_CrackTransmit.mac" >run.log 2>&1); then
   ex_bad="$ex_bad run:testworld"
 elif ! (cd "$EXRUN/testworld" && $PY "$VAL/check_crack_transmittance.py" output/bbr.root 2>&1) | grep -q 'RESULT: PASS'; then
   ex_bad="$ex_bad check_crack_transmittance"
 fi
-if ! (cd "$EXRUN/lightpipe" && env -u BBRSIMDATA -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
-        "$EXPFX/bin/bbrsimLightPipe" "$REPO/examples/lightpipe/G4Macros/lightpipe.mac" >run.log 2>&1) \
-   || [ ! -f "$EXRUN/lightpipe/output/bbr.root" ]; then
-  ex_bad="$ex_bad run:lightpipe"
-fi
 if [ -z "$ex_bad" ]; then
-  line PASS "installed examples" "expfx binaries, no BBRSIMDATA/DYLD_*: transmittance PASS, light pipe output"; pass=$((pass+1))
+  line PASS "installed examples" "expfx binary, no BBRSIMDATA/DYLD_*: transmittance PASS"; pass=$((pass+1))
 else line FAIL "installed examples" "failed:$ex_bad (see $exlog, $EXRUN/*/run.log)"; fail=$((fail+1)); fi
 
 # Tools smoke: every plot script and the notebook's code cells (IPython magics

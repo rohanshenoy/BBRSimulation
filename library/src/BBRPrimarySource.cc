@@ -31,8 +31,8 @@ BBRPrimarySource::BBRPrimarySource()
 
   // Planck emitter box from BBRConfigManager. Test-world default: a 1x20x20 mm
   // patch centred at x=-50 mm (~91% of photons from the x-faces, ~45% aimed
-  // at +x). Other geometries (e.g. the light pipe) set their own box via
-  // /bbr/thermal/emitterCenter and /bbr/thermal/emitterSize.
+  // at +x). Other geometries (e.g. a light-pipe application) set their own
+  // box via /bbr/thermal/emitterCenter and /bbr/thermal/emitterSize.
   BuildEmitter();
 
   // Energy range 10 GHz-20 THz in eV (bare eV). 8.27e-2 eV = 20 THz.
