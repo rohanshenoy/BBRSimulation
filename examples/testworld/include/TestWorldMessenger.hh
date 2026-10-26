@@ -10,6 +10,8 @@ class TestWorldDetectorConstruction;
 // /bbr/testworld/ commands, owned by the test world (not the library):
 //   /bbr/testworld/roundGap <bool>   also place the straight round gap
 //                                    RoundGap_r50um (default false)
+//   /bbr/testworld/cracks <bool>     place the two crack plates and their
+//                                    cracks (default true)
 // PreInit only and not broadcast: the geometry is built on the master.
 class TestWorldMessenger : public G4UImessenger {
  public:
@@ -21,6 +23,7 @@ class TestWorldMessenger : public G4UImessenger {
   TestWorldDetectorConstruction* fDet;
   G4UIdirectory* fDir;
   G4UIcmdWithABool* fRoundGapCmd;
+  G4UIcmdWithABool* fCracksCmd;
 };
 
 #endif

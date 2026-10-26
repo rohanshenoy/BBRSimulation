@@ -226,7 +226,7 @@ fi
 pt_tmp=$(mktemp -d "${TMPDIR:-/tmp}/bbrsim-pytest.XXXXXX")
 if ! (cd / && $PY -c 'import pytest' >/dev/null 2>&1); then
   line FAIL pytest "pytest is not installed in the bbrsim env: conda run -n bbrsim pip install -e 'tools/python[test]'"; fail=$((fail+1))
-elif (cd / && BBR_TESTWORLD_BINARY="$TESTWORLD" BBR_LIGHTPIPE_BINARY="$LIGHTPIPE" $PY -B -m pytest -q -p no:cacheprovider --basetemp="$pt_tmp/basetemp" "$REPO/tools/python/tests" >"$BUILD/pytest.log" 2>&1); then
+elif (cd / && BBR_TESTWORLD_BINARY="$TESTWORLD" $PY -B -m pytest -q -p no:cacheprovider --basetemp="$pt_tmp/basetemp" "$REPO/tools/python/tests" >"$BUILD/pytest.log" 2>&1); then
   line PASS pytest "$(tail -1 "$BUILD/pytest.log")"; pass=$((pass+1))
 else
   line FAIL pytest "$(tail -1 "$BUILD/pytest.log")"; fail=$((fail+1)); grep -E '^(FAILED|ERROR)' "$BUILD/pytest.log" | head -10 | sed 's/^/       /'
