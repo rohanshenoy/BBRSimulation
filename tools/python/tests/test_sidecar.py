@@ -207,13 +207,21 @@ def test_s2_builder_writes_material(tmp_path):
     assert build2(base, stem)["provenance"]["material"] == "vacuum"
 
 
-def test_extent_section_disc_not_compared(tmp_path):
-    """A disc's extent_mm is the HFSS bounding box; it is not compared with 2R here."""
+@pytest.mark.parametrize("key,factor,ok", [
+    ("l", 0.0123 / 0.03, False), ("l", 1 + 2e-6, False), ("l", 1 - 5e-7, True),
+    ("g", 1 + 2e-6, False), ("g", 1 - 2e-6, False), ("g", 1 + 5e-7, True),
+], ids=["l-far", "l-2e-6", "l-minus-5e-7", "g-2e-6", "g-minus-2e-6", "g-5e-7"])
+def test_extent_section_disc(tmp_path, key, factor, ok):
+    """CDX-028: a disc's extent_mm.l and g equal its diameter 2R to 1e-6 relative (R = 15 um: 0.03 mm)."""
     base = str(tmp_path)
     stem = write_disc(base)
     sc = copy.deepcopy(disc_sidecar(base, stem, "omitted"))
-    sc["geometry"]["extent_mm"].update(l=0.0123, g=0.0123)
-    sidecar.check(sc, "c", stem, 500.0)
+    sc["geometry"]["extent_mm"][key] *= factor
+    if ok:
+        sidecar.check(sc, "c", stem, 500.0)
+        return
+    with pytest.raises(ValueError, match=rf"^BBR024: geometry\.extent_mm\.{key} .*2 x radius_m"):
+        sidecar.check(sc, "c", stem, 500.0)
 
 
 def test_check_accepts_unknown_fields(tmp_path):
