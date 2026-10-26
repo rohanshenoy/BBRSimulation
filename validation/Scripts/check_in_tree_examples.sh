@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure and run examples against the source-tree library without an install.
+# Configure and run the example against the source-tree library without an install.
 # Pass any local CMake compiler/Geant4 options after <build-dir>. The dedicated
 # scratch directory must be fresh or already use the Unix Makefiles generator.
 set -euo pipefail
@@ -18,7 +18,7 @@ cmake -G 'Unix Makefiles' -S "$repo" -B "$build" \
   -DBUILD_BBRSIM_TOOLS=OFF \
   -DCMAKE_DISABLE_FIND_PACKAGE_BBRsim=TRUE \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "$@"
-cmake --build "$build" --target bbrsimTestWorld bbrsimLightPipe -j 4
+cmake --build "$build" --target bbrsimTestWorld -j 4
 
 python3 - "$repo" "$build/compile_commands.json" <<'PY'
 import json
@@ -27,7 +27,7 @@ import sys
 
 repo = pathlib.Path(sys.argv[1]).resolve()
 commands = json.loads(pathlib.Path(sys.argv[2]).read_text())
-for example in ('testworld', 'lightpipe'):
+for example in ('testworld',):
     entries = [entry for entry in commands
                if f'/examples/{example}/src/' in entry['file']]
     if not entries:
@@ -40,7 +40,7 @@ for example in ('testworld', 'lightpipe'):
             raise SystemExit(f'{example} uses installed library headers')
 PY
 
-for example in testworld lightpipe; do
+for example in testworld; do
   link_command="$build/examples/$example/CMakeFiles/${example}Lib.dir/link.txt"
   if ! grep -qF '../../library/libBBRsim' "$link_command"; then
     echo "FAIL: $example does not link the source-tree BBRsim library" >&2
@@ -54,11 +54,8 @@ printf '/control/verbose 0\n' > "$scratch/smoke.mac"
 env -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
   "$build/examples/testworld/bbrsimTestWorld" "$scratch/smoke.mac" > "$scratch/testworld.log" 2>&1
 env -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
-  "$build/examples/lightpipe/bbrsimLightPipe" "$scratch/smoke.mac" > "$scratch/lightpipe.log" 2>&1
-env -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
   bash "$repo/validation/Scripts/check_batch_cli.sh" \
-  "$build/examples/testworld/bbrsimTestWorld" \
-  "$build/examples/lightpipe/bbrsimLightPipe"
+  "$build/examples/testworld/bbrsimTestWorld"
 
 # Enabling source-tree examples must not change the top-level install surface.
 cmake --build "$build" --target version > /dev/null
@@ -68,13 +65,11 @@ if ! cmake --install "$build" --prefix "$install_prefix" > "$scratch/install.log
   cat "$scratch/install.log" >&2
   exit 1
 fi
-for artifact in bin/bbrsimTestWorld bin/bbrsimLightPipe \
-                lib/libbbrsimTestWorld.dylib lib/libbbrsimLightPipe.dylib \
-                lib/libbbrsimTestWorld.so lib/libbbrsimLightPipe.so \
-                macros/bbrsimTestWorld macros/bbrsimLightPipe; do
+for artifact in bin/bbrsimTestWorld lib/libbbrsimTestWorld.dylib \
+                lib/libbbrsimTestWorld.so macros/bbrsimTestWorld; do
   if [ -e "$install_prefix/$artifact" ]; then
     echo "FAIL: in-tree build installed example artifact $artifact" >&2
     exit 1
   fi
 done
-echo "PASS: in-tree examples build, link, and run without installed BBRsim"
+echo "PASS: in-tree example builds, links and runs without installed BBRsim"

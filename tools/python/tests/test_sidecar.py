@@ -74,7 +74,7 @@ def test_disc_modes_order_zero_empty(radius_m, modes):
 
 
 def test_disc_modes_5um_matches_the_producer():
-    """Codex's probe: R = 5 um at 18000 GHz; the HFSS producer lists TE11 at 17569.85 GHz, count 1."""
+    """The external review's probe: R = 5 um at 18000 GHz; the HFSS producer lists TE11 at 17569.85 GHz, count 1."""
     m = sidecar.disc_modes(5e-6, 18000.0)
     assert [(c["mode"], round(c["cutoff_ghz"], 2), c["degeneracy"]) for c in m["cutoffs"]] == [("TE11", 17569.85, 2)]
     assert m["propagating_count"] == 1
@@ -454,7 +454,7 @@ GRID_KEYS = ((0.0, 135.0), (0.0, 180.0), (45.0, 135.0), (45.0, 180.0))
 
 
 def write_grid(base, ff=((0, 60), (0, 120)), exit_yz=((0.001, 0.0),), skip_key=None, label="500GHz"):
-    """The grid fixtures of Codex's deep-debug review (CDX-021, CDX-022): keys {0, 45} x {135, 180},
+    """The grid fixtures of the external review's deep-debug review (CDX-021, CDX-022): keys {0, 45} x {135, 180},
     T0 = 0.75 at (0, 180) and 0.25 elsewhere, T1 = 0.25; every key holds the far-field rows ff and the
     exit rows exit_yz, in that order; skip_key leaves one key out of all four CSVs."""
     stem = f"c_{label}"
@@ -527,7 +527,7 @@ def test_c2_key_missing_from_part_of_the_data(tmp_path, ephi, names, match):
      r"exit point \(Y, Z\) = \(0.0, 0.0\) m of key \(0.0, 135.0\) is not a node of the declared lattice"),
 ], ids=["duplicate-far-field-point", "uneven-far-field-axis", "duplicate-exit-point", "uneven-exit-axis"])
 def test_c3_c4_per_key_grids(tmp_path, kw, match):
-    """CDX-022: Codex's fixtures (and an uneven exit axis) pass the dataset-wide counts; the per-key
+    """CDX-022: the external review's fixtures (and an uneven exit axis) pass the dataset-wide counts; the per-key
     node checks refuse them."""
     base = str(tmp_path)
     stem = write_grid(base, **kw)

@@ -24,10 +24,18 @@ TestWorldMessenger::TestWorldMessenger(TestWorldDetectorConstruction* det) : fDe
   fRoundGapCmd->SetParameterName("enable", false);
   fRoundGapCmd->AvailableForStates(G4State_PreInit);
   fRoundGapCmd->SetToBeBroadcasted(false);
+
+  fCracksCmd = new G4UIcmdWithABool("/bbr/testworld/cracks", this);
+  fCracksCmd->SetGuidance("Place the Cu plates CuPlateCrack1 and CuPlateCrack2 with their vacuum_wg");
+  fCracksCmd->SetGuidance("cracks (default true); false leaves them out. The round gap is unaffected.");
+  fCracksCmd->SetParameterName("enable", false);
+  fCracksCmd->AvailableForStates(G4State_PreInit);
+  fCracksCmd->SetToBeBroadcasted(false);
 }
 
 TestWorldMessenger::~TestWorldMessenger()
 {
+  delete fCracksCmd;
   delete fRoundGapCmd;
   delete fDir;
 }
@@ -35,4 +43,5 @@ TestWorldMessenger::~TestWorldMessenger()
 void TestWorldMessenger::SetNewValue(G4UIcommand* cmd, G4String value)
 {
   if (cmd == fRoundGapCmd) fDet->SetRoundGap(G4UIcmdWithABool::GetNewBoolValue(value));
+  if (cmd == fCracksCmd) fDet->SetCracks(G4UIcmdWithABool::GetNewBoolValue(value));
 }

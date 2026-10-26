@@ -9,7 +9,8 @@ class TestWorldMessenger;
 
 // Test geometry: 50 cm world, two touching Cu plates (CuPlateCrack1, 1.0 mm thick, and
 // CuPlateCrack2, 1.5 mm thick) each holding a vacuum_wg crack daughter that equals its HFSS
-// model (OR-020), plus, only with /bbr/testworld/roundGap true, a Cu plate
+// model (OR-020; both left out with /bbr/testworld/cracks false), plus, only with
+// /bbr/testworld/roundGap true, a Cu plate
 // RoundGapPlate holding the straight round gap RoundGap_r50um (a vacuum_wg
 // displaced tube). The Cu material is built from BBRConfigManager's CuRRR /
 // CuStageT_K at Construct() time via BBRMaterials::GetCopper(RRR, T_K).
@@ -21,12 +22,14 @@ class TestWorldMessenger;
 //     /bbr/det/setCuStageT <T> K                      temperature stage [K]
 //   from TestWorldMessenger (this example):
 //     /bbr/testworld/roundGap <bool>                  also place the round gap (default false)
+//     /bbr/testworld/cracks <bool>                    place the two crack plates (default true)
 class TestWorldDetectorConstruction : public G4VUserDetectorConstruction {
  public:
   TestWorldDetectorConstruction();
   ~TestWorldDetectorConstruction() override;
   G4VPhysicalVolume* Construct() override;
   void SetRoundGap(G4bool on) { fRoundGap = on; }
+  void SetCracks(G4bool on) { fCracks = on; }
 
   // The opt-in round gap, after HFSS cylindrical2. The Geant4 radius equals the HFSS
   // radius (OR-020). Construct() builds the geometry from these and the messenger's
@@ -39,6 +42,7 @@ class TestWorldDetectorConstruction : public G4VUserDetectorConstruction {
 
  private:
   G4bool fRoundGap = false;
+  G4bool fCracks = true;
   TestWorldMessenger* fMessenger = nullptr;
 };
 

@@ -23,8 +23,9 @@ at z = 0, in a 1.0 mm plate; crack2: 1.5 mm long, 10 mm wide, 100 µm gap at
 z = 3 mm, in a 1.5 mm plate).
 
 In the commands below, `./bbrsimTestWorld` runs in `examples/testworld/build/`
-and the `conda run` commands run from the repository root. The light-pipe
-example has its own [README](examples/lightpipe/README.md).
+and the `conda run` commands run from the repository root. The light pipe
+application moved out of this repository on 2026-10-26; BBRSimulation keeps the
+test world.
 
 ## Test cases
 
@@ -186,6 +187,7 @@ are allowed and whether they reach the worker threads:
 | `/bbr/thermal/` | any time | yes | emitter rebuilt at the next event |
 | `/bbr/gun/` | any time | yes | read every event |
 | `/bbr/testworld/roundGap` | before `/run/initialize` | no | test world only, default `false`: `true` also places the opt-in straight round gap `RoundGap_r50um`, which needs a data root holding a `RoundGap_r50um` dataset (`/bbr/dataDir`) |
+| `/bbr/testworld/cracks` | before `/run/initialize` | no | test world only, default `true`: `false` leaves out the two crack plates and their cracks, for a crack-free world; the round gap is unaffected |
 | `/bbr/config/print` | any time | — | prints every current setting |
 
 There is no runtime geometry change: after `/run/initialize`, changing a
@@ -234,8 +236,7 @@ compares it with Serov (2016).
 | `/bbr/thermal/emitterSize` | full extents Wx Wy Wz + unit | `1 20 20 mm` |
 
 The emitter is a box radiating outward from all six faces. The default suits
-the test world; other geometries need their own. The light pipe uses
-`-51 0 0 mm` / `1 7 7 mm` to keep the emitter inside its 5 mm bore.
+the test world; other geometries need their own.
 
 Energies follow the Planck photon-number spectrum, ∝ ν²/(e^{hν/kT} − 1), the
 right weighting when each event is one photon. It peaks at hν ≈ 1.59 kT
