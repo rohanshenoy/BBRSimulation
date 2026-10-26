@@ -727,13 +727,22 @@ int main(int argc, char** argv) {
       ExpectG4Exception("BBR024", [&] { Parse(with("g", 0.05 * (1 + 2e-6))); }, "BBRDatasetSidecar", "geometry.extent_mm.g");
       Parse(with("g", 0.05 * (1 + 5e-7)));              // inside 1e-6 relative
       Parse(with("l", 9. * (1 - 5e-7)));
-      // A disc's extent is not compared with its radius here; the round gap's extent_mm is the HFSS bounding box.
-      json j = json::parse(Valid());
+      // A disc's l and g must equal its diameter 2R the same way (the HFSS bounding box of a true cylinder;
+      // the real disc sidecars read 0.1 mm against 2R within 2e-13 relative).
       auto p = hfssfix::SidecarFrom(kStem, hfssfix::Mini500());
       p.disc = true; p.radius = 5e-5; p.lengthMm = 0.4;
-      json d = json::parse(hfssfix::SidecarJson(p));
-      d["geometry"]["extent_mm"]["l"] = 0.1234;
-      Parse(d.dump(2));
+      auto disc = [&](const std::string& key, double v) {
+        json d = json::parse(hfssfix::SidecarJson(p));
+        d["geometry"]["extent_mm"][key] = v;
+        return d.dump(2);
+      };
+      Parse(hfssfix::SidecarJson(p));                   // l = g = 0.1 mm = 2R
+      ExpectG4Exception("BBR024", [&] { Parse(disc("l", 0.1234)); }, "BBRDatasetSidecar", "geometry.extent_mm.l");
+      ExpectG4Exception("BBR024", [&] { Parse(disc("l", 0.1234)); }, "BBRDatasetSidecar", "2 x radius_m");
+      ExpectG4Exception("BBR024", [&] { Parse(disc("g", 0.1 * (1 + 2e-6))); }, "BBRDatasetSidecar", "geometry.extent_mm.g");
+      ExpectG4Exception("BBR024", [&] { Parse(disc("g", 0.1 * (1 - 2e-6))); }, "BBRDatasetSidecar", "geometry.extent_mm.g");
+      Parse(disc("g", 0.1 * (1 + 5e-7)));               // inside 1e-6 relative
+      Parse(disc("l", 0.1 * (1 - 5e-7)));
     }},
     {"material_vacuum", [] {
       // CDX-029: provenance.material, when a string, must be "vacuum" (case-insensitive).

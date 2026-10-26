@@ -599,19 +599,20 @@ BBRDatasetSidecar BBRDatasetSidecar::Parse(const std::string& text, const std::s
     }
   }
 
-  // F11: geometry. p is compared with the placed solid's length in F12 (CheckFitsSolid); for a rectangle
-  // l and g must equal the full widths of the declared exit section (CDX-028). A disc's l and g are not
-  // compared with its diameter here: the round gap's extent_mm is the HFSS bounding box.
+  // F11: geometry. p is compared with the placed solid's length in F12 (CheckFitsSolid); l and g must equal
+  // the full widths of the declared exit section, a rectangle's 2 x its half-widths and a disc's diameter
+  // (CDX-028; the round gap's extent_mm is the HFSS bounding box of a true cylinder).
   const json& geo = r.At(j, "geometry", "");
   const json& ext = r.At(geo, "extent_mm", "geometry.");
   sc.extentP_mm = r.Num(ext, "p", "geometry.extent_mm.");
   sc.extentL_mm = r.Num(ext, "l", "geometry.extent_mm.");
   sc.extentG_mm = r.Num(ext, "g", "geometry.extent_mm.");
   if (!(sc.extentP_mm > 0.) || !(sc.extentL_mm > 0.) || !(sc.extentG_mm > 0.)) Fail("BBR024", path, "geometry.extent_mm must be > 0");
-  if (sc.crossSection.shape == BBRCrossSection::kRectangle) {
+  {
+    const bool disc = sc.crossSection.shape == BBRCrossSection::kDisc;
     const struct { const char* name; double extent_mm; const char* half; double width_mm; } axes[] = {
-      {"l", sc.extentL_mm, "y_e_half_m", 2e3 * sc.crossSection.yHalf_m},
-      {"g", sc.extentG_mm, "z_e_half_m", 2e3 * sc.crossSection.zHalf_m}};
+      {"l", sc.extentL_mm, disc ? "radius_m" : "y_e_half_m", 2e3 * (disc ? sc.crossSection.radius_m : sc.crossSection.yHalf_m)},
+      {"g", sc.extentG_mm, disc ? "radius_m" : "z_e_half_m", 2e3 * (disc ? sc.crossSection.radius_m : sc.crossSection.zHalf_m)}};
     for (const auto& a : axes)
       if (std::abs(a.extent_mm - a.width_mm) > 1e-6 * a.width_mm) {
         std::ostringstream ed;
