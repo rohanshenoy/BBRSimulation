@@ -93,7 +93,7 @@ line() { printf '%-6s %-30s %s\n' "$1" "$2" "$3"; }
 # data, headers and env scripts.
 stale_ex=0
 for f in "$PREFIX"/lib/libbbrsim*.*; do
-  case "${f##*/}" in libBBRsim*) continue ;; esac   # the library itself (case-insensitive filesystems)
+  case "${f##*/}" in libBBRsim*) continue ;; esac   # the library itself; the glob is case-sensitive, so a guard only
   if [ -e "$f" ] || [ -L "$f" ]; then
     echo "ERROR: $f is an example library installed into the prefix; the installed examples' RPATH finds it before BUILD_DIR/expfx/lib, so they would run it instead of this build. Remove it and rerun."
     stale_ex=1

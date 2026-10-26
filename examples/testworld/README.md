@@ -27,7 +27,9 @@ the library reads `<dataDir>/waveguides/<id>_<freq>GHz_Ephi={0,1}`. Since
 OR-020 the solids equal the HFSS models in length and section (before, the
 slots were 4 mm long, 10.2 mm wide and 2 µm taller than HFSS); at load, exit
 points that HFSS placed on a wall are clamped 1 nm inside the declared section
-(see *Dataset sidecars* in `validation/README.md`).
+(see *Dataset sidecars* in `validation/README.md`). `/bbr/testworld/cracks false`
+(PreInit only, default `true`) leaves out both plates and their cracks, for a
+crack-free world.
 
 Opt-in round gap: `/bbr/testworld/roundGap true` (PreInit only, default
 `false`) also places `RoundGapPlate`, a 0.4 mm Cu plate centred at z = −80 mm
@@ -68,6 +70,7 @@ All are issued before `/run/initialize` unless noted.
 | `/bbr/dataDir` | library | data root holding `waveguides/` |
 | `/bbr/thermal/*`, `/bbr/gun/*` | library | Planck emitter and fixed gun; also valid after `/run/initialize` |
 | `/bbr/testworld/roundGap <bool>` | this example (`TestWorldMessenger`) | also place the round gap (default `false`); refused after `/run/initialize` |
+| `/bbr/testworld/cracks <bool>` | this example (`TestWorldMessenger`) | place the two crack plates (default `true`); `false` gives a crack-free world, the round gap unaffected; refused after `/run/initialize` |
 
 ## Execution & output
 

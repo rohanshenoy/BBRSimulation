@@ -21,6 +21,8 @@ def binary():
 @pytest.fixture(scope="module")
 def round_gap_data(repo_root, tmp_path_factory):
     """A data root holding the mock round gap beside links to the real cracks."""
+    if not os.environ.get("BBR_TESTWORLD_BINARY"):   # its tests skip; do not build it
+        pytest.skip("test-world binary not supplied")
     root = tmp_path_factory.mktemp("round_gap_data")
     gen = repo_root / "validation/Scripts/make_mock_round_gap.py"
     r = subprocess.run([sys.executable, str(gen), "--real", str(Path(data_dir()) / "waveguides"),
@@ -89,6 +91,7 @@ def test_redirected_results_keep_independent_metadata(binary, tmp_path):
         assert frequency["recorded"]["frames"]["pose_rule"] == "legacy"
     nocracks = json.loads((tmp_path / "results/nocracks.metadata.json").read_text())
     assert nocracks["data"]["hfss_datasets"] == []
+    assert "CuPlateCrack" not in nocracks["geometry"]   # the plates go with their cracks
 
 
 def test_output_failure_is_fatal(binary, tmp_path):
@@ -145,6 +148,7 @@ def test_cracks_off_keeps_round_gap(binary, tmp_path, round_gap_data):
     assert result.returncode == 0, result.stdout + result.stderr
     meta = json.loads((tmp_path / "rg.metadata.json").read_text())
     assert [d["dataset_id"] for d in meta["data"]["hfss_datasets"]] == ["RoundGap_r50um"]
+    assert "CuPlateCrack" not in meta["geometry"] and "RoundGapPlate" in meta["geometry"]
 
 
 def test_cracks_off_needs_no_waveguides(binary, tmp_path):
@@ -157,3 +161,4 @@ def test_cracks_off_needs_no_waveguides(binary, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     meta = json.loads((tmp_path / "free.metadata.json").read_text())
     assert meta["data"]["hfss_datasets"] == []
+    assert "CuPlateCrack" not in meta["geometry"]

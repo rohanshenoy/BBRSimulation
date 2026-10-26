@@ -187,6 +187,7 @@ are allowed and whether they reach the worker threads:
 | `/bbr/thermal/` | any time | yes | emitter rebuilt at the next event |
 | `/bbr/gun/` | any time | yes | read every event |
 | `/bbr/testworld/roundGap` | before `/run/initialize` | no | test world only, default `false`: `true` also places the opt-in straight round gap `RoundGap_r50um`, which needs a data root holding a `RoundGap_r50um` dataset (`/bbr/dataDir`) |
+| `/bbr/testworld/cracks` | before `/run/initialize` | no | test world only, default `true`: `false` leaves out the two crack plates and their cracks, for a crack-free world; the round gap is unaffected |
 | `/bbr/config/print` | any time | — | prints every current setting |
 
 There is no runtime geometry change: after `/run/initialize`, changing a

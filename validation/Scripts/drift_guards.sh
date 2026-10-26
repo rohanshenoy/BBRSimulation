@@ -52,8 +52,8 @@ NB_PY='import json, sys; nb = json.load(open(sys.argv[1])); sys.exit(1 if any(c.
 report "notebooks without outputs" "$(git -C "$REPO" ls-files '*.ipynb' | while read -r nb; do
     $PY -c "$NB_PY" "$REPO/$nb" >/dev/null 2>&1 || echo "$nb"; done)"
 report "tools file lists" "$(unlisted "$REPO/tools/CMakeLists.txt" "$REPO"/tools/python/bbrsim/*.py "$REPO"/tools/plot_*.py)"
-# The next two need a git checkout with examples/; an installed copy of
-# validation/ has neither, so there they are skipped like the pin guard. The
+# The next two need a git checkout; an installed copy of
+# validation/ is not one, so there they are skipped like the pin guard. The
 # links and banned-names guards need REPO to be the top of the checkout: the
 # default prefix install/ lies inside it, where git works but tracks nothing.
 if [ "$(git -C "$REPO" rev-parse --show-toplevel 2>/dev/null)" = "$REPO" ]; then

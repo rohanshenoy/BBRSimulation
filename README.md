@@ -218,7 +218,9 @@ minimal working example.
 - **[testworld](examples/testworld/README.md)**, `bbrsimTestWorld`: two Cu
   plates, each as thick as its HFSS crack volume, in a 50 cm vacuum world, lit
   by the Planck emitter or a fixed photon gun.
-The light pipe application moved out of this repository on 2026-10-26; BBRSimulation keeps the test world.
+
+The light pipe application moved out of this repository on 2026-10-26;
+BBRSimulation keeps the test world.
 
 The example is a standalone CMake project built against the installed
 library, with its own `clang-release` preset. Its macros are copied beside the
