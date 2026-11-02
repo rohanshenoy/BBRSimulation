@@ -93,7 +93,7 @@ bbrsim_add_test_program(testSidecar LABEL unit
 bbrsim_add_test_program(testCrackLibrary LABEL unit
   CASES selection_grid5 token_verbatim discovery_errors discovery_missing_far_field discovery_missing_waveguide
         dataset_id_of unreadable_root concurrent_first_load
-        sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok
+        sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok validate_placed_cracks_changed
         placed_cracks_json cutoff_warning cutoff_warning_regime rho_limit_warning)
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF

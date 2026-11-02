@@ -43,7 +43,8 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   static G4bool IsBoundaryStep(const G4Step& aStep);
 
   // Forwards to the wrapped process, then runs
-  // BBRCrackLibrary::ValidatePlacedCracks() (once per process), so a missing or
+  // BBRCrackLibrary::ValidatePlacedCracks() (it validates on its first call and
+  // only confirms an unchanged geometry on later ones, BBR030), so a missing or
   // wrong HFSS dataset, or a crack too small for its exit grid, stops the run at
   // the first run initialization (/run/initialize with an MT or task run
   // manager, whose Initialize calls BeamOn(0); /run/beamOn with a sequential

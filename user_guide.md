@@ -435,6 +435,15 @@ propagation axis is not its local x (a CAD part converted in another pose):
 fix the geometry. In the test world every crack fills its plate, so its side
 faces border copper and this cannot occur.
 
+**`BBR030`**: the `vacuum_wg` volumes changed after the cracks were validated
+before the first run. The first run validates every crack (datasets, sidecars,
+F12); every later physics-table build (each worker thread's, or a later run's)
+only confirms that the cracks are the same volume and solid objects, with the
+same names and extents. The message gives the counts then and now and the first
+crack that differs. BBRsim does not support changing the geometry after
+`/run/initialize` (every `/bbr/det/` and `/bbr/testworld/` command is PreInit):
+start a new session with the new geometry.
+
 **A `BBR026` banner in a Planck run**: a warning, not an error. A photon's
 frequency and the grid frequency serving it lie on opposite sides of a regime
 cutoff of the guide (the lowest mode, `modes.cutoff_ghz`, under schema 1; every

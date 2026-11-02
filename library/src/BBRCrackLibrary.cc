@@ -17,7 +17,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <iterator>
 #include <limits>
+#include <sstream>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -252,28 +254,64 @@ const BBRHFSSData& BBRCrackLibrary::Lookup(const G4String& datasetId, G4double n
   return *E[k].data;
 }
 
-void BBRCrackLibrary::ValidatePlacedCracks()
+bool BBRCrackLibrary::PlacedCrack::operator==(const PlacedCrack& o) const
 {
-  G4AutoLock lock(&cacheMutex);
-  if (fValidated) return;
-  fValidated = true;
+  return pv == o.pv && solid == o.solid && volume == o.volume && datasetId == o.datasetId &&
+         std::equal(std::begin(extent_mm), std::end(extent_mm), std::begin(o.extent_mm));
+}
+
+std::vector<BBRCrackLibrary::PlacedCrack> BBRCrackLibrary::ScanPlacedCracks()
+{
+  std::vector<PlacedCrack> out;
   for (const G4VPhysicalVolume* pv : *G4PhysicalVolumeStore::GetInstance()) {
     const G4LogicalVolume* lv = pv->GetLogicalVolume();
     const G4Material* mat = lv ? lv->GetMaterial() : nullptr;
     if (!mat || mat->GetName() != "vacuum_wg") continue;
-    const G4String name = pv->GetName();
-    const G4String id = DatasetIdOf(name);
-    FrequencySet& set = Discover(id);
-    const G4VSolid& solid = *lv->GetSolid();
-    for (const auto& e : set.entries) e.sidecar->CheckFitsSolid(solid, name);
+    const G4VSolid* solid = lv->GetSolid();
     G4ThreeVector lo, hi;
-    solid.BoundingLimits(lo, hi);
+    solid->BoundingLimits(lo, hi);
     const G4ThreeVector extent = (hi - lo) / mm;
-    fPlaced.push_back({name, id, {extent.x(), extent.y(), extent.z()}});
+    out.push_back({pv, solid, pv->GetName(), DatasetIdOf(pv->GetName()), {extent.x(), extent.y(), extent.z()}});
+  }
+  return out;
+}
+
+void BBRCrackLibrary::ValidatePlacedCracks()
+{
+  G4AutoLock lock(&cacheMutex);
+  const std::vector<PlacedCrack> placed = ScanPlacedCracks();
+  if (fValidated) {
+    // A later call: the checks and the metadata (PlacedCracksJson) describe the geometry the first call
+    // saw, so a changed geometry is refused rather than silently left unchecked (ADV-05).
+    if (placed == fPlaced) return;
+    auto describe = [](const std::vector<PlacedCrack>& v, std::size_t i) {
+      std::ostringstream os;
+      if (i >= v.size()) return std::string("none");
+      const PlacedCrack& p = v[i];
+      os << "crack volume " << p.volume << " (dataset " << p.datasetId << ", solid " << p.solid->GetName()
+         << ", extent (" << p.extent_mm[0] << "," << p.extent_mm[1] << "," << p.extent_mm[2] << ") mm)";
+      return os.str();
+    };
+    std::size_t i = 0;
+    while (i < placed.size() && i < fPlaced.size() && placed[i] == fPlaced[i]) ++i;
+    G4ExceptionDescription ed;
+    ed << "The vacuum_wg volumes of the geometry changed after they were validated before the first run ("
+       << fPlaced.size() << " then, " << placed.size() << " now; first difference at entry " << i << ": "
+       << describe(fPlaced, i) << " then, " << describe(placed, i) << " now, where a changed volume or "
+       << "solid object counts too). BBRsim does not support changing the geometry after /run/initialize: "
+       << "start a new session with the new geometry.";
+    G4Exception("BBRCrackLibrary::ValidatePlacedCracks", "BBR030", FatalException, ed);
+    return;
+  }
+  fValidated = true;
+  for (const PlacedCrack& p : placed) {
+    FrequencySet& set = Discover(p.datasetId);
+    for (const auto& e : set.entries) e.sidecar->CheckFitsSolid(*p.solid, p.volume);
+    fPlaced.push_back(p);
     const auto& sc = *set.entries.front().sidecar;
-    G4cout << "[BBR] crack " << name << ": HFSS (p, l, g) = (" << sc.extentP_mm << ", " << sc.extentL_mm << ", "
-           << sc.extentG_mm << ") mm, Geant4 (x, y, z) = (" << extent.x() << ", " << extent.y() << ", "
-           << extent.z() << ") mm; " << set.entries.size() << " sidecar(s) fit" << G4endl;
+    G4cout << "[BBR] crack " << p.volume << ": HFSS (p, l, g) = (" << sc.extentP_mm << ", " << sc.extentL_mm << ", "
+           << sc.extentG_mm << ") mm, Geant4 (x, y, z) = (" << p.extent_mm[0] << ", " << p.extent_mm[1] << ", "
+           << p.extent_mm[2] << ") mm; " << set.entries.size() << " sidecar(s) fit" << G4endl;
   }
 }
 
