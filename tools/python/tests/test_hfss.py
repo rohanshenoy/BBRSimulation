@@ -251,6 +251,34 @@ def test_load_checks_every_freq_row(tmp_path, name):
         hfss.load_dataset("c_500GHz", str(tmp_path))
 
 
+@pytest.mark.parametrize("name", ["far_field.csv", "waveguide.csv"])
+def test_load_checks_every_ephi_row(tmp_path, name):
+    """G4-034: every row's Ephi is its directory's polarization (BBR009, as BBRHFSSData::CheckEphiColumn), so a
+    copied or swapped polarization directory cannot stand in for the other."""
+    write_dataset(tmp_path, "c_500GHz")
+    edit_last_row(tmp_path / "c_500GHz_Ephi=1" / name, 1, "0")
+    with pytest.raises(ValueError, match=rf"^BBR009: .*c_500GHz_Ephi=1/{name} line \d+: Ephi column '0' is not the "
+                                         rf"directory's polarization 1"):
+        hfss.load_dataset("c_500GHz", str(tmp_path))
+
+
+def test_load_ephi_tokens(tmp_path):
+    """"0.0" and "1.0" are the directory's polarization (the producer's identity check reads them so); a
+    non-numeric Ephi is BBR013, as any other numeric field."""
+    write_dataset(tmp_path / "a", "c_500GHz")
+    for e in (0, 1):
+        for name in ("far_field.csv", "waveguide.csv"):
+            path = tmp_path / "a" / f"c_500GHz_Ephi={e}" / name
+            lines = path.read_text().splitlines()
+            path.write_text("\n".join([lines[0]] + [",".join([v[0], f"{e}.0"] + v[2:])
+                                                     for v in (row.split(",") for row in lines[1:])]) + "\n")
+    hfss.load_dataset("c_500GHz", str(tmp_path / "a"))
+    write_dataset(tmp_path / "b", "c_500GHz")
+    edit_last_row(tmp_path / "b" / "c_500GHz_Ephi=0" / "far_field.csv", 1, "x")
+    with pytest.raises(ValueError, match="^BBR013: .*Ephi"):
+        hfss.load_dataset("c_500GHz", str(tmp_path / "b"))
+
+
 def test_load_accepts_freq_units(tmp_path):
     for i, tok in enumerate(("0.5THz", "500000MHz", " 500 ghz")):
         write_dataset(tmp_path / str(i), "c_500GHz", freq=tok)

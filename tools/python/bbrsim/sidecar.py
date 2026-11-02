@@ -391,6 +391,7 @@ def _describe_one(base, stem, ephi, v2=False):
                     ff[["IWavePhi", "IWaveTheta"]].itertuples(index=False)},
         "freq_tokens": {"far_field.csv": sorted(ff.Freq.astype(str).unique()),
                         "waveguide.csv": sorted(wg.Freq.astype(str).unique())},
+        "ephi_columns": {"far_field.csv": ff.Ephi, "waveguide.csv": wg.Ephi},
         "ff_rows": _rows_by_key(ff, ("Phi", "Theta")),
         "exit_rows": _rows_by_key(wg, ("X", "Y", "Z")),
         "rows2": rows_v2(wg) if v2 else None,
@@ -1027,6 +1028,13 @@ def _check_freq(stem, d):
                                  f"frequency {f_dir} GHz (tolerance 0.1 %)")
 
 
+def _check_ephi(stem, d):
+    """Every row's Ephi is the polarization of its directory, as BBRHFSSData checks each row (BBR009,
+    BBR013 for a non-number; G4-034)."""
+    for name, column in d["ephi_columns"].items():
+        hfss.check_ephi_column(column, d["ephi"], f"{stem}_Ephi={d['ephi']}/{name}")
+
+
 def _far_rel(a, b):
     """a and b differ by more than 1e-6 of the larger magnitude (BBRHFSSData's FarRel)."""
     return abs(a - b) > DIVISOR_REL * max(abs(a), abs(b))
@@ -1102,6 +1110,7 @@ def _check_one(stem, d, sc, exempt):
     if d["far_field"]["columns"] != ff["columns"] or d["exit_field"]["columns"] != xf["columns"]:
         raise ValueError(f"BBR013: {tag}: a CSV header differs from the sidecar's columns")              # C1
     _check_freq(stem, d)
+    _check_ephi(stem, d)
     # C2: keys rounded to 0.01 deg, as BBRHFSSData rounds them; the waveguide keys must equal the
     # declared grid, and the far-field keys must equal them (BBR007 in BBRHFSSData too). A declared
     # key without rows would be served by its nearest neighbour, another incidence's tables (CDX-021).
@@ -1214,6 +1223,7 @@ def check_csvs(base, stem, sc):
         recs = key_records(sc)
         for p in (d0, d1):
             _check_freq(stem, p)
+            _check_ephi(stem, p)
             check_rows_v2(stem, p["ephi"], p["rows2"], sc, recs, path_for(base, stem))
     # C5: with outside_points "zero" a point outside the section is allowed when its six field
     # components are exactly zero in both polarizations; with "none" or "omitted" none is.

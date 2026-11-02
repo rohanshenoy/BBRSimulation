@@ -42,7 +42,8 @@ struct BBRCrossSection;
 //   BBR002  waveguide.csv cannot be opened
 //   BBR007  far_field.csv and waveguide.csv have different incidence keys; with
 //           a sidecar, also C2 (validation/README.md, Dataset sidecars)
-//   BBR009  a row's Freq disagrees with the directory frequency (every row)
+//   BBR009  a row's Freq disagrees with the directory frequency, or its Ephi
+//           with the directory's polarization (every row; G4-034)
 //   BBR012  an Ephi=1 row does not match the Ephi=0 row at the same index
 //           (X/Y/Z of an exit point, Phi/Theta of a far-field row), or the
 //           two files have different row counts for a key; with a sidecar,
@@ -68,7 +69,9 @@ class BBRHFSSData
   //   Loads baseDir/dirStem_Ephi=0/ and baseDir/dirStem_Ephi=1/.
   // expectedFreqGHz: the frequency parsed from the directory name. Each CSV's
   //   Freq column must agree with it to 0.1 % (BBR009), so a mislabelled or
-  //   mis-copied dataset cannot be used under the wrong frequency.
+  //   mis-copied dataset cannot be used under the wrong frequency. Likewise each
+  //   row's Ephi must be its directory's polarization, 0 or 1 (BBR009; G4-034), so
+  //   a copied or swapped polarization directory cannot stand in for the other.
   // sidecar (optional): the dataset's parsed <dirStem>.dataset.json. When
   // given, the loader also runs the sidecar checks C1-C5: header = declared
   // columns (BBR013), keys on the declared grid (BBR007), far-field and
@@ -152,6 +155,9 @@ class BBRHFSSData
 
   // Fatal BBR009 if the CSV's Freq column disagrees with fFreqGHz.
   void CheckFrequencyColumn(const G4String& path, const std::string& token) const;
+  // Fatal BBR009 if the Ephi column on (1-based) line `line` is not ephi_flag, the polarization of the
+  // directory the CSV sits in (G4-034); BBR013 if it is not a finite number.
+  void CheckEphiColumn(const G4String& path, const std::string& token, int ephi_flag, std::size_t line) const;
 
   // Nearest-neighbour lookup by L2 distance in (phi, theta) degree space.
   const AngleDataset& FindDataset(G4double iwavePhi_deg, G4double iwaveTheta_deg) const;

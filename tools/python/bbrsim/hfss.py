@@ -68,6 +68,24 @@ class AngleDataset:
     dark1: bool = False           # BBRKeyRecord::dark1
 
 
+def check_ephi_column(column, ephi, where):
+    """Every row's Ephi is the polarization ephi of the directory the CSV sits in, as
+    BBRHFSSData::CheckEphiColumn checks (G4-034): BBR013 for a value that is not a finite number, BBR009 for
+    another polarization (a copied or swapped Ephi directory). "1.0" is 1. The line is the CSV line of a
+    file without blank lines (header = line 1)."""
+    values = pd.to_numeric(column, errors="coerce").to_numpy(float)
+    tokens = column.astype(str).to_numpy()
+    bad = np.nonzero(~np.isfinite(values))[0]
+    if len(bad):
+        raise ValueError(f"BBR013: Bad numeric field Ephi = '{tokens[bad[0]]}' in {where}")
+    wrong = np.nonzero(values != ephi)[0]
+    if len(wrong):
+        i = int(wrong[0])
+        raise ValueError(f"BBR009: {where} line {i + 2}: Ephi column '{tokens[i]}' is not the directory's "
+                         f"polarization {ephi}: the table is another polarization's (a copied or swapped Ephi "
+                         f"directory)")
+
+
 def load_dataset(dir_stem, base_dir=None):
     """Load ``<base>/<dir_stem>_Ephi={0,1}/{far_field,waveguide}.csv``.
 
@@ -77,7 +95,8 @@ def load_dataset(dir_stem, base_dir=None):
 
     Returns {(IWavePhi, IWaveTheta): AngleDataset}. Mirrors BBRHFSSData's
     constructor: every row's Freq must agree with the stem's frequency to 0.1 %
-    (BBR009); every numeric field must be a finite number (BBR013); the Ephi=1
+    and its Ephi be its directory's polarization (BBR009; G4-034); every numeric
+    field must be a finite number (BBR013); the Ephi=1
     rows are matched to the Ephi=0 rows by order within each incidence key and
     must sit at the same far-field (Phi, Theta) and exit-point (X, Y, Z), with the
     same row count and no key of their own (BBR012); the two CSVs must have the
@@ -137,6 +156,7 @@ def load_dataset(dir_stem, base_dir=None):
             vals = df.drop(columns=["Freq", "Ephi"]).apply(pd.to_numeric, errors="coerce").to_numpy(float)
             if not np.isfinite(vals).all():
                 raise ValueError(f"BBR013: non-numeric or non-finite field in {d}/{name}")
+            check_ephi_column(df["Ephi"], e, f"{d}/{name}")
     if v2:   # LoadWaveguide's 2.x row checks, before any T is computed or any basis masked (CDX-037)
         recs = sidecar.key_records(sc)
         for e in (0, 1):

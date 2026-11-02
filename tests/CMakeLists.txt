@@ -72,7 +72,7 @@ bbrsim_add_abort_test(testSupport.abort_stock testSupport abort_stock BBRT03)
 bbrsim_add_test_program(testHFSSData LABEL unit
   CASES parse_frequency mini_loads transmittance_mixing load_cap_first_row nearest_key
         direction_cdf zero_weight_rows coherent_cross_term_in_direction exit_position
-        err_missing_files err_no_keys err_key_mismatch err_freq_column err_ephi1_row_mismatch
+        err_missing_files err_no_keys err_key_mismatch err_freq_column err_ephi_column ephi_column_numeric err_ephi1_row_mismatch
         err_bad_number zero_support_fatal real_data_smoke transmittance_coherent real_data_diagonal_key
         sidecar_checks_pass sidecar_c1_header sidecar_c1_bom sidecar_c2_key_off_grid sidecar_c2_key_missing
         sidecar_c3_far_field

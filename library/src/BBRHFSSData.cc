@@ -289,6 +289,20 @@ void BBRHFSSData::CheckFrequencyColumn(const G4String& path,
   }
 }
 
+// The polarization a table is USED as comes from its directory (_Ephi=0 or _Ephi=1); every row's Ephi must
+// agree, so a copied or swapped polarization directory cannot stand in for the other (G4-034). "1.0" is 1, as
+// the producer's own identity check reads it.
+void BBRHFSSData::CheckEphiColumn(const G4String& path, const std::string& token, int ephi_flag,
+                                  std::size_t line) const
+{
+  if (Num(token, path, "Ephi") != ephi_flag) {
+    G4ExceptionDescription ed;
+    ed << path << " line " << line << ": Ephi column '" << token << "' is not the directory's polarization "
+       << ephi_flag << ": the table is another polarization's (a copied or swapped Ephi directory).";
+    G4Exception("BBRHFSSData::CheckEphiColumn", "BBR009", FatalException, ed);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // CSV loading
 // ---------------------------------------------------------------------------
@@ -311,11 +325,14 @@ void BBRHFSSData::LoadFarField(const G4String& path, int ephi_flag, const BBRDat
   // FarFieldPoints by position, and each pair must share (Phi, Theta) (BBR012).
   std::map<std::pair<G4double,G4double>, std::size_t> rowIdx;
 
+  std::size_t lineNo = 1;                       // the header
   while (std::getline(f, line)) {
+    ++lineNo;
     auto v = SplitCSV(line);
     if (v.empty()) continue;                    // a blank line (also a bare CRLF)
     if (!FieldCountOK(v, 10, path)) continue;
     CheckFrequencyColumn(path, v[0]);
+    CheckEphiColumn(path, v[1], ephi_flag, lineNo);
 
     G4double iwPhi = Num(v[2], path, "IWavePhi");
     G4double iwThe = Num(v[3], path, "IWaveTheta");
@@ -396,11 +413,14 @@ void BBRHFSSData::LoadWaveguide(const G4String& path, int ephi_flag, const BBRDa
   std::map<std::pair<G4double,G4double>, bool>         tSet;
   std::map<std::pair<G4double,G4double>, G4double>     firstFactor;   // 2.x: the key's first InterceptFactor
 
+  std::size_t lineNo = 1;                       // the header
   while (std::getline(f, line)) {
+    ++lineNo;
     auto v = SplitCSV(line);
     if (v.empty()) continue;                    // a blank line (also a bare CRLF)
     if (!FieldCountOK(v, v2 ? 16 : 15, path)) continue;
     CheckFrequencyColumn(path, v[0]);
+    CheckEphiColumn(path, v[1], ephi_flag, lineNo);
 
     G4double iwPhi  = Num(v[2], path, "IWavePhi");
     G4double iwThe  = Num(v[3], path, "IWaveTheta");
