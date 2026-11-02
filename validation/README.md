@@ -507,7 +507,13 @@ and a run regenerates it.
   ran the planned number of events; every `crossings` and `abspoints` event_id of
   a run lies in [0, events) (row `run NNN event_id`, which fails on the first
   value outside the range, naming the file, the ntuple and the row; G4-027,
-  G4-026: one output once carried a corrupted event_id column); every Planck run
+  G4-026: one output once carried a corrupted event_id column); every basket of
+  a run's file is sound (row `run NNN baskets`, `bbrsim.io.basket_problems`;
+  G4-035): none is keyed uncompressed over one whole compression block of its
+  length, G4-026's cause (g4tools before Geant4 11.3.0 wrote such a basket when
+  compression saved nothing, and readers take the block for the data), and every
+  branch reads; it names the tree, branch and basket, counts baskets kept in
+  their branch without a key, and costs one more full read of the file; every Planck run
   reached its crack; every decided crack entry carries the
   grid frequency the selection rule gives for its recorded energy, and every
   other row −1 (the mirror computes the frequency in CLHEP's own arithmetic, so
