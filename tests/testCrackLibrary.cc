@@ -113,8 +113,13 @@ int main(int argc, char** argv) {
     }},
     {"token_verbatim", [] {
       TempDir d; Grid(d.path(), "sci", {"1.5e3"});
+      // A token strtod reads only in part ("500x") is not a frequency: its directory is skipped, so it is not
+      // a second 500 GHz point beside part_500GHz (which would be BBR011's duplicate frequency).
+      Grid(d.path(), "part", {"500"});
+      std::filesystem::create_directories(d.path() / "waveguides" / "part_500xGHz_Ephi=0");
       BBRConfigManager::SetDataDir(d.path().string());
       CHECK_NEAR(Pick("sci", 1000), 1500, 0);
+      CHECK_NEAR(Pick("part", 500), 500, 0);
     }},
     {"discovery_errors", [] {
       TempDir d;

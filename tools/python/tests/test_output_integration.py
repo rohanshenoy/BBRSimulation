@@ -32,14 +32,27 @@ def round_gap_data(repo_root, tmp_path_factory):
     return root
 
 
-def run_macro(binary, work, text):
+def run_macro(binary, work, text, threads=1):
     macro = work / "test.mac"
     macro.write_text(text)
-    env = dict(os.environ, G4FORCENUMBEROFTHREADS="1")
+    env = dict(os.environ, G4FORCENUMBEROFTHREADS=str(threads))
     env.pop("DYLD_LIBRARY_PATH", None)
     env.pop("LD_LIBRARY_PATH", None)
     return subprocess.run([binary, str(macro)], cwd=work, env=env,
                           capture_output=True, text=True, timeout=60)
+
+
+def test_band_and_polarization_warnings_once_per_process_mt(binary, tmp_path):
+    """BBR021 (an emitter outside 2.2-117 K) and BBR010 (a fixed polarization parallel to the gun) are raised on
+    the worker threads that generate the events, once per process however many workers hit them."""
+    r = run_macro(binary, tmp_path,
+                  "/bbr/thermal/setT 1 K\n/run/initialize\n/analysis/setFileName out/planck.root\n/run/beamOn 400\n"
+                  "/bbr/gun/mode true\n/bbr/gun/pol 1 0 0\n/analysis/setFileName out/gun.root\n/run/beamOn 400\n",
+                  threads=4)
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = r.stdout + r.stderr
+    assert log.count("G4Exception : BBR021") == 1, log
+    assert log.count("G4Exception : BBR010") == 1, log
 
 
 def commands(name, extra=""):
