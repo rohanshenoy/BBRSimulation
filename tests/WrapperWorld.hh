@@ -106,8 +106,11 @@ class World {
   // Drives the navigator through a real step from start to the next boundary
   // along k, builds the G4Step (post-step status postStatus, fGeomBoundary by
   // default) and calls the wrapper's PostStepDoIt with eng as the random engine.
+  // stepLength >= 0 replaces the navigated length as the step's and the track's
+  // step length (a tolerance-scale re-step at the same boundary).
   Result Shoot(G4ThreeVector start, G4ThreeVector k, G4ThreeVector pol, G4double E_eV,
-               bbrtest::ScriptedEngine& eng, G4StepStatus postStatus = fGeomBoundary) {
+               bbrtest::ScriptedEngine& eng, G4StepStatus postStatus = fGeomBoundary,
+               G4double stepLength = -1.) {
     G4Random::setTheEngine(&eng);
     k = k.unit();
     fNav->LocateGlobalPointAndSetup(start, &k, false, false);
@@ -123,14 +126,15 @@ class World {
     dp->SetPolarization(pol);
     G4Track track(dp, 0., hit);
     track.SetTouchableHandle(postTh);
+    const G4double len = stepLength >= 0. ? stepLength : s;
     G4Step step;
-    step.SetStepLength(s);
+    step.SetStepLength(len);
     G4StepPoint* pre = step.GetPreStepPoint();
     pre->SetPosition(start);
     pre->SetTouchableHandle(preTh);
     pre->SetMaterial(preTh->GetVolume()->GetLogicalVolume()->GetMaterial());
     track.SetStep(&step);
-    track.SetStepLength(s);
+    track.SetStepLength(len);
     G4StepPoint* post = step.GetPostStepPoint();
     post->SetStepStatus(postStatus);
     post->SetPosition(hit);

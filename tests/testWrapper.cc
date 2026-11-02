@@ -405,6 +405,33 @@ int main(int argc, char** argv) {
       CHECK(r.status == S::kBBRNone && r.uniformsUsed == 0 && r.freqGHz == -1.);
       CHECK(w.Process().GetStatus() == NotAtBoundary);
     }},
+    {"step_too_small_matches_stock", [] {
+      // ADV-03: Geant4 11.4's G4OpBoundaryProcess classifies a boundary step of length at most the
+      // surface tolerance as StepTooSmall and does nothing (bug 2510; 10.x used half of it). The wrapper
+      // and the recorder use the same threshold, so such a re-step at a crack face or a REFLECTIVITY
+      // surface is passed through: no lookup, no uniform, no second absorption roll.
+      const G4double tol = G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
+      TempDir d; UseData(d, hfssfix::WrapKeys());
+      ScriptedEngine eng;
+      {
+        World w;
+        for (double f : {0.75, 1.0}) {
+          Script(eng, {0.0, 0.5, 0.5});
+          const auto r = w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng, fGeomBoundary, f * tol);
+          CHECK(r.status == S::kBBRNone && r.uniformsUsed == 0 && r.freqGHz == -1.);
+          CHECK(w.Process().GetStatus() == StepTooSmall);
+        }
+        Script(eng, {0.0, 0.5, 0.5});
+        CHECK(w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng, fGeomBoundary, 1.5 * tol).status == S::kBBRDiffractionTransmit);
+      }
+      {
+        World w({2 * mm, 5 * mm, 0.026 * mm}, {}, Flat30());
+        Script(eng, {0.9});   // would absorb (U > R = 0.3) if the step were intercepted
+        const auto r = w.Shoot(kSlabStart, k30, Z, 2.07e-3, eng, fGeomBoundary, 0.75 * tol);
+        CHECK(r.status == S::kBBRNone && r.uniformsUsed == 0 && r.trackStatus == fAlive);
+        CHECK(w.Process().GetStatus() == StepTooSmall);
+      }
+    }},
     {"snap_and_rotation", [] {
       TempDir d; UseData(d, hfssfix::WrapKeys());
       ScriptedEngine eng;
@@ -495,21 +522,35 @@ int main(int argc, char** argv) {
       CHECK(nBad == 0);
       CHECK(nTransmit > 0 && nTransmit < nCase / 3);   // both branches exercised
     }},
-    {"side_face_entry_documented", [] {
-      // D10 characterization: entry through a side (+y) face is not detected; the photon
-      // is treated as an axial entry and relocated to an x face. The geometry rule "only
-      // the +-x faces of a vacuum_wg volume may be exposed" is in BBSimOpBoundaryProcess.hh.
+    {"side_face_entry_is_fatal", [] {
+      // ADV-01: a vacuum_wg volume is entered through one of its two local x faces (the crack
+      // axis). Entry through a side face would be given an incidence angle from the x axis and an
+      // exit point on an x face the photon never approached, so it is the fatal BBR029, naming
+      // the volume and the face. The crack is bare in the World, so its side faces are exposed.
       TempDir d; UseData(d, hfssfix::WrapKeys());
-      World w; ScriptedEngine eng;
-      for (double kx : {0.3, -0.3}) {
-        const G4ThreeVector k = G4ThreeVector(kx, -0.95, 0).unit();
+      ScriptedEngine eng;
+      {
+        World w;
         Script(eng, {0.0, 0.5, 0.5});
-        const auto r = w.Shoot({0, 6 * mm, 0}, k, Z, E500, eng);
-        CHECK_NEAR(r.hit.y(), 5 * mm, 1e-9);                      // entered through the +y face
-        CHECK(r.status == S::kBBRDiffractionTransmit);            // key (90,135), T = 1
-        const double sgn = kx > 0 ? 1. : -1.;                     // normal flipped along k
-        CHECK_VEC(r.pos, ExpectedStart(G4ThreeVector(sgn * 2 * mm, 1 * mm, 0.01 * mm),
-                                       FFDir(60, 90, sgn * X, Y, Z), sgn * X), 1e-9);
+        ExpectG4Exception("BBR029", [&] { w.Shoot({0, 0, -3 * mm}, Z, X, E500, eng); },   // into the gap face
+                          "BBSimOpBoundaryProcess", "volume crack through its local -z face");
+        for (double kx : {0.3, -0.3}) {                                                   // into the long face
+          Script(eng, {0.0, 0.5, 0.5});
+          ExpectG4Exception("BBR029", [&] { w.Shoot({0, 6 * mm, 0}, G4ThreeVector(kx, -0.95, 0).unit(), Z, E500, eng); },
+                            "BBSimOpBoundaryProcess", "volume crack through its local +y face");
+        }
+        // Control: an axial entry 0.1 mm from the long edge of the -x face is not refused.
+        Script(eng, {0.0, 0.5, 0.5});
+        CHECK(w.Shoot({-3 * mm, 4.9 * mm, 0.02 * mm}, X, Z, E500, eng).status == S::kBBRDiffractionTransmit);
+      }
+      {
+        // A crack part whose propagation axis is not its local x: active Rz(+90 deg) puts local x
+        // along world +y and local y along world -x, so a photon along world +x meets local +y.
+        G4RotationMatrix rz; rz.rotateZ(90 * deg);
+        World w({2 * mm, 5 * mm, 0.026 * mm}, rz);
+        Script(eng, {0.0, 0.5, 0.5});
+        ExpectG4Exception("BBR029", [&] { w.Shoot({-8 * mm, 0, 0}, X, Z, E500, eng); },
+                          "BBSimOpBoundaryProcess", "volume crack through its local +y face");
       }
     }},
     {"reflectance_decision", [] {

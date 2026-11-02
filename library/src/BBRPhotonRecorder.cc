@@ -3,7 +3,6 @@
 #include "BBSimOpBoundaryProcess.hh"
 
 #include "G4AnalysisManager.hh"
-#include "G4GeometryTolerance.hh"
 #include "G4OpticalPhoton.hh"
 #include "G4ProcessManager.hh"
 #include "G4ProcessVector.hh"
@@ -98,9 +97,9 @@ void BBRPhotonRecorder::Record(const G4Step* step)
     }
   }
 
-  const auto* postStep = step->GetPostStepPoint();
-  const G4double tolerance = G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
-  const G4bool crossing = postStep->GetStepStatus() == fGeomBoundary && step->GetStepLength() > tolerance / 2.;
+  // A boundary crossing is a step the boundary process acts on; tolerance-scale
+  // re-steps at the same surface (StepTooSmall) are not (ADV-03).
+  const G4bool crossing = BBSimOpBoundaryProcess::IsBoundaryStep(*step);
   const G4String crossingStatus = crossing ? ResolveStatus(fWrapper, fBoundary) : "";
   if (crossing && BBRAnalysis::EventTypeForStatus(crossingStatus) == 1) ++fReflections;
 
@@ -134,14 +133,10 @@ void BBRPhotonRecorder::Record(const G4Step* step)
     am->AddNtupleRow(aid);
   }
 
-  if (step->GetPostStepPoint()->GetStepStatus() != fGeomBoundary)  return;
-
-  // Skip tolerance-scale re-steps at the same surface (StepTooSmall in the
-  // boundary process): no physics happens on them and they would inflate
-  // n_reflect / duplicate rows.
-  const G4double kCarTolerance =
-      G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
-  if (step->GetStepLength() <= kCarTolerance / 2.) return;
+  // Only boundary crossings make a row. Tolerance-scale re-steps at the same
+  // surface (StepTooSmall in the boundary process) are skipped: no physics
+  // happens on them and they would inflate n_reflect / duplicate rows.
+  if (!crossing) return;
 
   const G4StepPoint* pre  = step->GetPreStepPoint();
   const G4StepPoint* post = step->GetPostStepPoint();

@@ -219,11 +219,31 @@ int main(int argc, char** argv) {
       auto* ok = new G4LogicalVolume(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapA");
       new G4PVPlacement(nullptr, {}, ok, "gap", wlv, false, 0);
       BBRCrackLibrary::Instance().ValidatePlacedCracks();
-      // Once per process: the second call is a no-op, so a crack placed since is not checked.
-      auto* thin = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 5 * mm, 0.020 * mm), BBRMaterials::GetVacuumWG(), "gapB");
-      new G4PVPlacement(nullptr, {0, 0, 10 * mm}, thin, "gap:2", wlv, false, 0);
+      // A later call on the unchanged geometry (a worker thread's, or a later run's) only confirms it.
       BBRCrackLibrary::Instance().ValidatePlacedCracks();
       CHECK_NEAR(Pick("gap", 500), 500, 0);
+    }},
+    {"validate_placed_cracks_changed", [] {
+      // ADV-05: geometry reinitialisation is unsupported, so a later call that finds the vacuum_wg volumes
+      // changed since the first call validated them is the fatal BBR030, not a silent return.
+      TempDir d; Grid(d.path(), "gap", {"500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
+      auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
+      new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
+      auto* box = new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm);
+      new G4PVPlacement(nullptr, {}, new G4LogicalVolume(box, BBRMaterials::GetVacuumWG(), "gapA"), "gap", wlv, false, 0);
+      auto& lib = BBRCrackLibrary::Instance();
+      lib.ValidatePlacedCracks();
+      box->SetZHalfLength(0.020 * mm);   // resized in place: the same volume and solid objects, another section
+      ExpectG4Exception("BBR030", [&] { lib.ValidatePlacedCracks(); }, "BBRCrackLibrary::ValidatePlacedCracks",
+                        "crack volume gap (dataset gap, solid gapA, extent (4,9,0.04) mm)");
+      box->SetZHalfLength(0.025 * mm);   // restored: the comparison is with the geometry first validated
+      lib.ValidatePlacedCracks();
+      auto* b = new G4LogicalVolume(new G4Box("gapB", 2 * mm, 4.5 * mm, 0.025 * mm), BBRMaterials::GetVacuumWG(), "gapB");
+      new G4PVPlacement(nullptr, {0, 0, 10 * mm}, b, "gap:2", wlv, false, 0);   // a crack placed since
+      ExpectG4Exception("BBR030", [&] { lib.ValidatePlacedCracks(); }, "BBRCrackLibrary::ValidatePlacedCracks",
+                        "1 then, 2 now");
     }},
     {"placed_cracks_json", [] {
       // One record per validated placement, in visiting order, with every grid frequency's sidecar.

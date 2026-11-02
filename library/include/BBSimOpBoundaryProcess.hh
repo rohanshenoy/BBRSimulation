@@ -17,19 +17,34 @@
 // pass-through.
 //
 // Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x
-// faces (the crack axis). Entry through a side face is not detected and is
-// treated as an axial entry.
+// faces (the crack axis). An entry point farther than the surface tolerance from
+// the entry x face (a side face, or a part whose propagation axis is not its
+// local x) is the fatal BBR029, naming the volume and the face (ADV-01).
 class BBSimOpBoundaryProcess : public G4WrapperProcess
 {
  public:
+  // Process name: G4WrapperProcess::RegisterProcess appends the wrapped process's
+  // name, so the wrapper is BBSimOpBoundaryOpBoundary in /process/list; its type
+  // (fOptical) and sub-type (fOpBoundary) are the stock ones (ADV-02).
+  // G4ProcessManager::RemoveProcess takes the stock process out of G4ProcessTable,
+  // so /process/inactivate OpBoundary finds no process: name the wrapper instead.
   explicit BBSimOpBoundaryProcess(const G4String& name = "BBSimOpBoundary");
   ~BBSimOpBoundaryProcess() override = default;
 
   G4VParticleChange* PostStepDoIt(const G4Track& aTrack,
                                   const G4Step& aStep) override;
 
+  // True for a step that ends on a geometry boundary and is longer than the
+  // surface tolerance: the steps on which stock G4OpBoundaryProcess acts. Geant4
+  // 11.4 classifies a boundary step of at most the tolerance as StepTooSmall and
+  // does nothing (G4OpBoundaryProcess.cc, bug 2510; 10.x used half the tolerance).
+  // The wrapper intercepts, and BBRPhotonRecorder records a crossing, only when
+  // this holds (ADV-03).
+  static G4bool IsBoundaryStep(const G4Step& aStep);
+
   // Forwards to the wrapped process, then runs
-  // BBRCrackLibrary::ValidatePlacedCracks() (once per process), so a missing or
+  // BBRCrackLibrary::ValidatePlacedCracks() (it validates on its first call and
+  // only confirms an unchanged geometry on later ones, BBR030), so a missing or
   // wrong HFSS dataset, or a crack too small for its exit grid, stops the run at
   // the first run initialization (/run/initialize with an MT or task run
   // manager, whose Initialize calls BeamOn(0); /run/beamOn with a sequential

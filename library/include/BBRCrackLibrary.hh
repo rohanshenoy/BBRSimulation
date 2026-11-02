@@ -11,6 +11,9 @@
 #include <string>
 #include <vector>
 
+class G4VPhysicalVolume;
+class G4VSolid;
+
 // Singleton that owns HFSS dataset discovery, loading and caching.
 //
 // Routing key: (crack volume name stripped of any ":N" placement suffix,
@@ -78,8 +81,11 @@ class BBRCrackLibrary
   // discovers its dataset (sidecars and CSV presence included) and checks that
   // each sidecar's exit cross-section equals the volume's solid section
   // (F12, fatal BBR025; OR-020). Prints each crack's HFSS and Geant4 extents (F11).
-  // Called once per process by BBSimOpBoundaryProcess::BuildPhysicsTable; later
-  // calls return.
+  // Called by BBSimOpBoundaryProcess::BuildPhysicsTable. The first call validates;
+  // every later one (each worker thread's, a later run's) only confirms that the
+  // vacuum_wg volumes are those it validated (the same volume and solid objects,
+  // names and solid extents, in the same order), else fatal BBR030: BBRsim does not
+  // support changing the geometry after /run/initialize (ADV-05).
   void ValidatePlacedCracks();
 
   // JSON array, one object per crack ValidatePlacedCracks checked, in its order:
@@ -109,9 +115,15 @@ class BBRCrackLibrary
   FrequencySet& Discover(const G4String& datasetId);
 
   struct PlacedCrack {
+    const G4VPhysicalVolume* pv;
+    const G4VSolid* solid;
     G4String volume, datasetId;
     G4double extent_mm[3];                // solid's BoundingLimits extent along local x, y, z
+    bool operator==(const PlacedCrack& o) const;
   };
+
+  // The vacuum_wg volumes of the physical-volume store, in its order.
+  static std::vector<PlacedCrack> ScanPlacedCracks();
 
   G4String fWaveguidesDir;                  // <data root>/waveguides, resolved once
   std::map<G4String, FrequencySet> fSets;

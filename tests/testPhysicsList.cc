@@ -37,12 +37,14 @@
 #include "G4LogicalVolume.hh"
 #include "G4NistManager.hh"
 #include "G4OpBoundaryProcess.hh"
+#include "G4OpProcessSubType.hh"
 #include "G4OpticalParameters.hh"
 #include "G4OpticalPhoton.hh"
 #include "G4OpticalPhysics.hh"
 #include "G4PVPlacement.hh"
 #include "G4ParticleGun.hh"
 #include "G4ProcessManager.hh"
+#include "G4ProcessTable.hh"
 #include "G4ProcessVector.hh"
 #include "G4RunManager.hh"
 #include "G4RunManagerFactory.hh"
@@ -220,13 +222,21 @@ int main(int argc, char** argv) {
       CHECK(now.list == gStock.list);                      // same place in the process list
       CHECK(now.postDoIt == gStock.postDoIt);              // and in the post-step DoIt vector
       // The wrapper as Geant4 names it: G4WrapperProcess::RegisterProcess appends
-      // the wrapped process's name, and the subtype keeps G4VProcess's default.
+      // the wrapped process's name and copies its type, not its sub-type, so the
+      // wrapper sets the stock sub-type itself (ADV-02): a lookup by sub-type finds it.
       const G4ProcessVector* pl = G4OpticalPhoton::Definition()->GetProcessManager()->GetProcessList();
       for (std::size_t i = 0; i < pl->size(); ++i) {
         if (!dynamic_cast<const BBSimOpBoundaryProcess*>((*pl)[i])) continue;
         CHECK((*pl)[i]->GetProcessName() == "BBSimOpBoundaryOpBoundary");
-        CHECK((*pl)[i]->GetProcessSubType() == -1);
+        CHECK((*pl)[i]->GetProcessType() == fOptical);
+        CHECK((*pl)[i]->GetProcessSubType() == fOpBoundary);
       }
+      // The process table holds the wrapper under its own name and no OpBoundary at all, so
+      // /process/inactivate OpBoundary finds nothing (the limit the wrapper's header states).
+      const G4ProcessTable* table = G4ProcessTable::GetProcessTable();
+      CHECK(table->FindProcess("OpBoundary", G4OpticalPhoton::Definition()) == nullptr);
+      CHECK(dynamic_cast<const BBSimOpBoundaryProcess*>(
+                table->FindProcess("BBSimOpBoundaryOpBoundary", G4OpticalPhoton::Definition())) != nullptr);
     }},
     {"registered_twice_is_fatal", [] {
       G4RunManager* rm = Build(Order::Twice);
