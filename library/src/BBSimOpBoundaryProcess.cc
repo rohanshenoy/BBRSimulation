@@ -6,6 +6,7 @@
 #include "G4GeometryTolerance.hh"
 #include "G4NavigationHistory.hh"
 #include "G4Navigator.hh"
+#include "G4OpProcessSubType.hh"
 #include "G4ParallelWorldProcess.hh"
 #include "G4PhysicalConstants.hh"
 #include "G4SafetyHelper.hh"
@@ -18,9 +19,14 @@
 
 #include <cmath>
 
+// G4WrapperProcess::RegisterProcess appends the wrapped process's name and copies
+// its type (fOptical) but not its sub-type, so the wrapper carries the stock
+// boundary sub-type itself: a lookup by sub-type (fOpBoundary) finds it (ADV-02).
 BBSimOpBoundaryProcess::BBSimOpBoundaryProcess(const G4String& name)
   : G4WrapperProcess(name)
-{}
+{
+  SetProcessSubType(fOpBoundary);
+}
 
 void BBSimOpBoundaryProcess::BuildPhysicsTable(const G4ParticleDefinition& particle)
 {

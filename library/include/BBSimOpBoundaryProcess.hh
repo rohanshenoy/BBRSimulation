@@ -23,6 +23,11 @@
 class BBSimOpBoundaryProcess : public G4WrapperProcess
 {
  public:
+  // Process name: G4WrapperProcess::RegisterProcess appends the wrapped process's
+  // name, so the wrapper is BBSimOpBoundaryOpBoundary in /process/list; its type
+  // (fOptical) and sub-type (fOpBoundary) are the stock ones (ADV-02).
+  // G4ProcessManager::RemoveProcess takes the stock process out of G4ProcessTable,
+  // so /process/inactivate OpBoundary finds no process: name the wrapper instead.
   explicit BBSimOpBoundaryProcess(const G4String& name = "BBSimOpBoundary");
   ~BBSimOpBoundaryProcess() override = default;
 
