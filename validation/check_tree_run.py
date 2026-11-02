@@ -21,7 +21,9 @@ being crack to World with the direction unchanged to 1e-9, never into the crack'
 with one example; a crack to plate to World pair whose plate to World row follows at once, at a tolerance-scale
 step the recorder keeps, is a clean exit: see exit_directions); every event_id of a run's
 crossings and abspoints lies in [0, events) (one output once carried a corrupted
-column); per gun run, one entry per event on the aimed crack, with the configured
+column); every basket of a run's file is sound, none keyed uncompressed over a whole compression
+block of its length (G4-026's fault, which the event_id row met only by chance) and every branch
+readable; per gun run, one entry per event on the aimed crack, with the configured
 direction and energy and the expected grid frequency; per Planck run, at most one entry per event; reflections
 are specular; every grid frequency is served by a gun run. With --log: BBR008, BBR026 and BBR028 exactly as the output implies, a clean log, and one startup line
 per placed crack and dataset. BBR026 is once per dataset, regime mode and direction (the
@@ -225,6 +227,23 @@ def check_event_ids(rep, name, path, events, **ntuples):
             return
     rep.check(name, True, ", ".join(f"{len(f)} {label}" for label, f in ntuples.items())
               + f" rows, every event_id in [0, {events})")
+
+
+def check_baskets(rep, name, path):
+    """Every basket of a run's ROOT file is sound (bbrsim.io.basket_problems; G4-026, G4-035): none keyed
+    uncompressed over one whole compression block of its length, as g4tools before Geant4 11.3.0 could write,
+    and every branch readable. Exact, like the event_id row; it costs one more full read of the file plus one
+    key-header read per basket."""
+    try:
+        r = io.basket_problems(path)
+    except Exception as err:          # an unreadable file is a FAIL row, not a traceback
+        rep.check(name, False, f"{path}: {type(err).__name__}: {err}")
+        return
+    counted = f"{r.on_disk} on-disk baskets" + (f", {r.embedded} kept in their branch (read only)" if r.embedded else "")
+    if r.problems:
+        rep.check(name, False, f"{path}: {len(r.problems)} problem(s), the first: {r.problems[0]}; {counted}")
+    else:
+        rep.check(name, True, f"{counted}, none keyed uncompressed over a whole compression block, every branch read")
 
 
 def run_tag(r):
@@ -586,6 +605,7 @@ def validate(run_dir, log_path=None, data_root=None, tables=None):
     n_dec = n_bad_sel = n_bad_sentinel = 0
     for r, df, ab, meta, problem in load_runs(run_dir, man):
         tag = run_tag(r)
+        check_baskets(rep, f"run {r['run']:03d} baskets", os.path.join(run_dir, r["file"]))
         if problem:
             rep.check(f"{tag} output", False, problem)
             continue

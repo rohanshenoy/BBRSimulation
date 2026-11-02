@@ -14,6 +14,7 @@ import pytest
 
 from bbrsim import hfss, sidecar
 
+import basket_fixture as bf
 import schema2_fixture as fx
 
 CRACK1, CRACK2, ROUND = "InfParallelPlate_crack1Rohan", "InfParallelPlate_crack2", "RoundGap_r50um"
@@ -735,14 +736,15 @@ def copy_run(run, dst):
     return dst
 
 
-def rewrite_crossings(path, change, ntuple="crossings"):
-    """Rewrite the ROOT file at path with change(arrays of ntuple) applied in place."""
+def rewrite_crossings(path, change, ntuple="crossings", **recreate):
+    """Rewrite the ROOT file at path with change(arrays of ntuple) applied in place; recreate is passed to
+    uproot.recreate (compression=None writes every basket keyed uncompressed)."""
     import uproot
     with uproot.open(path) as f:
         trees = {name: {k: np.array(v) for k, v in f[name].arrays(library="np").items()}
                  for name in ("crossings", "abspoints")}                 # writable copies
     change(trees[ntuple])
-    with uproot.recreate(path) as f:
+    with uproot.recreate(path, **recreate) as f:
         for name, arrs in trees.items():
             tree = f.mktree(name, {k: v.dtype for k, v in arrs.items()})
             if len(next(iter(arrs.values()))):
@@ -760,6 +762,7 @@ def test_e2e_passes(checker, e2e, e2e_tables):
     passing = {n for s, n, _ in rows if s == "PASS"}
     assert any(n.endswith(" event_id") for n in passing)
     assert any(n.endswith(" exit direction") for n in passing)
+    assert any(n.endswith(" baskets") for n in passing)
 
 
 def test_e2e_cli(repo_root, e2e):
@@ -796,6 +799,34 @@ def test_e2e_event_id_out_of_range(checker, e2e, e2e_tables, tmp_path):
     detail = failing(rows)["run 000 event_id"]
     assert "tree_r000.root" in detail and "crossings" in detail and str(events) in detail
     assert not any(n.endswith(" event_id") for n in failing(rows) if n != "run 000 event_id")
+
+
+def test_e2e_baskets_g4026(checker, e2e, e2e_tables, tmp_path):
+    """A run file with one basket as G4-026 left it (keyed uncompressed over a whole zlib block of its length)
+    fails its baskets row, which names the tree, branch and basket (G4-035)."""
+    run = copy_run(e2e[0], tmp_path / "run")
+    path = run / "output/tree_r000.root"
+    rewrite_crossings(path, lambda cr: None, compression=None)
+    bf.corrupt_g4026(path, "crossings", "event_id", 0)
+    ok, rows = rows_of(checker, run, e2e_tables)
+    assert not ok and "crossings/event_id basket 0" in failing(rows).get("run 000 baskets", "")
+    assert not any(n.endswith(" baskets") for n in failing(rows) if n != "run 000 baskets")
+
+
+def test_check_baskets_row(checker, tmp_path):
+    """The row on its own: a sound file passes with its basket count, G4-026's basket and a missing file fail."""
+    good, bad = tmp_path / "good.root", tmp_path / "bad.root"
+    bf.write_tree(good)
+    bf.write_tree(bad)
+    bf.corrupt_g4026(bad, "abspoints", "event_id", 1)
+    rep = checker.Report()
+    checker.check_baskets(rep, "good", str(good))
+    checker.check_baskets(rep, "bad", str(bad))
+    checker.check_baskets(rep, "missing", str(tmp_path / "missing.root"))
+    status = {n: (s, d) for s, n, d in rep.rows}
+    assert status["good"][0] == "PASS" and "4 on-disk baskets" in status["good"][1]
+    assert status["bad"][0] == "FAIL" and "abspoints/event_id basket 1 (entries [100, 200)" in status["bad"][1]
+    assert status["missing"][0] == "FAIL"
 
 
 def test_e2e_event_id_negative_in_abspoints(checker, e2e, e2e_tables, tmp_path):
