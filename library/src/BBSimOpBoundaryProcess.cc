@@ -42,20 +42,16 @@ void BBSimOpBoundaryProcess::BuildPhysicsTable(const G4ParticleDefinition& parti
 // The wrapped G4OpBoundaryProcess is Forced, so this runs on EVERY step of
 // every optical photon. Mirror the stock process's own entry guards before
 // intercepting: only act on genuine geometry-boundary steps longer than the
-// surface tolerance. Tolerance-scale re-steps at the same surface must NOT
-// roll the absorption dice a second time — the stock process classifies them
-// as StepTooSmall and does nothing.
+// surface tolerance (IsBoundaryStep). Tolerance-scale re-steps at the same
+// surface must NOT roll the absorption dice a second time — the stock process
+// classifies them as StepTooSmall and does nothing.
 G4VParticleChange* BBSimOpBoundaryProcess::PostStepDoIt(const G4Track& aTrack,
                                                         const G4Step& aStep)
 {
   fLastBBRStatus = kBBRNone;
   fLastHFSSFreqGHz = -1.;
 
-  const G4double kCarTolerance =
-      G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
-
-  if (aStep.GetPostStepPoint()->GetStepStatus() == fGeomBoundary &&
-      aStep.GetStepLength() > kCarTolerance / 2.) {
+  if (IsBoundaryStep(aStep)) {
     const G4Material* mat2 = aStep.GetPostStepPoint()->GetMaterial();
     if (mat2 && mat2->GetName() == "vacuum_wg")
       return HandleDiffractionBoundary(aTrack, aStep);
@@ -66,6 +62,12 @@ G4VParticleChange* BBSimOpBoundaryProcess::PostStepDoIt(const G4Track& aTrack,
     }
   }
   return pRegProcess->PostStepDoIt(aTrack, aStep);
+}
+
+G4bool BBSimOpBoundaryProcess::IsBoundaryStep(const G4Step& aStep)
+{
+  return aStep.GetPostStepPoint()->GetStepStatus() == fGeomBoundary &&
+         aStep.GetStepLength() > G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
 }
 
 // ---------------------------------------------------------------------------

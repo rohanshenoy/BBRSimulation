@@ -34,6 +34,14 @@ class BBSimOpBoundaryProcess : public G4WrapperProcess
   G4VParticleChange* PostStepDoIt(const G4Track& aTrack,
                                   const G4Step& aStep) override;
 
+  // True for a step that ends on a geometry boundary and is longer than the
+  // surface tolerance: the steps on which stock G4OpBoundaryProcess acts. Geant4
+  // 11.4 classifies a boundary step of at most the tolerance as StepTooSmall and
+  // does nothing (G4OpBoundaryProcess.cc, bug 2510; 10.x used half the tolerance).
+  // The wrapper intercepts, and BBRPhotonRecorder records a crossing, only when
+  // this holds (ADV-03).
+  static G4bool IsBoundaryStep(const G4Step& aStep);
+
   // Forwards to the wrapped process, then runs
   // BBRCrackLibrary::ValidatePlacedCracks() (once per process), so a missing or
   // wrong HFSS dataset, or a crack too small for its exit grid, stops the run at

@@ -405,6 +405,33 @@ int main(int argc, char** argv) {
       CHECK(r.status == S::kBBRNone && r.uniformsUsed == 0 && r.freqGHz == -1.);
       CHECK(w.Process().GetStatus() == NotAtBoundary);
     }},
+    {"step_too_small_matches_stock", [] {
+      // ADV-03: Geant4 11.4's G4OpBoundaryProcess classifies a boundary step of length at most the
+      // surface tolerance as StepTooSmall and does nothing (bug 2510; 10.x used half of it). The wrapper
+      // and the recorder use the same threshold, so such a re-step at a crack face or a REFLECTIVITY
+      // surface is passed through: no lookup, no uniform, no second absorption roll.
+      const G4double tol = G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
+      TempDir d; UseData(d, hfssfix::WrapKeys());
+      ScriptedEngine eng;
+      {
+        World w;
+        for (double f : {0.75, 1.0}) {
+          Script(eng, {0.0, 0.5, 0.5});
+          const auto r = w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng, fGeomBoundary, f * tol);
+          CHECK(r.status == S::kBBRNone && r.uniformsUsed == 0 && r.freqGHz == -1.);
+          CHECK(w.Process().GetStatus() == StepTooSmall);
+        }
+        Script(eng, {0.0, 0.5, 0.5});
+        CHECK(w.Shoot({-3 * mm, 0, 0}, X, Z, E500, eng, fGeomBoundary, 1.5 * tol).status == S::kBBRDiffractionTransmit);
+      }
+      {
+        World w({2 * mm, 5 * mm, 0.026 * mm}, {}, Flat30());
+        Script(eng, {0.9});   // would absorb (U > R = 0.3) if the step were intercepted
+        const auto r = w.Shoot(kSlabStart, k30, Z, 2.07e-3, eng, fGeomBoundary, 0.75 * tol);
+        CHECK(r.status == S::kBBRNone && r.uniformsUsed == 0 && r.trackStatus == fAlive);
+        CHECK(w.Process().GetStatus() == StepTooSmall);
+      }
+    }},
     {"snap_and_rotation", [] {
       TempDir d; UseData(d, hfssfix::WrapKeys());
       ScriptedEngine eng;

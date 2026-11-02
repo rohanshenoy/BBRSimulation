@@ -97,7 +97,7 @@ bbrsim_add_test_program(testCrackLibrary LABEL unit
         placed_cracks_json cutoff_warning cutoff_warning_regime rho_limit_warning)
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
-  CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget snap_and_rotation
+  CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget step_too_small_matches_stock snap_and_rotation
         fatal_bbr004_bbr005 mirror_equivariance side_face_entry_is_fatal
         exit_start_wall_grazing exit_start_away_from_wall exit_start_long_wall exit_start_folds
         exit_start_minus_x_face exit_start_guard_limit exit_start_disc_rim exit_start_corner
