@@ -17,8 +17,9 @@
 // pass-through.
 //
 // Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x
-// faces (the crack axis). Entry through a side face is not detected and is
-// treated as an axial entry.
+// faces (the crack axis). An entry point farther than the surface tolerance from
+// the entry x face (a side face, or a part whose propagation axis is not its
+// local x) is the fatal BBR029, naming the volume and the face (ADV-01).
 class BBSimOpBoundaryProcess : public G4WrapperProcess
 {
  public:

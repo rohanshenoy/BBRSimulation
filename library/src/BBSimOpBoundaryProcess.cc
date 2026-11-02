@@ -83,6 +83,28 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
   // Flip normal_hat to point outward (same half-space as khat, i.e. toward exit face).
   if (khat.dot(normal_hat) < 0.) normal_hat = -normal_hat;
 
+  // The photon must enter through the x face opposite the exit face (ADV-01). An entry through a
+  // side face would get its incidence angle from the x axis and an exit point on an x face it
+  // never approached, so it stops here, before the lookup and any random draw.
+  const G4VSolid*     solid       = touch->GetSolid();
+  const G4ThreeVector localNormal = xf.TransformAxis(normal_hat);
+  const G4ThreeVector localHit    = xf.TransformPoint(aStep.GetPostStepPoint()->GetPosition());
+  const G4double      entryHalf   = solid->DistanceToOut(G4ThreeVector(0., 0., 0.), -localNormal);
+  if (std::abs(-localHit.dot(localNormal) - entryHalf) >
+      G4GeometryTolerance::GetInstance()->GetSurfaceTolerance()) {
+    const G4ThreeVector n = solid->SurfaceNormal(localHit);
+    G4String face = "side";
+    for (int i = 0; i < 3; ++i)
+      if (std::abs(std::abs(n[i]) - 1.) < 1e-9) face = G4String("local ") + (n[i] > 0. ? "+" : "-") + "xyz"[i];
+    G4ExceptionDescription ed;
+    ed << "BBR029 volume=" << touch->GetVolume()->GetName() << " : a photon entered vacuum_wg volume "
+       << touch->GetVolume()->GetName() << " through its " << face << " face (local outward normal " << n
+       << ", entry point " << localHit / mm << " mm in the volume's frame). A crack is entered through "
+       << "its local +-x faces only (|x| = " << entryHalf / mm << " mm here): check that the part's "
+       << "propagation axis is its local x and that its side faces border a wall, not an open volume.";
+    G4Exception("BBSimOpBoundaryProcess::HandleDiffractionBoundary", "BBR029", FatalException, ed);
+  }
+
   // Dataset for this crack volume at this photon's frequency (lazy-loaded).
   // Units: in Geant4 internals E is in MeV and h_Planck in MeV*ns, so
   // E/h_Planck is a frequency in 1/ns; 1e9*hertz is exactly 1/ns, so the
@@ -190,9 +212,7 @@ G4VParticleChange* BBSimOpBoundaryProcess::HandleDiffractionBoundary(
     // waveguide axis, so they must be added to the face centre. (Adding them
     // to the entry-point projection — the previous behaviour — relocated
     // off-axis photons outside the crack, into solid Cu.)
-    G4ThreeVector localNormal = xf.TransformAxis(normal_hat);
-    G4double      halfLen     = touch->GetSolid()->DistanceToOut(
-                                    G4ThreeVector(0., 0., 0.), localNormal);
+    G4double      halfLen     = solid->DistanceToOut(G4ThreeVector(0., 0., 0.), localNormal);
     G4ThreeVector exitCenter  = xf.InverseTransformPoint(halfLen * localNormal);
 
     // HFSS waveguide CSV: Y=long dim → theta axis, Z=gap/b → phi axis.

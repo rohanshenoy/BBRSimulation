@@ -64,8 +64,9 @@ the copper face over both cracks, so 200 000 events are enough.
 A photon entering a crack volume is handled by the HFSS lookup, which decides
 whether it transmits and samples its exit direction and position.
 Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x faces
-(the crack axis). Entry through a side face is not detected and is treated as
-an axial entry. At 500 GHz and normal incidence:
+(the crack axis). An entry through a side face, or into a crack whose
+propagation axis is not its local x, is the fatal `BBR029`. At 500 GHz and
+normal incidence:
 
 | Crack | Gap | Observed T (40 000 photons) |
 |---|---|---|
@@ -422,6 +423,17 @@ fields or exit fields cancel for one photon's mixed polarization. BBRsim no
 longer draws a uniform direction or exit point instead. The export is
 inconsistent: check it with `check_dataset_sidecars.py` and ask the HFSS side
 for a re-export. See [Dataset sidecars](validation/README.md#dataset-sidecars).
+
+**`BBR029`**: a photon entered a `vacuum_wg` volume through a face other than
+its two local x faces. The message names the volume, the face (`local +y`,
+`local -z`, or `side` for a curved one), its outward normal and the entry point
+in the volume's frame. The HFSS lookup takes the incidence angle from the
+local x axis and samples the exit point on an x face, so it cannot serve a
+side entry. Either the crack's side faces border an open volume (the crack is
+longer than the wall it crosses, or sits in a recess), or the crack part's
+propagation axis is not its local x (a CAD part converted in another pose):
+fix the geometry. In the test world every crack fills its plate, so its side
+faces border copper and this cannot occur.
 
 **A `BBR026` banner in a Planck run**: a warning, not an error. A photon's
 frequency and the grid frequency serving it lie on opposite sides of a regime

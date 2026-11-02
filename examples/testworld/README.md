@@ -42,8 +42,8 @@ dataset, for example the mock written by
 `validation/Scripts/make_mock_round_gap.py`, selected with `/bbr/dataDir`.
 
 Geometry rule: a `vacuum_wg` volume is entered through one of its two ±x faces
-(the crack axis). Entry through a side face is not detected and is treated as
-an axial entry.
+(the crack axis). An entry through a side face, or into a crack whose
+propagation axis is not its local x, is the fatal `BBR029`.
 
 ## Primary event
 
