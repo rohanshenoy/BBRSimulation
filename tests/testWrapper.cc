@@ -522,6 +522,25 @@ int main(int argc, char** argv) {
       CHECK(nBad == 0);
       CHECK(nTransmit > 0 && nTransmit < nCase / 3);   // both branches exercised
     }},
+    {"cross_term_absolute_sign", [] {
+      // The cross term's sign, absolute rather than relative to a mirrored run. At the diagonal key (45,135) of
+      // NineKeyGrid (T0 = 0.9, T1 = 0.3, Re rho = 0.390948 over the six exit-field reals) a photon polarized along
+      // (e_theta + e_phi)/sqrt2, HFSS's own spherical basis at its arrival direction, transmits with
+      // T = (T0 + T1)/2 + sqrt(T0 T1) Re rho = 0.803142, and one along (e_theta - e_phi)/sqrt2 with 0.396858.
+      // k, e_theta and e_phi are derived from the frame convention, HFSS (X, Y, Z) = (-z, +y, +x) in the crack
+      // frame, not from the wrapper's own basis; mirror_equivariance carries the sign to the folded azimuths.
+      TempDir d; UseData(d, hfssfix::NineKeyGrid());
+      World w; ScriptedEngine eng;
+      const G4ThreeVector k(c45, -0.5, 0.5), eTheta(-c45, -0.5, 0.5), ePhi(0, s45, s45);
+      struct Case { G4ThreeVector pol; double T; };
+      for (const Case& c : {Case{(eTheta + ePhi).unit(), 0.80314247465934943},
+                            Case{(eTheta - ePhi).unit(), 0.39685752534065055}}) {
+        Script(eng, {c.T - 1e-9, 0.5, 0.5});
+        CHECK(w.Shoot(kHitMinusX - 1 * mm * k, k, c.pol, E500, eng).status == S::kBBRDiffractionTransmit);
+        Script(eng, {c.T + 1e-9});
+        CHECK(w.Shoot(kHitMinusX - 1 * mm * k, k, c.pol, E500, eng).status == S::kBBRDiffractionReflect);
+      }
+    }},
     {"side_face_entry_is_fatal", [] {
       // ADV-01: a vacuum_wg volume is entered through one of its two local x faces (the crack
       // axis). Entry through a side face would be given an incidence angle from the x axis and an
