@@ -22,8 +22,11 @@ Scripts/tests/              make_bad_output.py (synthetic outputs for the valida
 validation/Scripts/run_regression.sh [BUILD_DIR]     # default: build
 ```
 
-The runner builds and installs the library with the C++ tests
-(`BUILD_BBRSIM_TESTS=ON`; prefix `BBR_PREFIX`, default `install/`), sources
+The runner first refuses a prefix holding an example library (`lib/libbbrsim*`,
+left by a `cmake --install` of an example into the prefix): the `installed
+examples` row's RPATH would find it before its own copy and run it instead of
+this build, so remove it and rerun. It then builds and installs the library with
+the C++ tests (`BUILD_BBRSIM_TESTS=ON`; prefix `BBR_PREFIX`, default `install/`), sources
 the installed env script, builds the example, runs the drift guards, the
 consumer smoke test and the `bbrsim data default` and `version stamp` checks,
 then step 1c: the C++
