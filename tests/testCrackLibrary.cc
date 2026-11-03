@@ -5,12 +5,17 @@
 #include "BBRMaterials.hh"
 #include "G4Box.hh"
 #include "G4LogicalVolume.hh"
+#include "G4LogicalVolumeStore.hh"
 #include "G4NistManager.hh"
 #include "G4PVPlacement.hh"
+#include "G4PhysicalVolumeStore.hh"
+#include "G4SolidStore.hh"
 #include "G4SystemOfUnits.hh"
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <cstring>
+#include <new>
 #include <sstream>
 #include <set>
 #include <thread>
@@ -33,6 +38,52 @@ void Grid(const std::filesystem::path& root, const std::string& id, std::initial
     ds.ff0 = fix(ds.ff0); ds.ff1 = fix(ds.ff1); ds.wg0 = fix(ds.wg0); ds.wg1 = fix(ds.wg1);
     hfssfix::WriteDataset(root, id + "_" + f, ds);
   }
+}
+#if defined(__SANITIZE_ADDRESS__)
+#define BBRTEST_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define BBRTEST_ASAN 1
+#endif
+#endif
+// T whose bytes are zeroed and kept when it is deleted: nothing else is ever allocated there, so a test can read
+// a destroyed object deterministically (an empty name) or build a replacement at its address on purpose.
+template <class T>
+struct Kept : T {
+  using T::T;
+  static void operator delete(void* p, std::size_t n) { std::memset(p, 0, n); }
+};
+// The first crack's solid in the CDX-042 cases. Under AddressSanitizer it is freed like any solid, so the sanitizer
+// reports a read of it; otherwise it is kept zeroed, so the same read shows as an empty solid name.
+#ifdef BBRTEST_ASAN
+using DestroyedBox = G4Box;
+#else
+using DestroyedBox = Kept<G4Box>;
+#endif
+// The world "W" and in it the crack "gap" of `solid`; the crack's placement is kept on delete, and built at `at`
+// when given (the address of a destroyed placement). Returns the placement.
+void* PlaceGap(G4VSolid* solid, void* at = nullptr) {
+  auto* gal = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
+  auto* wlv = new G4LogicalVolume(new G4Box("W", 50 * mm, 50 * mm, 50 * mm), gal, "W");
+  new G4PVPlacement(nullptr, {}, wlv, "W", nullptr, false, 0);
+  auto* lv = new G4LogicalVolume(solid, BBRMaterials::GetVacuumWG(), solid->GetName());
+  using KeptPlacement = Kept<G4PVPlacement>;
+  return at ? new (at) KeptPlacement(nullptr, G4ThreeVector(), lv, "gap", wlv, false, 0)
+            : new KeptPlacement(nullptr, G4ThreeVector(), lv, "gap", wlv, false, 0);
+}
+// Deletes every volume and solid, as G4RunManager::ReinitializeGeometry(true) does.
+void DestroyGeometry() {
+  G4PhysicalVolumeStore::GetInstance()->Clean();
+  G4LogicalVolumeStore::GetInstance()->Clean();
+  G4SolidStore::GetInstance()->Clean();
+}
+// The gap dataset, the crack "gap" of the solid `first`, validated, then the geometry destroyed (CDX-042).
+void ValidateThenDestroy(const TempDir& d, G4VSolid* first) {
+  Grid(d.path(), "gap", {"500"});
+  BBRConfigManager::SetDataDir(d.path().string());
+  PlaceGap(first);
+  BBRCrackLibrary::Instance().ValidatePlacedCracks();
+  DestroyGeometry();
 }
 // A dataset on NineKeyGrid2 (schema 2) or NineKeyGrid (schema 1) at one frequency: a crack2-like
 // rectangle (a = 10 mm, b = 100 um) or, for `disc`, a 50 um disc whose exit lattice is scaled into it.
@@ -249,6 +300,50 @@ int main(int argc, char** argv) {
       new G4PVPlacement(nullptr, {0, 0, 10 * mm}, b, "gap:2", wlv, false, 0);   // a crack placed since
       ExpectG4Exception("BBR030", [&] { lib.ValidatePlacedCracks(); }, "BBRCrackLibrary::ValidatePlacedCracks",
                         "1 then, 2 now");
+    }},
+    {"validate_placed_cracks_destroyed", [] {
+      // CDX-042: after the geometry is deleted, nothing placed. The refusal describes the validated crack from
+      // what the first call kept, never from its destroyed objects.
+      TempDir d;
+      ValidateThenDestroy(d, new DestroyedBox("gapA", 2 * mm, 4.5 * mm, 0.025 * mm));
+      ExpectG4Exception("BBR030", [] { BBRCrackLibrary::Instance().ValidatePlacedCracks(); },
+                        "BBRCrackLibrary::ValidatePlacedCracks",
+                        "1 then, 0 now; first difference at entry 0: crack volume gap (dataset gap, solid gapA, "
+                        "extent (4,9,0.05) mm) then, none now");
+    }},
+    {"validate_placed_cracks_rebuilt", [] {
+      // CDX-042: a replacement of identical names and dimensions built after the geometry was deleted.
+      TempDir d;
+      ValidateThenDestroy(d, new DestroyedBox("gapA", 2 * mm, 4.5 * mm, 0.025 * mm));
+      PlaceGap(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.025 * mm));
+      ExpectG4Exception("BBR030", [] { BBRCrackLibrary::Instance().ValidatePlacedCracks(); },
+                        "BBRCrackLibrary::ValidatePlacedCracks",
+                        "1 then, 1 now; first difference at entry 0: crack volume gap (dataset gap, solid gapA, "
+                        "extent (4,9,0.05) mm) then, crack volume gap (dataset gap, solid gapA, extent (4,9,0.05) mm) now");
+    }},
+    {"validate_placed_cracks_rebuilt_resized", [] {
+      // CDX-042: a replacement of another extent built after the geometry was deleted.
+      TempDir d;
+      ValidateThenDestroy(d, new DestroyedBox("gapA", 2 * mm, 4.5 * mm, 0.025 * mm));
+      PlaceGap(new G4Box("gapA", 2 * mm, 4.5 * mm, 0.020 * mm));
+      ExpectG4Exception("BBR030", [] { BBRCrackLibrary::Instance().ValidatePlacedCracks(); },
+                        "BBRCrackLibrary::ValidatePlacedCracks",
+                        "crack volume gap (dataset gap, solid gapA, extent (4,9,0.05) mm) then, crack volume gap "
+                        "(dataset gap, solid gapA, extent (4,9,0.04) mm) now");
+    }},
+    {"validate_placed_cracks_rebuilt_in_place", [] {
+      // CDX-042: the identical crack rebuilt in the memory of the destroyed one, as an allocator handing freed
+      // blocks back would place it. Equal addresses do not make it the geometry that was validated.
+      TempDir d;
+      auto* box = new Kept<G4Box>("gapA", 2 * mm, 4.5 * mm, 0.025 * mm);
+      Grid(d.path(), "gap", {"500"});
+      BBRConfigManager::SetDataDir(d.path().string());
+      void* pv = PlaceGap(box);
+      BBRCrackLibrary::Instance().ValidatePlacedCracks();
+      DestroyGeometry();
+      PlaceGap(new (static_cast<void*>(box)) Kept<G4Box>("gapA", 2 * mm, 4.5 * mm, 0.025 * mm), pv);
+      ExpectG4Exception("BBR030", [] { BBRCrackLibrary::Instance().ValidatePlacedCracks(); },
+                        "BBRCrackLibrary::ValidatePlacedCracks", "1 then, 1 now; first difference at entry 0");
     }},
     {"placed_cracks_json", [] {
       // One record per validated placement, in visiting order, with every grid frequency's sidecar.

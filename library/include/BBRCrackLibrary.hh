@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-class G4VPhysicalVolume;
 class G4VSolid;
 
 // Singleton that owns HFSS dataset discovery, loading and caching.
@@ -85,7 +84,9 @@ class BBRCrackLibrary
   // every later one (each worker thread's, a later run's) only confirms that the
   // vacuum_wg volumes are those it validated (the same volume and solid objects,
   // names and solid extents, in the same order), else fatal BBR030: BBRsim does not
-  // support changing the geometry after /run/initialize (ADV-05).
+  // support changing the geometry after /run/initialize (ADV-05). The refusal is
+  // described from what the first call kept, never from its objects, which a
+  // deleted geometry has freed (CDX-042).
   void ValidatePlacedCracks();
 
   // JSON array, one object per crack ValidatePlacedCracks checked, in its order:
@@ -114,10 +115,11 @@ class BBRCrackLibrary
   // Scans the waveguide directory for this id. The caller must hold the lock.
   FrequencySet& Discover(const G4String& datasetId);
 
+  // Kept by value: a saved crack may outlive its volume and solid (CDX-042).
   struct PlacedCrack {
-    const G4VPhysicalVolume* pv;
-    const G4VSolid* solid;
-    G4String volume, datasetId;
+    G4int pvID;                           // the placement's instance ID, never reused in a process
+    const G4VSolid* solid;                // compared as an address only, never dereferenced once saved
+    G4String volume, datasetId, solidName;
     G4double extent_mm[3];                // solid's BoundingLimits extent along local x, y, z
     bool operator==(const PlacedCrack& o) const;
   };

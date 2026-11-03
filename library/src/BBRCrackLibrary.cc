@@ -256,8 +256,8 @@ const BBRHFSSData& BBRCrackLibrary::Lookup(const G4String& datasetId, G4double n
 
 bool BBRCrackLibrary::PlacedCrack::operator==(const PlacedCrack& o) const
 {
-  return pv == o.pv && solid == o.solid && volume == o.volume && datasetId == o.datasetId &&
-         std::equal(std::begin(extent_mm), std::end(extent_mm), std::begin(o.extent_mm));
+  return pvID == o.pvID && solid == o.solid && volume == o.volume && datasetId == o.datasetId &&
+         solidName == o.solidName && std::equal(std::begin(extent_mm), std::end(extent_mm), std::begin(o.extent_mm));
 }
 
 std::vector<BBRCrackLibrary::PlacedCrack> BBRCrackLibrary::ScanPlacedCracks()
@@ -271,7 +271,8 @@ std::vector<BBRCrackLibrary::PlacedCrack> BBRCrackLibrary::ScanPlacedCracks()
     G4ThreeVector lo, hi;
     solid->BoundingLimits(lo, hi);
     const G4ThreeVector extent = (hi - lo) / mm;
-    out.push_back({pv, solid, pv->GetName(), DatasetIdOf(pv->GetName()), {extent.x(), extent.y(), extent.z()}});
+    out.push_back({pv->GetInstanceID(), solid, pv->GetName(), DatasetIdOf(pv->GetName()), solid->GetName(),
+                   {extent.x(), extent.y(), extent.z()}});
   }
   return out;
 }
@@ -282,13 +283,14 @@ void BBRCrackLibrary::ValidatePlacedCracks()
   const std::vector<PlacedCrack> placed = ScanPlacedCracks();
   if (fValidated) {
     // A later call: the checks and the metadata (PlacedCracksJson) describe the geometry the first call
-    // saw, so a changed geometry is refused rather than silently left unchecked (ADV-05).
+    // saw, so a changed geometry is refused rather than silently left unchecked (ADV-05). fPlaced is described
+    // from its own fields only: its volumes and solids may have been deleted since (CDX-042).
     if (placed == fPlaced) return;
     auto describe = [](const std::vector<PlacedCrack>& v, std::size_t i) {
       std::ostringstream os;
       if (i >= v.size()) return std::string("none");
       const PlacedCrack& p = v[i];
-      os << "crack volume " << p.volume << " (dataset " << p.datasetId << ", solid " << p.solid->GetName()
+      os << "crack volume " << p.volume << " (dataset " << p.datasetId << ", solid " << p.solidName
          << ", extent (" << p.extent_mm[0] << "," << p.extent_mm[1] << "," << p.extent_mm[2] << ") mm)";
       return os.str();
     };

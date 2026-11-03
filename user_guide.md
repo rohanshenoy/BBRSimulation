@@ -439,8 +439,11 @@ faces border copper and this cannot occur.
 before the first run. The first run validates every crack (datasets, sidecars,
 F12); every later physics-table build (each worker thread's, or a later run's)
 only confirms that the cracks are the same volume and solid objects, with the
-same names and extents. The message gives the counts then and now and the first
-crack that differs. BBRsim does not support changing the geometry after
+same names and extents. A geometry deleted and rebuilt (`G4RunManager::ReinitializeGeometry`
+with `destroyFirst`) counts as changed even when it is identical, since its volumes
+are new objects. The message gives the counts then and now and the first
+crack that differs, the validated one described from what the first run kept.
+BBRsim does not support changing the geometry after
 `/run/initialize` (every `/bbr/det/` and `/bbr/testworld/` command is PreInit):
 start a new session with the new geometry.
 
