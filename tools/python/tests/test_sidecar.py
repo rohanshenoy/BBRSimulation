@@ -661,6 +661,19 @@ def test_check_full_rejects_a_foreign_freq_token(tmp_path):
         sidecar.check_full(base, "c", stem, 500.0)
 
 
+def test_check_full_rejects_a_foreign_ephi(tmp_path):
+    """G4-034: BBRHFSSData refuses a row whose Ephi is not its directory's polarization (BBR009)."""
+    base = str(tmp_path)
+    stem = write_grid(base)
+    sc = tiny_sidecar(base, stem)
+    rewrite(base, stem, 1, "far_field.csv", lambda t: t.replace("500GHz,1,0.0,180.0,", "500GHz,0,0.0,180.0,", 1))
+    write_with_files(base, stem, sc)
+    # the first (0, 180) far-field row is the file's line 4, after the two rows of key (0, 135)
+    with pytest.raises(ValueError, match=r"^BBR009: c_500GHz_Ephi=1/far_field.csv line 4: Ephi column '0' is not "
+                                         r"the directory's polarization 1"):
+        sidecar.check_full(base, "c", stem, 500.0)
+
+
 # --- fix round 2: the physics-only invariant, the disc modes, load(), malformed CSVs -------------
 
 def built(tmp_path):

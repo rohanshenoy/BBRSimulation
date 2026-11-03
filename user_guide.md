@@ -407,6 +407,16 @@ a `c_k`, `modes.regime_cutoffs_ghz`, `cross_term.valid_below_ghz`,
 or a `reference.passed` that is not true; a declared theta list without a 90 degree
 entry is refused the same way.
 
+**`BBR009`**: a CSV row disagrees with the directory it sits in. Either its `Freq`
+column is not the directory's frequency (the `<id>_<freq>GHz` name, to 0.1 %), or
+its `Ephi` column is not the directory's polarization, 0 in `<stem>_Ephi=0` and 1
+in `<stem>_Ephi=1` ("1.0" counts as 1). The message names the file and the value,
+and for `Ephi` the line. The usual cause is a copied or renamed directory: an
+`_Ephi=1` directory holding a copy of `_Ephi=0`'s tables would otherwise give
+T0 = T1 and a cross term of 1. Restore the dataset from its source (the sidecar
+records each CSV's sha256); `check_dataset_sidecars.py` reports it before any run.
+BBRsim checks it when a frequency is first used, so a run can stop part-way.
+
 **`BBR012`**: a CSV does not match its sidecar (a far-field grid, exit lattice or row count
 different from the declaration). Under schema 2.x it also reports `InterceptFactor`
 that is not constant within a key or differs from the key's c_k or from the closed

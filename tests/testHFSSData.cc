@@ -360,6 +360,37 @@ int main(int argc, char** argv) {
       Dataset ds; ds.ff0 = hfssfix::FF_HDR; ds.ff1 = hfssfix::FF_HDR; ds.wg0 = hfssfix::WG_HDR; ds.wg1 = hfssfix::WG_HDR;
       TempDir d; ExpectG4Exception("BBR000", [&] { Load(d, ds); }, "BBRHFSSData");
     }},
+    {"err_ephi_column", [] {
+      // G4-034: every row's Ephi (column 2) must be its directory's polarization (BBR009, as for the Freq column),
+      // so a copied or swapped polarization directory cannot stand in for the other.
+      {
+        Dataset ds = hfssfix::Mini500();
+        ds.ff1 = ds.ff0; ds.wg1 = ds.wg0;   // the Ephi=1 directory holds a copy of Ephi=0's tables
+        TempDir d; ExpectG4Exception("BBR009", [&] { Load(d, ds); }, "BBRHFSSData",
+                                     "c_500GHz_Ephi=1/far_field.csv line 2: Ephi column '0' is not the directory's polarization 1");
+      }
+      {
+        Dataset ds = hfssfix::Mini500();   // one wrong row, the second of its file: every row is checked
+        ds.wg1 = std::string(hfssfix::WG_HDR) + "500GHz,1,0,180,1,4,0,0,0,0,0,1,0,0,0\n500GHz,1,0,180,1,4,0,0.001,0,0,0,1,0,0,0\n";
+        ds.wg0 = std::string(hfssfix::WG_HDR) + "500GHz,0,0,180,3,4,0,0,0,0,1,0,0,0,0\n500GHz,1,0,180,3,4,0,0.001,0,0,1,0,0,0,0\n";
+        TempDir d; ExpectG4Exception("BBR009", [&] { Load(d, ds); }, "BBRHFSSData",
+                                     "c_500GHz_Ephi=0/waveguide.csv line 3: Ephi column '1' is not the directory's polarization 0");
+      }
+      {
+        Dataset ds = hfssfix::Mini500();   // a non-numeric Ephi is BBR013, as any other numeric field
+        ds.ff1 = ReplaceAll(ds.ff1, "500GHz,1,", "500GHz,x,");
+        TempDir d; ExpectG4Exception("BBR013", [&] { Load(d, ds); }, "BBRHFSSData", "Ephi");
+      }
+    }},
+    {"ephi_column_numeric", [] {
+      // "0.0" and "1.0" are the directory's polarization too, as the producer's CDX-040 identity row reads them.
+      Dataset ds = hfssfix::Mini500();
+      for (std::string* csv : {&ds.ff0, &ds.wg0}) *csv = ReplaceAll(*csv, "500GHz,0,", "500GHz,0.0,");
+      for (std::string* csv : {&ds.ff1, &ds.wg1}) *csv = ReplaceAll(*csv, "500GHz,1,", "500GHz,1.0,");
+      TempDir d; const BBRHFSSData h = Load(d, ds);
+      CHECK_NEAR(h.GetTransmittance(1, 0, 0, 180), 0.75, 1e-15);
+      CHECK_NEAR(h.GetTransmittance(0, 1, 0, 180), 0.25, 1e-15);
+    }},
     {"err_key_mismatch", [] {
       Dataset ds = hfssfix::Mini500();
       // Both waveguide files use key (0,135), both far fields (0,180). Changing
