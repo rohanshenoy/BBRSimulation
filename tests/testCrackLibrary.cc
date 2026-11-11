@@ -19,6 +19,7 @@
 #include <sstream>
 #include <set>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 using namespace bbrtest;
@@ -87,8 +88,10 @@ void ValidateThenDestroy(const TempDir& d, G4VSolid* first) {
 }
 // A dataset on NineKeyGrid2 (schema 2) or NineKeyGrid (schema 1) at one frequency: a crack2-like
 // rectangle (a = 10 mm, b = 100 um) or, for `disc`, a 50 um disc whose exit lattice is scaled into it.
-void GridModes(const std::filesystem::path& root, const std::string& id, int freq, bool disc, bool schema1 = false) {
-  auto d = schema1 ? hfssfix::NineKeyGrid() : hfssfix::NineKeyGrid2();
+// ys and zs, when given, put the schema-2 rows on another exit lattice.
+void GridModes(const std::filesystem::path& root, const std::string& id, int freq, bool disc, bool schema1 = false,
+               const std::vector<double>& ys = {}, const std::vector<double>& zs = {}) {
+  auto d = schema1 ? hfssfix::NineKeyGrid() : ys.empty() ? hfssfix::NineKeyGrid2() : hfssfix::NineKeyGrid2(ys, zs);
   const std::string f = std::to_string(freq) + "GHz";
   auto fix = [&](const std::string& csv, bool scaleY) {
     std::istringstream in(csv);
@@ -130,6 +133,12 @@ void GridModes(const std::filesystem::path& root, const std::string& id, int fre
   }
 }
 double Pick(const char* id, double nu) { double chosen = -1; BBRCrackLibrary::Instance().Lookup(id, nu, chosen); return chosen; }
+// The index of the lattice node at v (metres, within 1e-12 m), or -1 when v is on none.
+int Node(double v, const std::vector<double>& nodes) {
+  for (std::size_t i = 0; i < nodes.size(); ++i)
+    if (std::abs(v - nodes[i]) <= 1e-12) return static_cast<int>(i);
+  return -1;
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -432,6 +441,38 @@ int main(int argc, char** argv) {
       CHECK_NEAR(Pick("disc2000", 2000), 2000, 0);
       CHECK(Handler().CountWarnings("BBR028") == 1);   // once per dataset
       CHECK(Handler().CountWarnings("BBR026") == 0);   // no regime cutoff lies between photon and table
+    }},
+    {"exit_lattice_per_frequency", [] {
+      // One dataset at two frequencies on different exit lattices, as the producer writes them (its exit step is
+      // c/(4f) at every frequency, OR-048; first read from a real tree in G4-036). Discovery accepts the pair: the
+      // lattice is not frequency-independent physics, so no BBR024. Each frequency's exit draws lie on its own
+      // lattice and reach every row and column of it. The 1000 GHz lattice has half the step, as the producer's
+      // c/(4f) gives, and the two share no y and no z node.
+      const std::vector<double> ys500{-1e-3, 0., 1e-3}, zs500{-2.5e-5, 0., 2.5e-5};
+      const std::vector<double> ys1000{-1.25e-3, -0.75e-3, -0.25e-3, 0.25e-3, 0.75e-3, 1.25e-3},
+          zs1000{-3.125e-5, -1.875e-5, -0.625e-5, 0.625e-5, 1.875e-5, 3.125e-5};
+      TempDir d;
+      GridModes(d.path(), "lat", 500, false);
+      GridModes(d.path(), "lat", 1000, false, false, ys1000, zs1000);
+      BBRConfigManager::SetDataDir(d.path().string());
+      for (const auto& [f, ys, zs] : {std::tuple{500., ys500, zs500}, std::tuple{1000., ys1000, zs1000}}) {
+        double chosen = -1;
+        const BBRHFSSData& h = BBRCrackLibrary::Instance().Lookup("lat", f, chosen);
+        CHECK_NEAR(chosen, f, 0);
+        std::set<int> rows, cols;
+        int off = 0;
+        for (int n = 0; n < 4000; ++n) {
+          // E_theta = 1 at (45, 180): the Ephi=0 basis, whose tangential field is nonzero at every node
+          const G4ThreeVector r = h.SampleExitPosition(1, 0, 45, 180, G4ThreeVector(), G4ThreeVector(0, 1, 0),
+                                                       G4ThreeVector(0, 0, 1));
+          const int iy = Node(r.y() / m, ys), iz = Node(r.z() / m, zs);
+          if (iy < 0 || iz < 0) ++off;
+          else { rows.insert(iy); cols.insert(iz); }
+        }
+        CHECK(off == 0);
+        CHECK(rows.size() == ys.size() && cols.size() == zs.size());
+      }
+      CHECK(Handler().CountWarnings("BBR026") == 0 && Handler().CountWarnings("BBR008") == 0);
     }},
   });
 }

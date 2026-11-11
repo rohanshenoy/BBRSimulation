@@ -95,9 +95,11 @@ def waveguide_rows(e, ys, zs, thetas=THETAS, phis=PHIS, label="500GHz", dark_key
     return out
 
 
-def write_nine_key_grid2(base, stem=STEM, disc=False, thetas=THETAS, phis=PHIS):
-    """Write <stem>_Ephi={0,1}/{far_field,waveguide}.csv under base; return stem."""
-    ys, zs = (DISC_Y, DISC_Z) if disc else (RECT_Y, RECT_Z)
+def write_nine_key_grid2(base, stem=STEM, disc=False, thetas=THETAS, phis=PHIS, ys=None, zs=None):
+    """Write <stem>_Ephi={0,1}/{far_field,waveguide}.csv under base; return stem. ys and zs give another exit
+    lattice (row-major over y, then z), as the producer's exit step differs per frequency (OR-048)."""
+    if ys is None:
+        ys, zs = (DISC_Y, DISC_Z) if disc else (RECT_Y, RECT_Z)
     label = stem.rsplit("_", 1)[1]
     for e in (0, 1):
         d = os.path.join(base, f"{stem}_Ephi={e}")
@@ -112,12 +114,13 @@ def write_nine_key_grid2(base, stem=STEM, disc=False, thetas=THETAS, phis=PHIS):
 # --- the sidecar of that dataset ------------------------------------------------------------------
 
 def sidecar2(stem=STEM, *, disc=False, radius=5e-5, y_half=4.5e-3, z_half=2.5e-5, thetas=THETAS, phis=PHIS,
-             tflux=None, emitter="uniform_theta", floor=0.01):
+             tflux=None, emitter="uniform_theta", floor=0.01, ys=None, zs=None):
     """The 2.0 sidecar of write_nine_key_grid2, as a dict (SidecarJson2 of the C++ fixture). tflux: one
     [t0, t1, dark0, dark1] per key in phi-major, then theta order; default 0.6, 0.3 and (0, 180)
-    Ephi=1 dark."""
+    Ephi=1 dark. ys and zs: the exit lattice the CSVs were written on, if not the default."""
     label = stem.rsplit("_", 1)[1]
-    ys, zs = (DISC_Y, DISC_Z) if disc else (RECT_Y, RECT_Z)
+    if ys is None:
+        ys, zs = (DISC_Y, DISC_Z) if disc else (RECT_Y, RECT_Z)
     if tflux is None:
         tflux = [[0.6, 0.0 if (ph, t) == (0, 180) else 0.3, 0, 1 if (ph, t) == (0, 180) else 0]
                  for ph in phis for t in thetas]

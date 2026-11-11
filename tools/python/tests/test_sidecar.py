@@ -1338,6 +1338,39 @@ def test_invariant_schema_major_and_grid():
     assert sidecar.invariant_diff(a, sec) == ["geometry", "modes", "cross_section"]
 
 
+def test_frequencies_on_different_exit_lattices(tmp_path, repo_root):
+    """One dataset ID at two frequencies on different exit lattices, as the producer writes them (its exit step
+    is c/(4f) at every frequency, OR-048; first read from a real tree in G4-036). The lattice is not
+    frequency-independent physics: the invariant agrees, the validator passes the pair, and each frequency's
+    exit points and trapezoid weights are its own lattice's. The twin of testCrackLibrary's
+    exit_lattice_per_frequency; the 1000 GHz lattice has half the step, and the two share no y and no z node."""
+    from bbrsim import hfss
+    base = str(tmp_path / "wg")
+    os.makedirs(base)
+    lattices = {"500GHz": ((-1e-3, 0.0, 1e-3), (-2.5e-5, 0.0, 2.5e-5)),
+                "1000GHz": ((-1.25e-3, -0.75e-3, -0.25e-3, 0.25e-3, 0.75e-3, 1.25e-3),
+                            (-3.125e-5, -1.875e-5, -0.625e-5, 0.625e-5, 1.875e-5, 3.125e-5))}
+    written = {}
+    for label, (ys, zs) in lattices.items():
+        stem = fx.write_nine_key_grid2(base, stem=f"{ID}_{label}", ys=ys, zs=zs)
+        sc = fx.sidecar2(stem, y_half=5e-3, z_half=5e-5, ys=ys, zs=zs)
+        sc["files"] = sidecar.file_entries(base, stem)
+        sidecar.write(base, stem, sc)
+        written[label] = sc
+    a, b = written["500GHz"], written["1000GHz"]
+    assert a["exit_field"]["grid"] != b["exit_field"]["grid"]
+    assert sidecar.invariant_diff(a, b) == [] and sidecar.same_invariant(a, b)
+    rc, rows, tail = run_validator(repo_root, base)
+    assert rc == 0 and tail == ["2 dataset(s) checked, 0 failing", "RESULT: PASS"], rows
+    for label, (ys, zs) in lattices.items():
+        d = hfss.load_dataset(f"{ID}_{label}", base)[(45.0, 180.0)]
+        assert len(d.exit_y_m) == len(ys) * len(zs)
+        assert sorted(set(d.exit_y_m.tolist())) == list(ys) and sorted(set(d.exit_z_m.tolist())) == list(zs)
+        # the trapezoid factor of each node of its own lattice, row-major over y, then z: 0.5 on an edge, 1 inside
+        edge = lambda i, n: 0.5 if i in (0, n - 1) else 1.0
+        assert d.w.tolist() == [edge(i, len(ys)) * edge(j, len(zs)) for i in range(len(ys)) for j in range(len(zs))]
+
+
 def built_1x():
     """A schema-1 sidecar whose grid is the one of the schema-2 fixture's keys (0, 180) only."""
     import tempfile
