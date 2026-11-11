@@ -96,7 +96,7 @@ bbrsim_add_test_program(testCrackLibrary LABEL unit
         sidecar_required sidecar_blocks_agree validate_placed_cracks validate_placed_cracks_ok validate_placed_cracks_changed
         validate_placed_cracks_destroyed validate_placed_cracks_rebuilt validate_placed_cracks_rebuilt_resized
         validate_placed_cracks_rebuilt_in_place
-        placed_cracks_json cutoff_warning cutoff_warning_regime rho_limit_warning)
+        placed_cracks_json cutoff_warning cutoff_warning_regime rho_limit_warning exit_lattice_per_frequency)
 
 bbrsim_add_test_program(testWrapper LABEL component NEEDS_ENSDF
   CASES fold_six_azimuths polarization_filter frequency_recorded rng_budget step_too_small_matches_stock snap_and_rotation

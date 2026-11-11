@@ -491,12 +491,13 @@ inline std::string SidecarJson2(const Schema2Params& p) {
 // y {-1e-3, 0, 1e-3} m x z {-2.5e-5, 0, 2.5e-5} m, IngoingPower 1e-9, OutgoingPower = t_p * 1e-9
 // with t0 = 0.6 and t1 = 0.3 except Ephi=1 at (0, 180), which is dark (OutgoingPower 0 with
 // nonzero stored fields), InterceptFactor = the key's c_k, and the six field values of point i
-// equal to (i+1 ... i+6) * 1e-3 for Ephi=0 and in reverse order for Ephi=1.
-inline Dataset NineKeyGrid2() {
+// equal to (i+1 ... i+6) * 1e-3 for Ephi=0 and in reverse order for Ephi=1. ys and zs give another
+// lattice (row-major over y, then z), as the producer's exit step differs per frequency (OR-048).
+inline Dataset NineKeyGrid2(const std::vector<double>& ys = {-1e-3, 0., 1e-3},
+                            const std::vector<double>& zs = {-2.5e-5, 0., 2.5e-5}) {
   const Dataset g = NineKeyGrid();
   const std::vector<double> th{90., 135., 180.};
   Dataset d{g.ff0, WG_HDR2, g.ff1, WG_HDR2};
-  const double ys[] = {-1e-3, 0., 1e-3}, zs[] = {-2.5e-5, 0., 2.5e-5};
   for (int ph : {0, 45, 90})
     for (int t : {90, 135, 180}) {
       const std::string key = detail::Fmt(ph) + "," + detail::Fmt(t) + ",";
